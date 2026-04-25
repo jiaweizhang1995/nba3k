@@ -1,0 +1,289 @@
+# nba3k-claude — 30 NBA GM personalities, 2025-26 season.
+#
+# Each entry is keyed by team abbreviation (matches `Team.abbrev` in
+# nba3k-core::team). `archetype` is one of the 11 variants in
+# `nba3k_core::GMArchetype`; defaults are seeded by
+# `GMPersonality::from_archetype()` and an optional `[ABBREV.traits]` table
+# overrides individual `GMTraits` fields.
+#
+# Sourcing approach: archetypes lean on widely-reported tendencies from the
+# 2024-25 / 2025-26 cycle (deal-history, public statements, ownership posture).
+# When in doubt we picked `Conservative` — a defensible neutral — rather than
+# inventing a controversial read. Trait overrides are reserved for tendencies
+# the public record clearly supports (e.g. Presti's patience, Pelinka's
+# star-hunting, ownership-driven cheapness in Charlotte / Washington).
+#
+# References:
+#   - GM identity / tenure: each franchise's 2025-26 front-office page.
+#   - Behavioral reads: HoopsRumors transaction logs, The Athletic / ESPN
+#     reporting on each FO's last 24 months of moves.
+#
+# Don't read these as predictions — they're priors to seed the trade engine.
+# Calibration via `dev calibrate-trade` will surface anything wildly off.
+
+[ATL]
+archetype = "Conservative"
+gm_name = "Onsi Saleh"
+# Saleh took over from Landry Fields summer 2025; early reads suggest a
+# pragmatic, value-conscious operator threading the apron needle around
+# Trae Young.
+[ATL.traits]
+patience = 0.5
+salary_aversion = 1.2
+
+[BOS]
+archetype = "WinNow"
+gm_name = "Brad Stevens"
+# Active 2024 champion roster; Stevens has shown he'll pay luxury tax for a
+# title window but is disciplined about long-term flexibility.
+[BOS.traits]
+patience = 0.3
+star_premium = 1.4
+risk_tolerance = 0.55
+
+[BRK]
+archetype = "Rebuilder"
+gm_name = "Sean Marks"
+# Post-Mikal/KD pivot is unambiguous: hoarding picks, embracing youth
+# development. Patience override matches the timeline reset.
+[BRK.traits]
+patience = 0.95
+pick_value_multiplier = 1.6
+
+[CHO]
+archetype = "Cheapskate"
+gm_name = "Jeff Peterson"
+# Long-running ownership preference for staying off the tax line; FO tends
+# to prioritize cap sheet over marginal wins.
+[CHO.traits]
+tax_aversion = 2.2
+salary_aversion = 1.6
+
+[CHI]
+archetype = "Conservative"
+gm_name = "Arturas Karnisovas"
+# Famously slow to commit either direction (retool vs rebuild). Conservative
+# fits the holding pattern; small risk-tolerance bump is generous.
+
+[CLE]
+archetype = "WinNow"
+gm_name = "Koby Altman"
+# Apron-2 territory built around Mitchell/Garland/Mobley/Allen core; window
+# is now.
+[CLE.traits]
+patience = 0.25
+current_overall_weight = 1.55
+
+[DAL]
+archetype = "StarHunter"
+gm_name = "Nico Harrison"
+# Track record of swinging for stars (Doncic-era acquisitions, AD trade).
+# Star-hunting bias is the cleanest read.
+[DAL.traits]
+star_premium = 1.7
+risk_tolerance = 0.7
+
+[DEN]
+archetype = "WinNow"
+gm_name = "Ben Tenzer"
+# Around a Jokic prime — not maximal aggression but clearly title-window.
+[DEN.traits]
+patience = 0.3
+star_premium = 1.5
+
+[DET]
+archetype = "Rebuilder"
+gm_name = "Trajan Langdon"
+# Langdon hired 2024 to lead a from-scratch rebuild around Cunningham;
+# pick-heavy, youth-first.
+[DET.traits]
+patience = 0.9
+pick_value_multiplier = 1.4
+
+[GSW]
+archetype = "WinNow"
+gm_name = "Mike Dunleavy Jr."
+# Curry's twilight years — front office has consistently traded picks for
+# plug-in vets.
+[GSW.traits]
+patience = 0.2
+pick_value_multiplier = 0.65
+current_overall_weight = 1.5
+
+[HOU]
+archetype = "Analytics"
+gm_name = "Rafael Stone"
+# Transitioning from full rebuild to win-soon (added VanVleet, Brooks,
+# Durant) but still values picks. Retool fits the dual mandate.
+[HOU.traits]
+pick_value_multiplier = 1.2
+patience = 0.55
+
+[IND]
+archetype = "Conservative"
+gm_name = "Chad Buchanan"
+# Owner-driven preference for fiscal restraint; Buchanan tends to stay near
+# the tax rather than blow past it.
+[IND.traits]
+tax_aversion = 1.6
+salary_aversion = 1.2
+
+[LAC]
+archetype = "WinNow"
+gm_name = "Lawrence Frank"
+# Older core (Leonard, Harden, Zubac); Frank has consistently dealt
+# first-rounders for win-now help.
+[LAC.traits]
+patience = 0.2
+pick_value_multiplier = 0.6
+current_overall_weight = 1.5
+
+[LAL]
+archetype = "StarHunter"
+gm_name = "Rob Pelinka"
+# Pelinka's reputation as a star-or-bust shopper is well established
+# (AD trade, perpetual star-pursuit).
+[LAL.traits]
+star_premium = 1.7
+risk_tolerance = 0.65
+patience = 0.25
+
+[MEM]
+archetype = "Analytics"
+gm_name = "Zach Kleiman"
+# Front office consistently regarded as analytics-forward; values draft
+# capital and youth retention.
+[MEM.traits]
+patience = 0.7
+pick_value_multiplier = 1.35
+
+[MIA]
+archetype = "OldSchool"
+gm_name = "Andy Elisburg"
+# Heat culture / Pat Riley shop — fit, character, and proven vets weighted
+# above pure analytics.
+[MIA.traits]
+fit_weight = 1.0
+risk_tolerance = 0.4
+
+[MIL]
+archetype = "WinNow"
+gm_name = "Jon Horst"
+# Around Giannis prime — Horst has repeatedly traded picks for present help
+# (Holiday, Lillard, Kuzma).
+[MIL.traits]
+patience = 0.2
+pick_value_multiplier = 0.65
+
+[MIN]
+archetype = "Conservative"
+gm_name = "Tim Connelly"
+# Connelly has been deliberate post-KAT-trade — neither tearing down nor
+# pushing all-in. Conservative captures the wait-and-see posture.
+
+[NOP]
+archetype = "Conservative"
+gm_name = "Joe Dumars"
+# Dumars hired 2025 to evaluate the Zion-era roster; expect retool moves
+# rather than a clean rebuild or all-in.
+
+[NYK]
+archetype = "Aggressive"
+gm_name = "Leon Rose"
+# Rose has been the most aggressive deal-maker of the post-2023 CBA era
+# (Mikal, OG, KAT, Brunson extension navigation).
+[NYK.traits]
+aggression = 1.0
+risk_tolerance = 0.85
+star_premium = 1.5
+
+[OKC]
+archetype = "Analytics"
+gm_name = "Sam Presti"
+# Presti is the canonical patience-and-picks operator; analytics-leaning
+# with elite pick valuation.
+[OKC.traits]
+patience = 0.95
+pick_value_multiplier = 1.6
+potential_weight = 1.5
+
+[ORL]
+archetype = "Rebuilder"
+gm_name = "Anthony Parker"
+# Still ascending, young core (Banchero / Wagner / Suggs). Rebuilder bias
+# softened — they're closer to retool than full teardown, but draft capital
+# remains a priority.
+[ORL.traits]
+patience = 0.75
+pick_value_multiplier = 1.35
+current_overall_weight = 0.8
+
+[PHI]
+archetype = "WinNow"
+gm_name = "Daryl Morey"
+# Morey is the textbook star-hunter / win-now archetype — willing to sell
+# the farm for an Embiid window.
+[PHI.traits]
+patience = 0.2
+star_premium = 1.6
+salary_aversion = 0.7
+
+[PHO]
+archetype = "StarHunter"
+gm_name = "Brian Gregory"
+# Ishbia ownership has prioritized stars at any cost; FO takes its cue
+# from there.
+[PHO.traits]
+star_premium = 1.7
+salary_aversion = 0.55
+tax_aversion = 0.6
+patience = 0.2
+
+[POR]
+archetype = "Rebuilder"
+gm_name = "Joe Cronin"
+# Post-Lillard rebuild, Cronin has accumulated picks and young guards.
+
+[SAC]
+archetype = "Conservative"
+gm_name = "Scott Perry"
+# Perry hired April 2025; early read is steady-handed retool, not radical
+# moves.
+[SAC.traits]
+risk_tolerance = 0.35
+
+[SAS]
+archetype = "Analytics"
+gm_name = "Brian Wright"
+# Spurs FO has earned its patient / analytical reputation; Wembanyama
+# timeline reinforces it.
+[SAS.traits]
+patience = 0.9
+pick_value_multiplier = 1.4
+potential_weight = 1.5
+
+[TOR]
+archetype = "Conservative"
+gm_name = "Bobby Webster"
+# Post-Siakam/OG tear-down resolved into a young-core retool around
+# Barnes / Quickley / Ingram.
+
+[UTA]
+archetype = "Rebuilder"
+gm_name = "Justin Zanik"
+# Ainge FO has run perhaps the cleanest pick-hoarding rebuild of the
+# 2020s.
+[UTA.traits]
+patience = 0.95
+pick_value_multiplier = 1.6
+current_overall_weight = 0.55
+
+[WAS]
+archetype = "Cheapskate"
+gm_name = "Will Dawkins"
+# Active rebuild driven equally by competitive timeline and ownership's
+# tax-avoidance posture.
+[WAS.traits]
+patience = 0.85
+tax_aversion = 1.9
+pick_value_multiplier = 1.4

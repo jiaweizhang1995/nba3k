@@ -1,0 +1,17 @@
+# StatisticalEngine tunables. Loaded by nba3k_sim::SimParams::from_toml.
+# Numbers calibrated for league-average 2025-26 NBA pace and scoring.
+
+# Mean possessions per game (one team) before HCA/strength adjustment.
+pace_mean = 99.0
+# Std dev on possessions sample.
+pace_sigma = 3.0
+# Std dev on team score (Normal sample around expected_points).
+score_sigma = 9.0
+# Points added to home expected score (typical NBA = 2.5..3.0).
+home_court_advantage = 2.0
+# Per-player Bernoulli probability of incurring an injury this game.
+injury_rate_per_game = 0.005
+# Hard cap on overtime periods to prevent runaway recursion on ties.
+max_overtimes = 4
+# Dirichlet-ish skew for usage distribution across rotation. Higher = more concentrated.
+usage_distribution_alpha = 1.4

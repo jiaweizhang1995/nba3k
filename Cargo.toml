@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nba3k-core",
+    "crates/nba3k-models",
+    "crates/nba3k-sim",
+    "crates/nba3k-trade",
+    "crates/nba3k-season",
+    "crates/nba3k-store",
+    "crates/nba3k-scrape",
+    "crates/nba3k-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/CarfagnoArcino/nba3k-claude"
+
+[workspace.dependencies]
+# Internal crates
+nba3k-core = { path = "crates/nba3k-core" }
+nba3k-models = { path = "crates/nba3k-models" }
+nba3k-sim = { path = "crates/nba3k-sim" }
+nba3k-trade = { path = "crates/nba3k-trade" }
+nba3k-season = { path = "crates/nba3k-season" }
+nba3k-store = { path = "crates/nba3k-store" }
+nba3k-scrape = { path = "crates/nba3k-scrape" }
+
+# Common deps pinned at workspace level
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+anyhow = "1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+rand_chacha = "0.3"
+rand_distr = "0.4"
+indexmap = { version = "2", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled", "chrono", "serde_json"] }
+refinery = { version = "0.8", features = ["rusqlite"] }
+
+# CLI / REPL
+clap = { version = "4", features = ["derive", "env"] }
+rustyline = "14"
+shlex = "1"
+
+# Scraping (only used by nba3k-scrape)
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip", "json"] }
+scraper = "0.20"
+csv = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

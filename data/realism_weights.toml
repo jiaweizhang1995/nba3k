@@ -1,0 +1,40 @@
+# M4 realism weights — tuning layer for the realism engine.
+# Missing sections fall back to hardcoded defaults in
+# `nba3k-models::weights::*Default::default()`.
+#
+# v1 calibration: BBRef-scraped ratings are compressed to OVR 60-78 (no
+# raw scrape data has stars at 90+). The franchise-tag list in
+# `data/star_roster.toml` is the durable patch; the weights below soften
+# OVR-gated boosts so the override actually fires for players the data
+# under-rates.
+
+[stat_projection]
+# Lowered from default 88 → 70 because BBRef ratings are compressed.
+# A franchise-tagged player at OVR 75 still gets the star uplift; an
+# untagged 75 doesn't (the franchise tag is the *real* discriminator).
+star_uplift_threshold_ovr = 70
+# Magnitudes tuned post-M4 first-pass: previous values produced 38+ PPG
+# stars and 17+ APG creators (NBA top is ~32 PPG, ~12 APG).
+star_uplift_pts = 2.0
+star_uplift_reb = 1.0
+star_uplift_ast = 0.5
+triple_double_floor_minutes = 32
+# Primary-creator bonuses on per-100 rates per unit of usage above 0.25.
+# Real NBA: Halliburton at 30% usage gets ~+5 ast/100 over an off-ball PG.
+creator_ast_bonus_per_excess = 5.0
+creator_reb_bonus_per_excess = 6.0
+# Per-game PTS cap so PTS-reconciliation can never push a single player's
+# average past a realistic ceiling. NBA league-leader PPG is ~32; cap = 55
+# leaves room for a real 60-pt outburst game without polluting the average.
+single_game_pts_cap = 55
+
+[player_value]
+# Same compression applies to the value model: lower the star-premium
+# threshold so quadratic premium kicks in for franchise tier even at
+# scrape-OVR 75-78. The franchise-tag-driven uplift already lives in
+# trade_acceptance; this just helps value math see the right gradient.
+age_peak = 27.0
+star_threshold_ovr = 78
+star_premium_max = 1.6
+salary_aversion_default = 1.0
+loyalty_bonus_default = 0.20

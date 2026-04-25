@@ -1,0 +1,91 @@
+# Curated franchise tags for the 2025-26 NBA season.
+#
+# Players named here are treated as untouchable by `star_protection_score`
+# (the franchise_tag component sets value = 1.0) regardless of their raw OVR
+# rating. This is the v1 backstop while the BBRef rating layer is still
+# compressed — names trump numbers.
+#
+# Lean conservative on tagging — only tag obvious, headline-level franchise
+# stars whose front offices would not seriously entertain trade calls.
+# Rotation starters, "good but movable" wings, and aging vets do NOT belong
+# here. Bottom-feeders and most mid-table teams legitimately have no entry —
+# that is a feature, not a gap.
+#
+# Schema:
+#   [<TEAM_ABBREV>]
+#   players = ["Display Name 1", "Display Name 2", ...]
+#
+# Names are matched case-insensitively against `Player.name` and should
+# follow BBRef's spelling (diacritics included where BBRef carries them).
+
+[BOS]
+players = ["Jayson Tatum", "Jaylen Brown"]
+
+[OKC]
+players = ["Shai Gilgeous-Alexander", "Chet Holmgren"]
+
+[DEN]
+players = ["Nikola Jokić"]
+
+[MIL]
+players = ["Giannis Antetokounmpo"]
+
+[LAL]
+players = ["Luka Dončić", "LeBron James"]
+
+[MIN]
+players = ["Anthony Edwards"]
+
+[PHI]
+players = ["Joel Embiid"]
+
+[PHO]
+players = ["Devin Booker", "Kevin Durant"]
+
+[GSW]
+players = ["Stephen Curry"]
+
+[DAL]
+players = ["Anthony Davis"]
+
+[NYK]
+players = ["Jalen Brunson", "Karl-Anthony Towns"]
+
+[CLE]
+players = ["Donovan Mitchell", "Evan Mobley"]
+
+[ATL]
+players = ["Trae Young"]
+
+[NOP]
+players = ["Zion Williamson"]
+
+[MEM]
+players = ["Ja Morant"]
+
+[ORL]
+players = ["Paolo Banchero"]
+
+[SAS]
+players = ["Victor Wembanyama"]
+
+[SAC]
+players = ["Domantas Sabonis"]
+
+[IND]
+players = ["Tyrese Haliburton"]
+
+[HOU]
+players = ["Alperen Şengün"]
+
+[MIA]
+players = ["Bam Adebayo"]
+
+[POR]
+players = ["Scoot Henderson"]
+
+[CHA]
+players = ["LaMelo Ball"]
+
+[DET]
+players = ["Cade Cunningham"]

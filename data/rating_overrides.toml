@@ -1,0 +1,21 @@
+# nba3k-scrape rating + contract overrides.
+#
+# Each `[[player]]` section can patch a player after the auto-rating pass.
+# All fields are optional. Keys are matched case-insensitively against
+# `Player.name`.
+#
+# Schema:
+#   name              = "Display Name"  (required)
+#   overall           = 0..=99          (clamps the BPM-derived overall)
+#   potential         = 0..=99          (overrides the age-curve potential)
+#   no_trade_clause   = true|false      (used by the M3 trade engine)
+#   trade_kicker_pct  = 0..=15          (used by the M3 trade engine)
+#
+# Example (uncomment to use):
+#
+# [[player]]
+# name = "Jayson Tatum"
+# overall = 95
+# potential = 96
+# no_trade_clause = true
+# trade_kicker_pct = 15

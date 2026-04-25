@@ -1,0 +1,21 @@
+[package]
+name = "nba3k-trade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nba3k-core = { workspace = true }
+nba3k-models = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+rand_chacha = { workspace = true }

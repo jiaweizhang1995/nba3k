@@ -1,0 +1,15 @@
+[package]
+name = "nba3k-season"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nba3k-core = { workspace = true }
+nba3k-models = { workspace = true }
+nba3k-sim = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }

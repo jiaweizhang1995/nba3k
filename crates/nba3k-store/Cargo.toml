@@ -1,0 +1,17 @@
+[package]
+name = "nba3k-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nba3k-core = { workspace = true }
+nba3k-models = { workspace = true }
+rusqlite = { workspace = true }
+refinery = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
