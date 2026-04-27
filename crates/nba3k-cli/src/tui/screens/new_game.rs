@@ -89,10 +89,41 @@ pub fn reset() {
 fn default_save_path() -> String {
     if let Some(home) = std::env::var_os("HOME") {
         let mut p = PathBuf::from(home);
-        p.push("nba3k_save.db");
+        p.push("Desktop");
+        p.push("nba3k_save");
+        p.push("save.db");
         return p.display().to_string();
     }
     "nba3k_save.db".to_string()
+}
+
+/// Normalize the user-typed save path:
+/// - trim whitespace
+/// - if it ends with `/` or `\` → append `save.db`
+/// - if it points to an existing directory → append `save.db`
+/// - if it has no extension → append `.db`
+/// - mkdir-p the parent directory so SQLite can create the file
+fn normalize_save_path(input: &str) -> Result<PathBuf> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("save path is empty"));
+    }
+    let mut path = PathBuf::from(trimmed);
+    let dir_like = trimmed.ends_with('/')
+        || trimmed.ends_with('\\')
+        || (path.exists() && path.is_dir());
+    if dir_like {
+        path.push("save.db");
+    } else if path.extension().is_none() {
+        path.set_extension("db");
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating parent directory {}", parent.display()))?;
+        }
+    }
+    Ok(path)
 }
 
 fn display_team(t: &Team) -> String {
@@ -438,7 +469,7 @@ fn retreat_step(st: &mut WizardState) -> WizardAction {
 fn submit(app: &mut AppState, tui: &mut TuiApp) -> Result<()> {
     let (save_path, args) = STATE.with(|s| -> Result<(PathBuf, NewArgs)> {
         let st = s.borrow();
-        let save_path = PathBuf::from(st.save_path.value().trim());
+        let save_path = normalize_save_path(st.save_path.value())?;
         let team = st
             .team_picker
             .selected()
