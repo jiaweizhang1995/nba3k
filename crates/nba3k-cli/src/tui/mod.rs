@@ -367,13 +367,10 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         return Ok(false);
     }
 
-    // Global shortcuts (Ctrl+S = saves overlay) work from any screen except
-    // QuitConfirm (handled above) and the wizard before a save exists (the
-    // saves overlay needs a loaded save to render its list).
-    if k.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(k.code, KeyCode::Char('s'))
-        && tui.has_save()
-    {
+    // Global shortcut: Ctrl+S = saves overlay. Works even with no save loaded
+    // so the user can pick an existing save from the wizard. Saves overlay's
+    // own logic handles the no-save case (Esc bounces to NewGame).
+    if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('s')) {
         tui.current = Screen::Saves;
         return Ok(false);
     }
@@ -407,6 +404,10 @@ where
     if !consumed && matches!(k.code, KeyCode::Esc) {
         if tui.has_save() {
             tui.current = Screen::Menu;
+        } else if matches!(tui.current, Screen::Saves) {
+            // No save AND user opened saves overlay from wizard → bounce back
+            // to wizard rather than quitting.
+            tui.current = Screen::NewGame;
         } else {
             // No save → wizard is the only way out; Esc opens quit confirm.
             tui.current = Screen::QuitConfirm;
@@ -646,10 +647,13 @@ fn draw_menu_preview(f: &mut Frame, area: Rect, tui: &TuiApp) {
 }
 
 fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
-    // No-save mode: only the wizard / quit confirm are reachable, so the bar
-    // must not advertise Ctrl+S / Esc-back.
+    // No-save mode: wizard + saves overlay are both reachable. Show Ctrl+S
+    // so user knows they can load an existing save instead of new-game.
     if !tui.has_save() && tui.current != Screen::QuitConfirm {
-        let hints: &[(&str, &str)] = &[("Esc", "Quit")];
+        let hints: &[(&str, &str)] = match tui.current {
+            Screen::Saves => &[("↑↓", "Navigate"), ("l", "Load"), ("Esc", "Back")],
+            _ => &[("Ctrl+S", "Load Save"), ("Esc", "Quit")],
+        };
         let bar = match tui.last_msg.as_deref() {
             Some(s) => ActionBar::new(hints).with_status(s),
             None => ActionBar::new(hints),

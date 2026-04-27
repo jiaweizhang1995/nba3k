@@ -195,15 +195,19 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, step: Step) {
 fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, st: &WizardState) {
     match st.step {
         Step::SavePath => {
-            let inner = vsplit(area, 3);
+            let inner = vsplit(area, 4);
             let lines = vec![
                 Line::from(Span::styled(
                     "Where should the new save live?",
                     theme.text(),
                 )),
                 Line::from(Span::styled(
-                    "Defaults to ~/nba3k_save.db. The file must not already exist.",
+                    "Default: ~/Desktop/nba3k_save/save.db. File must not already exist.",
                     theme.muted_style(),
+                )),
+                Line::from(Span::styled(
+                    "Already have a save? Press Ctrl+S to pick one to load instead.",
+                    theme.accent_style(),
                 )),
             ];
             let p = Paragraph::new(lines)
