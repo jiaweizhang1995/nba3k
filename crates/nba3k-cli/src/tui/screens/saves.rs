@@ -46,6 +46,7 @@ struct SaveRow {
     day: Option<u32>,
     team: Option<String>,
     size_kb: u64,
+    mtime: Option<SystemTime>,
     mtime_label: String,
     /// Set when `Store::open` failed — we still show the row but with the error.
     error: Option<String>,
@@ -249,10 +250,28 @@ fn scan_saves() -> Vec<SaveRow> {
     if cfg!(unix) && tmp.is_dir() {
         scan_db_files(&tmp, &mut paths);
     }
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        // Default save dir from the new-game wizard
+        let desktop_saves = home.join("Desktop").join("nba3k_save");
+        if desktop_saves.is_dir() {
+            scan_db_files(&desktop_saves, &mut paths);
+        }
+        // Old default location (single file at HOME root)
+        scan_db_files(&home, &mut paths);
+    }
     paths.sort();
     paths.dedup();
 
-    paths.into_iter().map(read_save_row).collect()
+    let mut rows: Vec<SaveRow> = paths.into_iter().map(read_save_row).collect();
+    // Newest first by mtime; rows without mtime sink to the bottom.
+    rows.sort_by(|a, b| match (a.mtime, b.mtime) {
+        (Some(x), Some(y)) => y.cmp(&x),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.path.cmp(&b.path),
+    });
+    rows
 }
 
 fn scan_db_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
@@ -268,11 +287,8 @@ fn scan_db_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
 fn read_save_row(path: PathBuf) -> SaveRow {
     let meta = std::fs::metadata(&path).ok();
     let size_kb = meta.as_ref().map(|m| m.len() / 1024).unwrap_or(0);
-    let mtime_label = meta
-        .as_ref()
-        .and_then(|m| m.modified().ok())
-        .map(format_mtime)
-        .unwrap_or_else(|| "—".into());
+    let mtime = meta.as_ref().and_then(|m| m.modified().ok());
+    let mtime_label = mtime.map(format_mtime).unwrap_or_else(|| "—".into());
 
     match nba3k_store::Store::open(&path) {
         Ok(store) => {
@@ -295,6 +311,7 @@ fn read_save_row(path: PathBuf) -> SaveRow {
                 day,
                 team,
                 size_kb,
+                mtime,
                 mtime_label,
                 error: None,
             }
@@ -305,6 +322,7 @@ fn read_save_row(path: PathBuf) -> SaveRow {
             day: None,
             team: None,
             size_kb,
+            mtime,
             mtime_label,
             error: Some(e.to_string()),
         },
