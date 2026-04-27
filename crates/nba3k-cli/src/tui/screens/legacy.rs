@@ -1,4 +1,9 @@
-// READ-ONLY M19 dashboard. Never call mutation methods on Store.
+//! Legacy M19 dashboard (5-tab Status/Roster/Standings/Trades/News). Preserved
+//! verbatim for `tui --legacy` so existing scripts and orchestrator QA can
+//! still compare against the old layout. M22 polish removes this entire file.
+//!
+//! READ-ONLY against the Store (other than role-cycle and trade-respond, which
+//! route through `commands::dispatch`).
 
 use anyhow::Result;
 use crossterm::{
@@ -17,6 +22,7 @@ use ratatui::{
 use std::io;
 
 use crate::state::AppState;
+use crate::tui::with_silenced_io;
 use nba3k_core::{
     Cents, Conference, NegotiationState, Player, PlayerId, PlayerRole, SeasonId, SeasonPhase,
     SeasonState, TeamId, TradeId,
@@ -71,7 +77,7 @@ struct StatusCounts {
     schedule_unplayed: u32,
 }
 
-struct TuiState {
+struct LegacyState {
     tab: Tab,
     scroll: u16,
     selected: usize,
@@ -87,16 +93,13 @@ struct TuiState {
     open_chains: Option<Vec<(TradeId, NegotiationState)>>,
     recent_chains: Option<Vec<(TradeId, NegotiationState)>>,
     news: Option<Vec<NewsRow>>,
-    /// Cached lookups for resolving offer asset names without repeated SQL.
     player_index: Option<HashMap<PlayerId, Player>>,
     team_abbrev_index: Option<HashMap<TeamId, String>>,
-    /// LeagueYear cap, fetched once per save.
     league_cap: Option<Cents>,
-    /// Last sim result / action feedback shown in footer.
     last_msg: Option<String>,
 }
 
-impl TuiState {
+impl LegacyState {
     fn invalidate_caches(&mut self) {
         self.counts = None;
         self.payroll = None;
@@ -107,12 +110,10 @@ impl TuiState {
         self.recent_chains = None;
         self.news = None;
         self.player_index = None;
-        // team_abbrev_index + league_cap rarely change — keep across sims.
     }
 }
 
 pub fn run(app: &mut AppState) -> Result<()> {
-    // Empty-save path: print message + bail before entering alt screen.
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
@@ -130,7 +131,7 @@ pub fn run(app: &mut AppState) -> Result<()> {
         .unwrap_or_else(|| format!("T{}", user_team.0));
     let season = season_state.season;
 
-    let mut tui = TuiState {
+    let mut tui = LegacyState {
         tab: Tab::Status,
         scroll: 0,
         selected: 0,
@@ -160,7 +161,6 @@ pub fn run(app: &mut AppState) -> Result<()> {
 
     let result = event_loop(&mut terminal, app, &mut tui);
 
-    // Always restore terminal even on error.
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     result
@@ -169,7 +169,7 @@ pub fn run(app: &mut AppState) -> Result<()> {
 fn event_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
-    tui: &mut TuiState,
+    tui: &mut LegacyState,
 ) -> Result<()> {
     loop {
         ensure_cache(app, tui)?;
@@ -187,15 +187,11 @@ fn event_loop<B: Backend>(
             KeyCode::Char('5') => switch(tui, Tab::News),
             KeyCode::Tab => switch(tui, tui.tab.next()),
             KeyCode::BackTab => switch(tui, tui.tab.prev()),
-            // Time-control hotkeys — sim from inside the TUI. Caches refresh
-            // after each sim. Stdout/stderr from inner sim is suppressed
-            // (alt-screen would corrupt) by capturing during the call.
             KeyCode::Char('s') => sim_action(app, tui, SimKind::Day)?,
             KeyCode::Char('w') => sim_action(app, tui, SimKind::Week)?,
             KeyCode::Char('m') => sim_action(app, tui, SimKind::Month)?,
             KeyCode::Char('t') => sim_action(app, tui, SimKind::TradeDeadline)?,
             KeyCode::Char('e') => sim_action(app, tui, SimKind::SeasonEnd)?,
-            // Tab-context actions:
             KeyCode::Char('r') if tui.tab == Tab::Roster => roster_cycle_role(app, tui)?,
             KeyCode::Char('a') if tui.tab == Tab::Trades => trade_respond(app, tui, "accept")?,
             KeyCode::Char('d') if tui.tab == Tab::Trades => trade_respond(app, tui, "reject")?,
@@ -226,7 +222,7 @@ fn event_loop<B: Backend>(
 #[derive(Copy, Clone)]
 enum SimKind { Day, Week, Month, TradeDeadline, SeasonEnd }
 
-fn sim_action(app: &mut AppState, tui: &mut TuiState, kind: SimKind) -> Result<()> {
+fn sim_action(app: &mut AppState, tui: &mut LegacyState, kind: SimKind) -> Result<()> {
     let pre_unplayed = app.store()?.count_unplayed()?;
     let pre_day = tui.season_state.day;
     let pre_offers = app
@@ -234,7 +230,6 @@ fn sim_action(app: &mut AppState, tui: &mut TuiState, kind: SimKind) -> Result<(
         .read_open_chains_targeting(tui.season, tui.user_team)?
         .len();
 
-    // Suppress stdout/stderr during sim to avoid corrupting the alt-screen.
     let result = with_silenced_io(|| match kind {
         SimKind::Day => crate::commands::sim_n_days(app, 1, true),
         SimKind::Week => crate::commands::sim_n_days(app, 7, true),
@@ -247,7 +242,6 @@ fn sim_action(app: &mut AppState, tui: &mut TuiState, kind: SimKind) -> Result<(
 
     match result {
         Ok(()) => {
-            // Reload season_state + invalidate caches.
             let new_state = app.store()?.load_season_state()?;
             if let Some(s) = new_state {
                 tui.season_state = s;
@@ -281,15 +275,11 @@ fn sim_action(app: &mut AppState, tui: &mut TuiState, kind: SimKind) -> Result<(
     Ok(())
 }
 
-/// Auto-progress to OffSeason: ensure Playoffs phase, run bracket, flip phase.
 fn sim_to_season_end(app: &mut AppState) -> Result<()> {
     let s = app.store()?.load_season_state()?.ok_or_else(|| anyhow::anyhow!("no state"))?;
     if !matches!(s.phase, SeasonPhase::Playoffs | SeasonPhase::OffSeason) {
         crate::commands::sim_until_phase(app, SeasonPhase::Playoffs)?;
     }
-    // Flip directly to OffSeason — simpler than running playoff bracket from
-    // inside TUI (playoff sim has its own UX). User can run `playoffs sim` in
-    // REPL post-TUI for a real bracket.
     let mut s = app.store()?.load_season_state()?.unwrap();
     if s.phase == SeasonPhase::Playoffs {
         s.phase = SeasonPhase::OffSeason;
@@ -298,40 +288,7 @@ fn sim_to_season_end(app: &mut AppState) -> Result<()> {
     Ok(())
 }
 
-/// Run a closure with stdout/stderr redirected to /dev/null so prints from
-/// inner sim functions don't corrupt the ratatui alt-screen.
-fn with_silenced_io<F: FnOnce() -> Result<()>>(f: F) -> Result<()> {
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-    // Best effort. If anything fails, just run f directly.
-    unsafe {
-        let stdout_fd = libc::dup(1);
-        let stderr_fd = libc::dup(2);
-        if stdout_fd < 0 || stderr_fd < 0 {
-            return f();
-        }
-        let null = std::fs::OpenOptions::new()
-            .write(true)
-            .open("/dev/null")
-            .ok();
-        let null_fd = null.as_ref().map(|f| f.as_raw_fd()).unwrap_or(-1);
-        if null_fd >= 0 {
-            libc::dup2(null_fd, 1);
-            libc::dup2(null_fd, 2);
-        }
-        let result = f();
-        // Restore.
-        libc::dup2(stdout_fd, 1);
-        libc::dup2(stderr_fd, 2);
-        let _ = OwnedFd::from_raw_fd(stdout_fd);
-        let _ = OwnedFd::from_raw_fd(stderr_fd);
-        drop(null);
-        result
-    }
-}
-
-/// Cycle the selected roster player's role: Star → Starter → SixthMan →
-/// RolePlayer → BenchWarmer → (Prospect skipped) → back to Star. Persists via Store.
-fn roster_cycle_role(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
+fn roster_cycle_role(app: &mut AppState, tui: &mut LegacyState) -> Result<()> {
     let Some(roster) = tui.roster.as_ref() else { return Ok(()) };
     let Some(p) = roster.get(tui.selected) else { return Ok(()) };
     let next = match p.role {
@@ -340,7 +297,7 @@ fn roster_cycle_role(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
         PlayerRole::SixthMan => PlayerRole::RolePlayer,
         PlayerRole::RolePlayer => PlayerRole::BenchWarmer,
         PlayerRole::BenchWarmer => PlayerRole::Star,
-        PlayerRole::Prospect => PlayerRole::Prospect, // leave prospects alone
+        PlayerRole::Prospect => PlayerRole::Prospect,
     };
     let mut updated = p.clone();
     updated.set_role(next);
@@ -353,9 +310,8 @@ fn roster_cycle_role(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
     match result {
         Ok(()) => {
             tui.last_msg = Some(format!("{} → {}", clean_name(&name), short_role(next)));
-            // Reload roster to reflect new role.
             tui.roster = None;
-            tui.roster_stats = None; // not strictly needed but OK
+            tui.roster_stats = None;
         }
         Err(e) => {
             tui.last_msg = Some(format!("role change failed: {}", e));
@@ -364,8 +320,7 @@ fn roster_cycle_role(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
     Ok(())
 }
 
-/// Respond to the selected open trade chain. action = "accept" | "reject".
-fn trade_respond(app: &mut AppState, tui: &mut TuiState, action: &str) -> Result<()> {
+fn trade_respond(app: &mut AppState, tui: &mut LegacyState, action: &str) -> Result<()> {
     let Some(chains) = tui.open_chains.as_ref() else { return Ok(()) };
     if chains.is_empty() {
         tui.last_msg = Some("no open offers".into());
@@ -403,7 +358,7 @@ fn trade_respond(app: &mut AppState, tui: &mut TuiState, action: &str) -> Result
     Ok(())
 }
 
-fn selectable_count(tui: &TuiState) -> Option<usize> {
+fn selectable_count(tui: &LegacyState) -> Option<usize> {
     match tui.tab {
         Tab::Roster => tui.roster.as_ref().map(|r| r.len()),
         Tab::Trades => tui.open_chains.as_ref().map(|c| c.len()).filter(|n| *n > 0),
@@ -411,14 +366,13 @@ fn selectable_count(tui: &TuiState) -> Option<usize> {
     }
 }
 
-fn switch(tui: &mut TuiState, t: Tab) {
+fn switch(tui: &mut LegacyState, t: Tab) {
     tui.tab = t;
     tui.scroll = 0;
 }
 
-fn ensure_cache(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
+fn ensure_cache(app: &mut AppState, tui: &mut LegacyState) -> Result<()> {
     let store = app.store()?;
-    // Header always shows payroll — populate once.
     if tui.payroll.is_none() {
         tui.payroll = Some(store.team_salary(tui.user_team, tui.season)?);
     }
@@ -440,9 +394,6 @@ fn ensure_cache(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
                 tui.roster = Some(r);
             }
             if tui.roster_stats.is_none() {
-                // Single read_games walk → aggregate per roster player. Avoids
-                // calling read_career_stats N times (each of which re-walks
-                // every game in the season).
                 let games = store.read_games(tui.season)?;
                 let mut map: HashMap<PlayerId, SeasonAvgRow> = HashMap::new();
                 if let Some(roster) = tui.roster.as_ref() {
@@ -495,7 +446,7 @@ fn ensure_cache(app: &mut AppState, tui: &mut TuiState) -> Result<()> {
     Ok(())
 }
 
-fn draw(f: &mut Frame, tui: &TuiState) {
+fn draw(f: &mut Frame, tui: &LegacyState) {
     let area = f.area();
     if area.width < 80 {
         let p = Paragraph::new("Resize terminal to ≥ 80 columns")
@@ -524,7 +475,7 @@ fn draw(f: &mut Frame, tui: &TuiState) {
     draw_footer(f, tui, chunks[2]);
 }
 
-fn draw_header(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_header(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let payroll = tui
         .payroll
         .map(|c| format!("${:.1}M", c.as_millions_f32()))
@@ -548,7 +499,7 @@ fn draw_header(f: &mut Frame, area: Rect, tui: &TuiState) {
     f.render_widget(tabs, area);
 }
 
-fn draw_footer(f: &mut Frame, tui: &TuiState, area: Rect) {
+fn draw_footer(f: &mut Frame, tui: &LegacyState, area: Rect) {
     let hint = " q quit · 1-5 tabs · ↑↓ select · [s]day [w]week [m]month [t]→deadline [e]→season-end ";
     let line = if let Some(msg) = tui.last_msg.as_deref() {
         format!(" {} │ {}", msg, hint)
@@ -559,7 +510,7 @@ fn draw_footer(f: &mut Frame, tui: &TuiState, area: Rect) {
     f.render_widget(p, area);
 }
 
-fn draw_status(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_status(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let payroll = tui
         .payroll
         .map(|c| format!("${:.2}M", c.as_millions_f32()))
@@ -589,7 +540,7 @@ fn draw_status(f: &mut Frame, area: Rect, tui: &TuiState) {
     f.render_widget(p, area);
 }
 
-fn draw_roster(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_roster(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let Some(roster) = tui.roster.as_ref() else { return };
     let stats = tui.roster_stats.as_ref();
     let header = Row::new(vec![
@@ -610,7 +561,6 @@ fn draw_roster(f: &mut Frame, area: Rect, tui: &TuiState) {
     .style(Style::default().add_modifier(Modifier::BOLD));
 
     let visible_h = area.height.saturating_sub(3) as usize;
-    // Auto-scroll to keep selected row visible.
     let auto_scroll = if tui.selected >= visible_h {
         tui.selected.saturating_sub(visible_h - 1)
     } else {
@@ -663,19 +613,19 @@ fn draw_roster(f: &mut Frame, area: Rect, tui: &TuiState) {
         .collect();
 
     let widths = [
-        Constraint::Length(22), // NAME
-        Constraint::Length(3),  // POS
-        Constraint::Length(3),  // AGE
-        Constraint::Length(3),  // OVR
-        Constraint::Length(5),  // ROLE
-        Constraint::Length(3),  // GP
-        Constraint::Length(5),  // PPG
-        Constraint::Length(4),  // RPG
-        Constraint::Length(4),  // APG
-        Constraint::Length(4),  // SPG
-        Constraint::Length(4),  // BPG
-        Constraint::Length(4),  // FG%
-        Constraint::Length(4),  // 3P%
+        Constraint::Length(22),
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Length(5),
+        Constraint::Length(3),
+        Constraint::Length(5),
+        Constraint::Length(4),
+        Constraint::Length(4),
+        Constraint::Length(4),
+        Constraint::Length(4),
+        Constraint::Length(4),
+        Constraint::Length(4),
     ];
     let title = format!(" Roster — {} ({} players) ", tui.user_abbrev, roster.len());
     let block = Block::default().borders(Borders::ALL).title(title);
@@ -683,7 +633,7 @@ fn draw_roster(f: &mut Frame, area: Rect, tui: &TuiState) {
     f.render_widget(table, area);
 }
 
-fn draw_standings(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_standings(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let Some(rows) = tui.standings.as_ref() else { return };
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -746,8 +696,7 @@ fn standings_table<'a>(rows: &[&StandingRow], title: &'a str) -> Table<'a> {
         .block(Block::default().borders(Borders::ALL).title(title.to_string()))
 }
 
-fn draw_trades(f: &mut Frame, area: Rect, tui: &TuiState) {
-    // Vertical split: header (1) / body (rest) / GM-message (3 incl borders)
+fn draw_trades(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -759,7 +708,6 @@ fn draw_trades(f: &mut Frame, area: Rect, tui: &TuiState) {
 
     draw_trade_header(f, outer[0], tui);
 
-    // 3-column body: menu (20%) / current offer (50%) / analysis (30%)
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -775,12 +723,11 @@ fn draw_trades(f: &mut Frame, area: Rect, tui: &TuiState) {
     draw_trade_message(f, outer[2], tui);
 }
 
-fn draw_trade_header(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_trade_header(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let payroll = tui.payroll.unwrap_or(Cents::ZERO);
     let cap = tui.league_cap.unwrap_or(Cents::ZERO);
     let cap_space_cents = cap.0.saturating_sub(payroll.0).max(0);
     let cap_space = Cents(cap_space_cents);
-    // Days to deadline: 2026-02-05 minus current date.
     let cur_date = crate::commands::day_index_to_date(tui.season_state.day);
     let deadline =
         chrono::NaiveDate::from_ymd_opt(2026, 2, 5).unwrap_or(cur_date);
@@ -800,7 +747,7 @@ fn draw_trade_header(f: &mut Frame, area: Rect, tui: &TuiState) {
     f.render_widget(p, area);
 }
 
-fn draw_trade_menu(f: &mut Frame, area: Rect, _tui: &TuiState) {
+fn draw_trade_menu(f: &mut Frame, area: Rect, _tui: &LegacyState) {
     let menu_lines = vec![
         Line::from("TRADE MENU"),
         Line::from(""),
@@ -824,7 +771,7 @@ fn draw_trade_menu(f: &mut Frame, area: Rect, _tui: &TuiState) {
     f.render_widget(p, area);
 }
 
-fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let self_season = tui.season;
     let chains = match tui.open_chains.as_ref() {
         Some(c) if !c.is_empty() => c,
@@ -850,7 +797,6 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &TuiState) {
         format!("Offer #{} (round {})", id.0, latest.map(|o| o.round).unwrap_or(0)),
         Style::default().add_modifier(Modifier::BOLD),
     )));
-    // List of all open offers above selected detail.
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!("Inbox ({} open)", chains.len()),
@@ -874,7 +820,6 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &TuiState) {
     lines.push(Line::from(""));
 
     if let Some(offer) = latest {
-        // Two sub-sections: "X Send" / "Y Send" per team.
         let team_index = tui.team_abbrev_index.as_ref();
         let player_index = tui.player_index.as_ref();
         let abbrev_for = |t: TeamId| {
@@ -888,7 +833,6 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &TuiState) {
                 label,
                 Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             )));
-            // Players
             for pid in &assets.players_out {
                 let (name, salary, ovr) = player_index
                     .and_then(|m| m.get(pid))
@@ -908,7 +852,6 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &TuiState) {
                     salary.as_millions_f32()
                 )));
             }
-            // Picks
             for pick_id in &assets.picks_out {
                 lines.push(Line::from(format!("  Pick #{}", pick_id.0)));
             }
@@ -927,7 +870,7 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &TuiState) {
     f.render_widget(p, area);
 }
 
-fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let self_season = tui.season;
     let chains = match tui.open_chains.as_ref() {
         Some(c) if !c.is_empty() => c,
@@ -954,7 +897,6 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &TuiState) {
 
     if let Some(offer) = latest {
         let player_index = tui.player_index.as_ref();
-        // Salary totals for user team incoming/outgoing.
         let mut outgoing = Cents::ZERO;
         let mut incoming = Cents::ZERO;
         for (team_id, assets) in offer.assets_by_team.iter() {
@@ -977,7 +919,6 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &TuiState) {
         )));
         lines.push(Line::from(""));
         lines.push(Line::from("Salary Match"));
-        // CBA matching rule (simplified): incoming ≤ 1.25 × outgoing + $250K
         let limit = (outgoing.as_millions_f32() * 1.25) + 0.25;
         let cba_valid = incoming.as_millions_f32() <= limit;
         lines.push(Line::from(if cba_valid {
@@ -1002,7 +943,6 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &TuiState) {
         let net = incoming.as_millions_f32() - outgoing.as_millions_f32();
         lines.push(Line::from(format!(" ${:+.1}M", net)));
         lines.push(Line::from(""));
-        // Crude trade-value heuristic: sum OVR of incoming - outgoing players.
         let mut delta_ovr: i32 = 0;
         for (team_id, assets) in offer.assets_by_team.iter() {
             for pid in &assets.players_out {
@@ -1040,7 +980,7 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &TuiState) {
     f.render_widget(p, area);
 }
 
-fn draw_trade_message(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_trade_message(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let chains = tui.open_chains.as_ref();
     let n = chains.map(|c| c.len()).unwrap_or(0);
     let msg = if n == 0 {
@@ -1069,31 +1009,9 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-fn chain_summary(entry: &(TradeId, NegotiationState)) -> String {
-    let (id, st) = entry;
-    let (status, round, teams) = match st {
-        NegotiationState::Open { chain } => {
-            let r = chain.last().map(|o| o.round).unwrap_or(0);
-            let t = chain.last().map(|o| o.assets_by_team.len()).unwrap_or(0);
-            ("open", r, t)
-        }
-        NegotiationState::Accepted(o) => ("accepted", o.round, o.assets_by_team.len()),
-        NegotiationState::Rejected { final_offer, .. } => (
-            "rejected",
-            final_offer.round,
-            final_offer.assets_by_team.len(),
-        ),
-        NegotiationState::Stalled => ("stalled", 0, 0),
-    };
-    format!(
-        "[T#{:>3}] {:<9} — {} teams — round {}",
-        id.0, status, teams, round
-    )
-}
-
-fn draw_news(f: &mut Frame, area: Rect, tui: &TuiState) {
+fn draw_news(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let Some(rows) = tui.news.as_ref() else { return };
-    let visible_h = area.height.saturating_sub(2) as usize; // borders only
+    let visible_h = area.height.saturating_sub(2) as usize;
     let max_scroll = rows.len().saturating_sub(visible_h.max(1)) as u16;
     let scroll = tui.scroll.min(max_scroll) as usize;
     let items: Vec<ListItem> = rows

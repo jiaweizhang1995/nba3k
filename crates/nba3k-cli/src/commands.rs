@@ -112,12 +112,16 @@ pub fn dispatch(app: &mut AppState, cmd: Command) -> Result<()> {
         },
         Command::Mandate { season, json } => cmd_mandate(app, season, json),
         Command::Recap { days, json } => cmd_recap(app, days, json),
-        Command::Tui => cmd_tui(app),
+        Command::Tui { tv, legacy } => cmd_tui(app, tv, legacy),
     }
 }
 
-fn cmd_tui(app: &mut AppState) -> Result<()> {
-    crate::tui::run(app)
+fn cmd_tui(app: &mut AppState, tv: bool, legacy: bool) -> Result<()> {
+    if legacy {
+        crate::tui::run_legacy(app)
+    } else {
+        crate::tui::run(app, tv)
+    }
 }
 
 // ----------------------------------------------------------------------

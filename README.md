@@ -95,35 +95,54 @@ nba3k --save my.db --script my_season.txt
 echo "sim-to season-end\nstandings" | nba3k --save my.db
 ```
 
-### TUI（只读仪表盘）
+### TUI（M20 起：可玩，TV 模式）
 
 ```bash
-nba3k --save my.db tui
+nba3k tui                    # 没存档自动跳新游戏向导
+nba3k --save my.db tui       # 进入主菜单
+nba3k --save my.db tui --tv  # 高对比 TV 调色板 + 大间距，沙发上看清楚
+nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 ```
 
 基于 `ratatui 0.29` + `crossterm 0.28`，单二进制无外部依赖。
 
-**5 个标签页**（`1`-`5` 或 `Tab` / `Shift-Tab` 切换）：
+**主菜单 7 项**（`↑` `↓` 切换 / `1`-`7` 直跳 / `Enter` 进入）：
 
-| 键 | 标签 | 内容 |
-|----|------|------|
-| `1` | Status | 玩家球队 / 当前赛季 / 比赛日 / 战绩 / 薪资概览 |
-| `2` | Roster | 你队当前球员，按 OVR 降序，可滚动 |
-| `3` | Standings | 东西部并排，含胜场差 GB |
-| `4` | Trades | 当前进行中的交易谈判 + 最近 20 条交易历史 |
-| `5` | News | 最近 50 条联盟动态 |
+| # | 菜单 | 状态 | 内容 |
+|---|------|------|------|
+| 1 | Home | M20 完工 | 仪表盘：老板任务 + 今日比赛 + GM 收件箱（球员不满 / 报价 / 收藏）+ 最近联盟新闻 |
+| 2 | Roster | M21 上线 | 阵容管理（训练 / 续约 / 裁员 / 角色 / FA 签约）|
+| 3 | Rotation | M21 上线 | 首发 5 人位置指派（Level A）|
+| 4 | Trades | M22 上线 | 交易构建器 + 收件箱 + 反报价 + 传闻 |
+| 5 | Draft | M22 上线 | 选秀板 + 球探 + 选人 |
+| 6 | Finance | M22 上线 | 薪资 / 奢侈税 / 阿屁绒 / 合约 |
+| 7 | Calendar | M20 完工 | 7×6 月历 + 6 子页（赛程/排名/季后赛/奖项/全明星/Cup）|
 
-**通用按键**：
+**Calendar 子页按键**：
 
-- `↑` `↓` 滚动
-- `PgUp` `PgDn` 翻页（±10 行）
-- `Home` 回到顶部
-- `q` / `Esc` 退出
+- `Space` 模拟 1 天
+- `W` 模拟 1 周
+- `M` 模拟 1 月
+- `Enter` 在高亮事件日 → 模拟到那天（all-star / cup-final / trade-deadline / season-end）
+- `A` 推进到下个赛季（带确认）
+- `Tab` / `Shift+Tab` 切子页
+- `[` `]` 换月（只看不动时间）
+
+**全局按键**：
+
+- `↑` `↓` 导航
+- `Enter` 选择 / 进入
+- `Esc` 返回上一层
+- `Ctrl+S` 打开存档管理浮层（列表 / 新建 / 加载 / 删除 / 导出）
+- `q` 退出（带确认）
+
+**新游戏向导**（无存档启动时自动触发）：保存路径 → 球队 → 模式 → 赛季 → 种子 → 确认。
 
 **约束**：
 
 - 终端宽度 < 80 列时显示「请放大窗口」占位
-- TUI 完全只读。所有写操作（交易、签人、训练、模拟）都回 REPL / CLI。
+- TUI 现已可玩。但范围只覆盖 7 个菜单项；菜单外的 CLI 功能（compare / records / hof / coach 等）仍要回 CLI 用。
+- `--legacy` 旗保留 M19 旧 5-tab 只读版（v3.0 polish 才会移除）
 
 ## 命令清单（CLI / REPL 通用）
 

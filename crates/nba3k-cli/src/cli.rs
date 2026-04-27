@@ -287,8 +287,16 @@ pub enum Command {
     },
     /// Developer / calibration tooling.
     Dev(DevArgs),
-    /// (M19) Launch read-only TUI dashboard.
-    Tui,
+    /// (M20) Launch the GM-mode TUI shell. Default path is the 7-menu shell;
+    /// `--legacy` falls back to the M19 5-tab read-only dashboard.
+    Tui {
+        /// Use the high-contrast TV palette + extra padding.
+        #[arg(long)]
+        tv: bool,
+        /// Open the legacy M19 5-tab dashboard instead of the M20 shell.
+        #[arg(long)]
+        legacy: bool,
+    },
 }
 
 #[derive(Parser, Debug, Clone)]
