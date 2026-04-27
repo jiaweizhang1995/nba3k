@@ -21,9 +21,8 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::Style,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Clear, Paragraph},
     Frame, Terminal,
 };
 use std::io;
@@ -693,7 +692,7 @@ fn draw_quit_modal(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let rect = Rect { x, y, width: w, height: h };
     // Wipe background under the modal.
-    f.render_widget(Paragraph::new("").style(Style::default()), rect);
+    f.render_widget(Clear, rect);
     tui.quit_confirm.render(f, rect, &tui.theme);
 }
 

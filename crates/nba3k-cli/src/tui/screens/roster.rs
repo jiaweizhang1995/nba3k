@@ -28,7 +28,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table},
+    widgets::{Cell, Clear, Paragraph, Row, Table},
     Frame,
 };
 use std::cell::RefCell;
@@ -220,8 +220,9 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
     let need_modal = CACHE.with(|c| !matches!(c.borrow().modal, Modal::None));
     if need_modal {
         let rect = modal_rect(area);
-        // Wipe under the modal.
-        f.render_widget(Paragraph::new(""), rect);
+        // Wipe under the modal so the underlying roster table doesn't bleed
+        // through (Paragraph::new("") doesn't actually clear cells).
+        f.render_widget(Clear, rect);
         draw_modal(f, rect, theme, app);
     }
 }

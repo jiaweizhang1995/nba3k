@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table},
+    widgets::{Cell, Clear, Paragraph, Row, Table},
     Frame,
 };
 use std::cell::RefCell;
@@ -96,7 +96,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, _tui
     });
     if let Some(rect) = modal_rect {
         // Wipe background under the modal so the table doesn't bleed through.
-        f.render_widget(Paragraph::new(""), rect);
+        f.render_widget(Clear, rect);
         STATE.with(|s| {
             let st = s.borrow();
             match &st.modal {
