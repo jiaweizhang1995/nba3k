@@ -113,9 +113,9 @@ nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 | 1 | Home | M20 完工 | 仪表盘：老板任务 + 今日比赛 + GM 收件箱（球员不满 / 报价 / 收藏）+ 最近联盟新闻 |
 | 2 | Roster | M21 完工 | 阵容管理：My Roster / Free Agents 两 tab；排序 `o/p/a/s`（OVR/位置/年龄/薪资）；行动作 `t` 训练 / `e` 续约 / `x` 裁员 / `R` 改角色；`Enter` 看详情（数据/生涯/合同/化学反应 4 块）；FA tab `s` 签人 |
 | 3 | Rotation | M21 完工 | 首发 5 人位置指派（Level A）：5 槽 PG/SG/SF/PF/C；`Enter` 选人（按相邻位置过滤，OVR 降序）；`c` 清单槽 / `C` 清空；自动覆盖 sim 引擎，bench + 分钟仍自动 |
-| 4 | Trades | M22 上线 | 交易构建器 + 收件箱 + 反报价 + 传闻 |
-| 5 | Draft | M22 上线 | 选秀板 + 球探 + 选人 |
-| 6 | Finance | M22 上线 | 薪资 / 奢侈税 / 阿屁绒 / 合约 |
+| 4 | Trades | M22 完工 | 4 tab：Inbox / My Proposals / Builder / Rumors；`a/r/c` 接受 / 拒绝 / 反报价；Builder 支持 2 队球员交易提案 |
+| 5 | Draft | M22 完工 | 选秀板 / 顺位两 tab；球探雾 `???`；`s` 球探 / `Enter` 选人 / `A` 自动选秀（仅选秀期可执行） |
+| 6 | Finance | M22 完工 | 薪资、奢侈税、第一/第二 apron、最低工资线、合同表；排序 `t/y/n`；`e` 续约 |
 | 7 | Calendar | M20 完工 | 7×6 月历 + 6 子页（赛程/排名/季后赛/奖项/全明星/Cup）|
 
 **Calendar 子页按键**：
@@ -134,6 +134,7 @@ nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 - `Enter` 选择 / 进入
 - `Esc` 返回上一层
 - `Ctrl+S` 打开存档管理浮层（列表 / 新建 / 加载 / 删除 / 导出）
+- `?` 打开当前页面按键帮助浮层
 - `q` 退出（带确认）
 
 **新游戏向导**（无存档启动时自动触发）：保存路径 → 球队 → 模式 → 赛季 → 种子 → 确认。

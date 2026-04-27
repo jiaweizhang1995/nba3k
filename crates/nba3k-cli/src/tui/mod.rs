@@ -9,8 +9,8 @@
 
 #![allow(dead_code)]
 
-pub mod widgets;
 pub mod screens;
+pub mod widgets;
 
 use anyhow::Result;
 use crossterm::{
@@ -173,6 +173,9 @@ pub struct TuiApp {
     /// left-aligned in the action bar.
     pub last_msg: Option<String>,
 
+    /// Global context help overlay, toggled by `?`.
+    pub help_open: bool,
+
     /// Confirm widget shown when QuitConfirm is current.
     quit_confirm: Confirm,
 }
@@ -194,6 +197,7 @@ impl TuiApp {
             season_state: empty_season_state(),
             payroll: None,
             last_msg: None,
+            help_open: false,
             quit_confirm: Confirm::new("Quit nba3k?"),
         };
         app.set_save_ctx(save_ctx);
@@ -340,7 +344,9 @@ fn event_loop<B: ratatui::backend::Backend>(
         ensure_shell_cache(app, tui)?;
         terminal.draw(|f| draw(f, app, tui))?;
 
-        let Event::Key(k) = event::read()? else { continue };
+        let Event::Key(k) = event::read()? else {
+            continue;
+        };
         if k.kind == KeyEventKind::Release {
             continue;
         }
@@ -355,6 +361,16 @@ fn event_loop<B: ratatui::backend::Backend>(
 
 /// Returns Ok(true) when the shell should exit.
 fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
+    if tui.help_open {
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+                tui.help_open = false;
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
     // QuitConfirm modal swallows everything until resolved.
     if tui.current == Screen::QuitConfirm {
         match tui.quit_confirm.handle_key(k) {
@@ -364,6 +380,11 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
             }
             _ => {}
         }
+        return Ok(false);
+    }
+
+    if matches!(k.code, KeyCode::Char('?')) {
+        tui.help_open = true;
         return Ok(false);
     }
 
@@ -383,7 +404,9 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         Screen::NewGame => inner_screen_key(app, tui, k, screens::new_game::handle_key),
         Screen::Roster => inner_screen_key(app, tui, k, screens::roster::handle_key),
         Screen::Rotation => inner_screen_key(app, tui, k, screens::rotation::handle_key),
-        Screen::Trades | Screen::Draft | Screen::Finance => stub_key(tui, k),
+        Screen::Trades => inner_screen_key(app, tui, k, screens::trades::handle_key),
+        Screen::Draft => inner_screen_key(app, tui, k, screens::draft::handle_key),
+        Screen::Finance => inner_screen_key(app, tui, k, screens::finance::handle_key),
         Screen::QuitConfirm => Ok(false), // unreachable
     }
 }
@@ -522,6 +545,9 @@ fn draw(f: &mut Frame, app: &mut AppState, tui: &TuiApp) {
     if tui.current == Screen::QuitConfirm {
         draw_quit_modal(f, area, tui);
     }
+    if tui.help_open {
+        draw_help_modal(f, area, tui);
+    }
 }
 
 fn draw_sidebar(f: &mut Frame, area: Rect, tui: &TuiApp) {
@@ -584,10 +610,7 @@ fn draw_sidebar_empty(f: &mut Frame, banner_area: Rect, menu_area: Rect, tui: &T
     let lines = vec![
         Line::from(Span::styled("NEW GAME", tui.theme.accent_style())),
         Line::from(""),
-        Line::from(Span::styled(
-            "Run the wizard to",
-            tui.theme.text(),
-        )),
+        Line::from(Span::styled("Run the wizard to", tui.theme.text())),
         Line::from(Span::styled("create or load", tui.theme.text())),
         Line::from(Span::styled("a save.", tui.theme.text())),
     ];
@@ -604,9 +627,9 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
         Screen::NewGame => screens::new_game::render(f, area, &tui.theme, app, tui),
         Screen::Roster => screens::roster::render(f, area, &tui.theme, app, tui),
         Screen::Rotation => screens::rotation::render(f, area, &tui.theme, app, tui),
-        Screen::Trades => screens::render_stub(f, area, &tui.theme, "Trades", "M22"),
-        Screen::Draft => screens::render_stub(f, area, &tui.theme, "Draft", "M22"),
-        Screen::Finance => screens::render_stub(f, area, &tui.theme, "Finance", "M22"),
+        Screen::Trades => screens::trades::render(f, area, &tui.theme, app, tui),
+        Screen::Draft => screens::draft::render(f, area, &tui.theme, app, tui),
+        Screen::Finance => screens::finance::render(f, area, &tui.theme, app, tui),
         Screen::QuitConfirm => {
             // Body still shows the menu preview; the modal is drawn by `draw`.
             draw_menu_preview(f, area, tui);
@@ -617,19 +640,15 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
 fn draw_menu_preview(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let item = MenuItem::ALL[tui.menu_selected];
     let blurb: &str = match item {
-        MenuItem::Home => {
-            "Owner mandate · next-game banner · recent results · GM inbox.\nWave-1 worker B fills this."
-        }
+        MenuItem::Home => "Owner mandate · next-game banner · recent results · GM inbox.",
         MenuItem::Roster => {
-            "Player table with stats, traits, contract, role tags. Coming in M21."
+            "Roster table, player details, training, extensions, cuts, roles, and free agents."
         }
-        MenuItem::Rotation => "Lineup builder + minutes distribution. Coming in M21.",
-        MenuItem::Trades => "Inbox + offer detail + analysis sidebar. Coming in M22.",
-        MenuItem::Draft => "Big board + workouts + pick clock. Coming in M22.",
-        MenuItem::Finance => "Cap sheet + apron lines + tax projections. Coming in M22.",
-        MenuItem::Calendar => {
-            "Month grid + sim controls (day/week/month/sim-to-event).\nWave-1 worker C fills this."
-        }
+        MenuItem::Rotation => "Starting five assignment with auto bench and minutes.",
+        MenuItem::Trades => "Incoming offers, proposal chains, trade builder, and rumors.",
+        MenuItem::Draft => "Prospect board, scouting, draft order, and pick controls.",
+        MenuItem::Finance => "Payroll, cap/tax/apron lines, contracts, and extensions.",
+        MenuItem::Calendar => "Month grid + sim controls (day/week/month/sim-to-event).",
     };
     let title = format!(" {} ", item.label());
     let lines = vec![
@@ -652,7 +671,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
     if !tui.has_save() && tui.current != Screen::QuitConfirm {
         let hints: &[(&str, &str)] = match tui.current {
             Screen::Saves => &[("↑↓", "Navigate"), ("l", "Load"), ("Esc", "Back")],
-            _ => &[("Ctrl+S", "Load Save"), ("Esc", "Quit")],
+            _ => &[("Ctrl+S", "Load Save"), ("?", "Help"), ("Esc", "Quit")],
         };
         let bar = match tui.last_msg.as_deref() {
             Some(s) => ActionBar::new(hints).with_status(s),
@@ -667,6 +686,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
             ("↑↓", "Navigate"),
             ("Enter", "Open"),
             ("Ctrl+S", "Saves"),
+            ("?", "Help"),
             ("q", "Quit"),
         ],
         Screen::QuitConfirm => &[("Y", "Yes"), ("N/Esc", "No")],
@@ -676,9 +696,45 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
             ("M", "Month"),
             ("Enter", "Sim to Event"),
             ("A", "Season Advance"),
+            ("?", "Help"),
             ("Esc", "Back"),
         ],
-        _ => &[("Esc", "Back"), ("Ctrl+S", "Saves")],
+        Screen::Roster => &[
+            ("Tab", "Roster/FA"),
+            ("Enter", "Detail"),
+            ("t/e/x/R", "Actions"),
+            ("?", "Help"),
+            ("Esc", "Back"),
+        ],
+        Screen::Rotation => &[
+            ("Enter", "Pick"),
+            ("c/C", "Clear"),
+            ("?", "Help"),
+            ("Esc", "Back"),
+        ],
+        Screen::Trades => &[
+            ("Tab", "Tabs"),
+            ("Enter", "Detail/Submit"),
+            ("a/r/c", "Respond"),
+            ("?", "Help"),
+            ("Esc", "Back"),
+        ],
+        Screen::Draft => &[
+            ("Tab", "Board/Order"),
+            ("s", "Scout"),
+            ("Enter", "Pick"),
+            ("A", "Auto"),
+            ("?", "Help"),
+            ("Esc", "Back"),
+        ],
+        Screen::Finance => &[
+            ("↑↓", "Navigate"),
+            ("t/y/n", "Sort"),
+            ("e", "Extend"),
+            ("?", "Help"),
+            ("Esc", "Back"),
+        ],
+        _ => &[("Esc", "Back"), ("Ctrl+S", "Saves"), ("?", "Help")],
     };
 
     let bar = match tui.last_msg.as_deref() {
@@ -694,10 +750,127 @@ fn draw_quit_modal(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let h = 7.min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let rect = Rect { x, y, width: w, height: h };
+    let rect = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
     // Wipe background under the modal.
     f.render_widget(Clear, rect);
     tui.quit_confirm.render(f, rect, &tui.theme);
+}
+
+fn draw_help_modal(f: &mut Frame, area: Rect, tui: &TuiApp) {
+    let w = 68.min(area.width.saturating_sub(4));
+    let h = 20.min(area.height.saturating_sub(4));
+    let rect = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!("{} keys", screen_label(tui.current)),
+        tui.theme.accent_style(),
+    )));
+    lines.push(Line::from(""));
+    for (key, label) in help_key_rows(tui.current) {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", key), tui.theme.accent_style()),
+            Span::styled(*label, tui.theme.text()),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Esc, q, or ? closes help.",
+        tui.theme.muted_style(),
+    )));
+
+    let p = Paragraph::new(lines).block(tui.theme.block(" Help "));
+    f.render_widget(p, rect);
+}
+
+fn screen_label(screen: Screen) -> &'static str {
+    match screen {
+        Screen::Menu => "Menu",
+        Screen::Home => "Home",
+        Screen::Roster => "Roster",
+        Screen::Rotation => "Rotation",
+        Screen::Trades => "Trades",
+        Screen::Draft => "Draft",
+        Screen::Finance => "Finance",
+        Screen::Calendar => "Calendar",
+        Screen::Saves => "Saves",
+        Screen::NewGame => "New Game",
+        Screen::QuitConfirm => "Quit",
+    }
+}
+
+fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
+    match screen {
+        Screen::Menu => &[
+            ("↑ / ↓", "Move through the 7 menu items"),
+            ("1 - 7", "Jump directly to a menu item"),
+            ("Enter", "Open selected screen"),
+            ("Ctrl+S", "Open save manager"),
+            ("q / Esc", "Quit"),
+        ],
+        Screen::Home => &[("Esc", "Back to menu"), ("Ctrl+S", "Open save manager")],
+        Screen::Roster => &[
+            ("Tab / 1 / 2", "Switch My Roster and Free Agents"),
+            ("↑ / ↓", "Move selected row"),
+            ("o / p / a / s", "Sort roster"),
+            ("Enter", "Open player detail"),
+            ("t / e / x / R", "Train, extend, cut, or set role"),
+        ],
+        Screen::Rotation => &[
+            ("↑ / ↓", "Move starter slot"),
+            ("Enter", "Pick player for selected slot"),
+            ("c", "Clear selected slot"),
+            ("C", "Clear all starters"),
+        ],
+        Screen::Trades => &[
+            ("Tab / 1-4", "Switch Inbox, Proposals, Builder, Rumors"),
+            ("↑ / ↓", "Move selected row"),
+            ("Enter", "Open detail or submit builder"),
+            ("a / r / c", "Accept, reject, or counter an open offer"),
+            ("Space", "Toggle selected player in builder"),
+        ],
+        Screen::Draft => &[
+            ("Tab / 1 / 2", "Switch Board and Order"),
+            ("↑ / ↓", "Move selected row"),
+            ("s", "Scout selected prospect"),
+            ("Enter", "Pick selected prospect when active"),
+            ("A", "Auto-pick draft"),
+        ],
+        Screen::Finance => &[
+            ("↑ / ↓", "Move selected contract"),
+            ("t / y / n", "Sort by total, years, or name"),
+            ("e", "Offer extension"),
+        ],
+        Screen::Calendar => &[
+            ("Space", "Sim one day"),
+            ("W / M", "Sim one week or one month"),
+            ("Enter", "Sim to highlighted event"),
+            ("A", "Advance season"),
+            ("Tab", "Switch Calendar sub-page"),
+        ],
+        Screen::Saves => &[
+            ("↑ / ↓", "Move selected save"),
+            ("l / n / d / e", "Load, new, delete, or export"),
+            ("Esc", "Back"),
+        ],
+        Screen::NewGame => &[
+            ("↑ / ↓", "Move selection"),
+            ("Enter", "Continue or confirm"),
+            ("Esc", "Quit when no save is loaded"),
+        ],
+        Screen::QuitConfirm => &[("Y", "Quit"), ("N / Esc", "Cancel")],
+    }
 }
 
 // ---------------------------------------------------------------------------
