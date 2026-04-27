@@ -704,8 +704,7 @@ fn inset(r: Rect) -> Rect {
 // Helper renderers reused by screens
 // ---------------------------------------------------------------------------
 
-/// Helper to centered-render a stub message inside a bordered block. Used by
-/// `tui::screens::stub` and ad-hoc placeholders.
+/// Helper to centered-render a short message inside a bordered block.
 pub fn centered_block(
     f: &mut Frame,
     area: Rect,

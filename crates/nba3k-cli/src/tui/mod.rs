@@ -213,6 +213,7 @@ impl TuiApp {
     /// Replace `save_ctx` and re-mirror its fields onto self. Internal helper
     /// used by `new`, `refresh_save_ctx`, and `switch_save`.
     fn set_save_ctx(&mut self, ctx: Option<SaveCtx>) {
+        self.help_open = false;
         match ctx {
             Some(c) => {
                 self.user_team = c.user_team;
@@ -251,6 +252,7 @@ impl TuiApp {
     /// Open a different save file and refresh `save_ctx`. Used by the Saves
     /// overlay when the user picks "Load" on a different file.
     pub fn switch_save(&mut self, app: &mut AppState, new_path: PathBuf) -> Result<()> {
+        self.help_open = false;
         app.open_path(new_path)?;
         self.refresh_save_ctx(app)
     }
@@ -383,15 +385,11 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         return Ok(false);
     }
 
-    if matches!(k.code, KeyCode::Char('?')) {
-        tui.help_open = true;
-        return Ok(false);
-    }
-
     // Global shortcut: Ctrl+S = saves overlay. Works even with no save loaded
     // so the user can pick an existing save from the wizard. Saves overlay's
     // own logic handles the no-save case (Esc bounces to NewGame).
     if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('s')) {
+        tui.help_open = false;
         tui.current = Screen::Saves;
         return Ok(false);
     }
@@ -424,7 +422,10 @@ where
     F: FnOnce(&mut AppState, &mut TuiApp, KeyEvent) -> Result<bool>,
 {
     let consumed = handler(app, tui, k)?;
-    if !consumed && matches!(k.code, KeyCode::Esc) {
+    if !consumed && matches!(k.code, KeyCode::Char('?')) {
+        tui.help_open = true;
+    } else if !consumed && matches!(k.code, KeyCode::Esc) {
+        tui.help_open = false;
         if tui.has_save() {
             tui.current = Screen::Menu;
         } else if matches!(tui.current, Screen::Saves) {
@@ -440,13 +441,6 @@ where
     Ok(false)
 }
 
-fn stub_key(tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
-    if matches!(k.code, KeyCode::Esc) {
-        tui.current = Screen::Menu;
-    }
-    Ok(false)
-}
-
 fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
     // No save loaded: only quit / open wizard are valid from the (empty) menu.
     // The shell forces `Screen::NewGame` on entry, so this branch is mostly
@@ -454,11 +448,16 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
     // save, nav keys are no-ops.
     if !tui.has_save() {
         match k.code {
+            KeyCode::Char('?') => {
+                tui.help_open = true;
+            }
             KeyCode::Char('q') | KeyCode::Esc => {
+                tui.help_open = false;
                 tui.current = Screen::QuitConfirm;
                 tui.quit_confirm = Confirm::new("Quit nba3k?");
             }
             KeyCode::Enter => {
+                tui.help_open = false;
                 tui.current = Screen::NewGame;
             }
             _ => {}
@@ -467,7 +466,11 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
     }
 
     match k.code {
+        KeyCode::Char('?') => {
+            tui.help_open = true;
+        }
         KeyCode::Char('q') | KeyCode::Esc => {
+            tui.help_open = false;
             tui.current = Screen::QuitConfirm;
             tui.quit_confirm = Confirm::new("Quit nba3k?");
         }
@@ -484,11 +487,13 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
         KeyCode::Char(c @ '1'..='7') => {
             let idx = (c as u8 - b'1') as usize;
             if idx < MenuItem::ALL.len() {
+                tui.help_open = false;
                 tui.menu_selected = idx;
                 tui.current = MenuItem::ALL[idx].screen();
             }
         }
         KeyCode::Enter => {
+            tui.help_open = false;
             tui.current = MenuItem::ALL[tui.menu_selected].screen();
         }
         _ => {}
@@ -870,6 +875,24 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("Esc", "Quit when no save is loaded"),
         ],
         Screen::QuitConfirm => &[("Y", "Quit"), ("N / Esc", "Cancel")],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_key_opens_only_after_screen_declines_it() {
+        let key = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
+        let mut app = AppState::new(None, false);
+        let mut tui = TuiApp::new(Theme::DEFAULT, None);
+
+        inner_screen_key(&mut app, &mut tui, key, |_app, _tui, _key| Ok(true)).unwrap();
+        assert!(!tui.help_open);
+
+        inner_screen_key(&mut app, &mut tui, key, |_app, _tui, _key| Ok(false)).unwrap();
+        assert!(tui.help_open);
     }
 }
 

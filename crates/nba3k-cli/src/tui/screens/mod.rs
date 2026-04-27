@@ -9,5 +9,4 @@ pub mod new_game;
 pub mod roster;
 pub mod rotation;
 pub mod saves;
-pub mod stub;
 pub mod trades;

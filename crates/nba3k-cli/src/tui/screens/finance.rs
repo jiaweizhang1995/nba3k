@@ -614,16 +614,8 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             });
             Ok(true)
         }
-        KeyCode::Char('t') => {
-            set_sort(SortKey::Total);
-            Ok(true)
-        }
-        KeyCode::Char('y') => {
-            set_sort(SortKey::Years);
-            Ok(true)
-        }
-        KeyCode::Char('n') => {
-            set_sort(SortKey::Name);
+        KeyCode::Char(c) if sort_key_from_char(c).is_some() => {
+            set_sort(sort_key_from_char(c).expect("guarded by is_some"));
             Ok(true)
         }
         KeyCode::Char('e') => {
@@ -785,6 +777,15 @@ fn set_sort(sort: SortKey) {
     });
 }
 
+fn sort_key_from_char(c: char) -> Option<SortKey> {
+    match c {
+        't' => Some(SortKey::Total),
+        'y' => Some(SortKey::Years),
+        'n' => Some(SortKey::Name),
+        _ => None,
+    }
+}
+
 fn sort_label(sort: SortKey) -> &'static str {
     match sort {
         SortKey::Total => "Total dollars",
@@ -813,4 +814,18 @@ fn year_label(current: SeasonId, year: SeasonId) -> String {
 
 fn clean_name(name: &str) -> String {
     name.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sort_key_from_char_maps_footer_shortcuts() {
+        assert_eq!(sort_key_from_char('t'), Some(SortKey::Total));
+        assert_eq!(sort_key_from_char('y'), Some(SortKey::Years));
+        assert_eq!(sort_key_from_char('n'), Some(SortKey::Name));
+        assert_eq!(sort_key_from_char('x'), None);
+        assert_eq!(sort_key_from_char('T'), None);
+    }
 }

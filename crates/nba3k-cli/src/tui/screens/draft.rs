@@ -794,3 +794,21 @@ enum MutationKind {
     Scout,
     Draft,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nba3k_core::SeasonPhase;
+
+    #[test]
+    fn draft_actions_are_gated_to_playoffs_and_offseason() {
+        assert!(draft_active(SeasonPhase::Playoffs));
+        assert!(draft_active(SeasonPhase::OffSeason));
+
+        assert!(!draft_active(SeasonPhase::PreSeason));
+        assert!(!draft_active(SeasonPhase::Regular));
+        assert!(!draft_active(SeasonPhase::TradeDeadlinePassed));
+        assert!(!draft_active(SeasonPhase::Draft));
+        assert!(!draft_active(SeasonPhase::FreeAgency));
+    }
+}

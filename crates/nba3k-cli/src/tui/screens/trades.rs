@@ -3,7 +3,7 @@
 //! Four sub-tabs:
 //! - Inbox: AI offers targeting the user's team.
 //! - My Proposals: user-involved negotiation chains.
-//! - Builder: simple 2-team player-for-player proposal flow.
+//! - Builder: 2-team or 3-team player-for-player proposal flow.
 //! - Rumors: read-only market interest table.
 //!
 //! All mutations route through `commands::dispatch` behind `with_silenced_io`
@@ -52,6 +52,20 @@ enum BuilderPanel {
     Outgoing,
     Incoming,
     Submit,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BuilderMode {
+    #[default]
+    TwoTeam,
+    ThreeTeam,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum IncomingSlot {
+    #[default]
+    First,
+    Second,
 }
 
 #[derive(Clone, Debug)]
@@ -114,7 +128,9 @@ struct TradesCache {
     teams: Option<Vec<TeamOption>>,
     user_roster: Option<Vec<PlayerOption>>,
     target_roster: Option<Vec<PlayerOption>>,
+    third_roster: Option<Vec<PlayerOption>>,
     target_team: Option<TeamId>,
+    third_team: Option<TeamId>,
 
     tab: SubTab,
     inbox_cursor: usize,
@@ -122,11 +138,14 @@ struct TradesCache {
     rumor_cursor: usize,
 
     builder_panel: BuilderPanel,
+    builder_mode: BuilderMode,
+    incoming_slot: IncomingSlot,
     team_cursor: usize,
     out_cursor: usize,
     in_cursor: usize,
     selected_out: HashSet<PlayerId>,
     selected_in: HashSet<PlayerId>,
+    selected_third: HashSet<PlayerId>,
     modal: Modal,
 }
 
@@ -159,6 +178,7 @@ pub fn invalidate() {
         c.teams = None;
         c.user_roster = None;
         c.target_roster = None;
+        c.third_roster = None;
     });
 }
 
@@ -362,6 +382,7 @@ fn draw_builder(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
             .split(parts[0]);
 
         draw_team_picker(f, cols[0], theme, &cache);
+        let (incoming_title, incoming_rows, incoming_selected) = incoming_view(&cache);
         draw_player_picker(
             f,
             cols[1],
@@ -376,10 +397,10 @@ fn draw_builder(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
             f,
             cols[2],
             theme,
-            " You Receive ",
-            cache.target_roster.as_deref().unwrap_or(&[]),
+            &incoming_title,
+            incoming_rows,
             cache.in_cursor,
-            &cache.selected_in,
+            incoming_selected,
             cache.builder_panel == BuilderPanel::Incoming,
         );
         draw_builder_submit(f, cols[3], theme, &cache, tui);
@@ -388,6 +409,8 @@ fn draw_builder(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
             ("<- ->", "Panel"),
             ("Up/Down", "Move"),
             ("Space", "Toggle"),
+            ("m", "2/3-team"),
+            ("i", "In team"),
             ("Enter", "Select/Submit"),
             ("p", "Propose"),
             ("Tab", "Tabs"),
@@ -400,24 +423,37 @@ fn draw_team_picker(f: &mut Frame, area: Rect, theme: &Theme, cache: &TradesCach
     let teams = cache.teams.as_deref().unwrap_or(&[]);
     let cursor = cache.team_cursor.min(teams.len().saturating_sub(1));
     let title = if cache.builder_panel == BuilderPanel::Team {
-        " Team > "
+        match cache.builder_mode {
+            BuilderMode::TwoTeam => " Team > ",
+            BuilderMode::ThreeTeam => " Teams > ",
+        }
     } else {
-        " Team "
+        match cache.builder_mode {
+            BuilderMode::TwoTeam => " Team ",
+            BuilderMode::ThreeTeam => " Teams ",
+        }
     };
     let lines: Vec<Line> = teams
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let active = cache.target_team == Some(t.id);
+            let first = cache.target_team == Some(t.id);
+            let second = cache.third_team == Some(t.id);
             let focus = i == cursor && cache.builder_panel == BuilderPanel::Team;
             let style = if focus {
                 theme.highlight()
-            } else if active {
+            } else if first || second {
                 theme.accent_style()
             } else {
                 theme.text()
             };
-            let mark = if active { "*" } else { " " };
+            let mark = if first {
+                "1"
+            } else if second {
+                "2"
+            } else {
+                " "
+            };
             Line::from(Span::styled(
                 format!("{} {:<4} {}", mark, t.abbrev, shorten(&t.name, 18)),
                 style,
@@ -425,6 +461,22 @@ fn draw_team_picker(f: &mut Frame, area: Rect, theme: &Theme, cache: &TradesCach
         })
         .collect();
     f.render_widget(Paragraph::new(lines).block(theme.block(title)), area);
+}
+
+fn incoming_view(cache: &TradesCache) -> (String, &[PlayerOption], &HashSet<PlayerId>) {
+    if cache.builder_mode == BuilderMode::ThreeTeam && cache.incoming_slot == IncomingSlot::Second {
+        (
+            " T2 Sends ".to_string(),
+            cache.third_roster.as_deref().unwrap_or(&[]),
+            &cache.selected_third,
+        )
+    } else {
+        (
+            " T1 Sends ".to_string(),
+            cache.target_roster.as_deref().unwrap_or(&[]),
+            &cache.selected_in,
+        )
+    }
 }
 
 fn draw_player_picker(
@@ -504,30 +556,67 @@ fn draw_builder_submit(
         .find(|t| Some(t.id) == cache.target_team)
         .map(|t| t.abbrev.clone())
         .unwrap_or_else(|| "???".into());
-    let ready = !cache.selected_out.is_empty() && !cache.selected_in.is_empty();
+    let third = cache
+        .teams
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .find(|t| Some(t.id) == cache.third_team)
+        .map(|t| t.abbrev.clone())
+        .unwrap_or_else(|| "???".into());
+    let mode_label = match cache.builder_mode {
+        BuilderMode::TwoTeam => "2-team trade",
+        BuilderMode::ThreeTeam => "3-team trade",
+    };
+    let ready = match cache.builder_mode {
+        BuilderMode::TwoTeam => !cache.selected_out.is_empty() && !cache.selected_in.is_empty(),
+        BuilderMode::ThreeTeam => {
+            cache.third_team.is_some()
+                && !cache.selected_out.is_empty()
+                && !cache.selected_in.is_empty()
+                && !cache.selected_third.is_empty()
+        }
+    };
     let status = if ready { "Ready" } else { "Pick both sides" };
-    let lines = vec![
-        Line::from(Span::styled("2-team trade", theme.accent_style())),
+    let mut lines = vec![
+        Line::from(Span::styled(mode_label, theme.accent_style())),
         Line::from(""),
         Line::from(Span::styled(
             format!("From: {}", tui.user_abbrev),
             theme.text(),
         )),
-        Line::from(Span::styled(format!("To:   {}", target), theme.text())),
+        Line::from(Span::styled(format!("T1:   {}", target), theme.text())),
+    ];
+    if cache.builder_mode == BuilderMode::ThreeTeam {
+        lines.push(Line::from(Span::styled(
+            format!("T2:   {}", third),
+            theme.text(),
+        )));
+    }
+    lines.extend([
         Line::from(""),
         Line::from(Span::styled(
             format!("Send: {}", cache.selected_out.len()),
             theme.text(),
         )),
         Line::from(Span::styled(
-            format!("Get:  {}", cache.selected_in.len()),
+            format!("T1:   {}", cache.selected_in.len()),
             theme.text(),
         )),
+    ]);
+    if cache.builder_mode == BuilderMode::ThreeTeam {
+        lines.push(Line::from(Span::styled(
+            format!("T2:   {}", cache.selected_third.len()),
+            theme.text(),
+        )));
+    }
+    lines.extend([
         Line::from(""),
         Line::from(Span::styled(status.to_string(), panel_style)),
         Line::from(""),
-        Line::from(Span::styled("3-team: disabled", theme.muted_style())),
-    ];
+        Line::from(Span::styled("m toggles 2/3-team", theme.muted_style())),
+        Line::from(Span::styled("i swaps incoming team", theme.muted_style())),
+    ]);
     f.render_widget(
         Paragraph::new(lines)
             .block(theme.block(" Submit "))
@@ -725,6 +814,14 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
             CACHE.with(|c| c.borrow_mut().target_roster = Some(roster));
         }
     }
+
+    if CACHE.with(|c| c.borrow().third_roster.is_none()) {
+        let third = CACHE.with(|c| c.borrow().third_team);
+        if let Some(team) = third {
+            let roster = build_roster_options(app, team, tui.season)?;
+            CACHE.with(|c| c.borrow_mut().third_roster = Some(roster));
+        }
+    }
     Ok(())
 }
 
@@ -759,6 +856,16 @@ fn build_inbox_rows(
         ));
         if !evaluation.commentary.trim().is_empty() {
             detail_lines.push(format!("Commentary: {}", evaluation.commentary));
+        }
+        if let Verdict::Reject(reason) = &evaluation.verdict {
+            detail_lines.push(format!(
+                "Reject reason: {}",
+                reject_reason_to_string(reason)
+            ));
+        }
+        if let Verdict::Counter(counter) = &evaluation.verdict {
+            detail_lines.push("Suggested counter:".to_string());
+            detail_lines.extend(offer_detail_lines(store, counter)?);
         }
         rows.push(OfferRow {
             id,
@@ -832,8 +939,16 @@ fn build_chain_rows(
             _ => "unknown".into(),
         };
         let mut detail_lines = vec![format!("Status: {}", status), format!("Teams: {}", teams)];
+        if let NegotiationState::Rejected { reason, .. } = &st {
+            detail_lines.push(format!(
+                "Reject reason: {}",
+                reject_reason_to_string(reason)
+            ));
+        }
+        detail_lines.push("Counter chain:".to_string());
         detail_lines.push(String::new());
-        for offer in offers {
+        for (idx, offer) in offers.iter().enumerate() {
+            detail_lines.push(format!("Offer {} / round {}", idx + 1, offer.round));
             detail_lines.extend(offer_detail_lines(store, offer)?);
             detail_lines.push(String::new());
         }
@@ -1100,6 +1215,8 @@ fn handle_builder_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Re
         }
         KeyCode::Up => move_builder_cursor(-1),
         KeyCode::Down => move_builder_cursor(1),
+        KeyCode::Char('m') => toggle_builder_mode(),
+        KeyCode::Char('i') => cycle_incoming_slot(),
         KeyCode::Enter | KeyCode::Char(' ') => builder_activate(app, tui),
         KeyCode::Char('p') => submit_builder(app, tui),
         _ => Ok(false),
@@ -1156,10 +1273,48 @@ fn move_builder_cursor(delta: isize) -> Result<bool> {
                 cache.out_cursor = moved(cache.out_cursor, len, delta);
             }
             BuilderPanel::Incoming => {
-                let len = cache.target_roster.as_ref().map(|r| r.len()).unwrap_or(0);
+                let len = if cache.builder_mode == BuilderMode::ThreeTeam
+                    && cache.incoming_slot == IncomingSlot::Second
+                {
+                    cache.third_roster.as_ref().map(|r| r.len()).unwrap_or(0)
+                } else {
+                    cache.target_roster.as_ref().map(|r| r.len()).unwrap_or(0)
+                };
                 cache.in_cursor = moved(cache.in_cursor, len, delta);
             }
             BuilderPanel::Submit => {}
+        }
+    });
+    Ok(true)
+}
+
+fn toggle_builder_mode() -> Result<bool> {
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        cache.builder_mode = match cache.builder_mode {
+            BuilderMode::TwoTeam => BuilderMode::ThreeTeam,
+            BuilderMode::ThreeTeam => BuilderMode::TwoTeam,
+        };
+        cache.incoming_slot = IncomingSlot::First;
+        if cache.builder_mode == BuilderMode::TwoTeam {
+            cache.third_team = None;
+            cache.third_roster = None;
+            cache.selected_third.clear();
+        }
+        cache.in_cursor = 0;
+    });
+    Ok(true)
+}
+
+fn cycle_incoming_slot() -> Result<bool> {
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        if cache.builder_mode == BuilderMode::ThreeTeam {
+            cache.incoming_slot = match cache.incoming_slot {
+                IncomingSlot::First => IncomingSlot::Second,
+                IncomingSlot::Second => IncomingSlot::First,
+            };
+            cache.in_cursor = 0;
         }
     });
     Ok(true)
@@ -1178,24 +1333,43 @@ fn builder_activate(app: &mut AppState, tui: &mut TuiApp) -> Result<bool> {
                 rows.get(cache.out_cursor)
                     .map(|p| BuilderAction::ToggleOut(p.id))
             }),
-            BuilderPanel::Incoming => cache.target_roster.as_ref().and_then(|rows| {
-                rows.get(cache.in_cursor)
-                    .map(|p| BuilderAction::ToggleIn(p.id))
-            }),
+            BuilderPanel::Incoming => {
+                if cache.builder_mode == BuilderMode::ThreeTeam
+                    && cache.incoming_slot == IncomingSlot::Second
+                {
+                    cache.third_roster.as_ref().and_then(|rows| {
+                        rows.get(cache.in_cursor)
+                            .map(|p| BuilderAction::ToggleThird(p.id))
+                    })
+                } else {
+                    cache.target_roster.as_ref().and_then(|rows| {
+                        rows.get(cache.in_cursor)
+                            .map(|p| BuilderAction::ToggleIn(p.id))
+                    })
+                }
+            }
             BuilderPanel::Submit => Some(BuilderAction::Submit),
         }
     });
     match action {
         Some(BuilderAction::SetTeam(team)) => {
-            CACHE.with(|c| {
+            let assignment = CACHE.with(|c| {
                 let mut cache = c.borrow_mut();
-                cache.target_team = Some(team);
-                cache.target_roster = None;
-                cache.selected_in.clear();
+                let assignment = select_builder_team(&mut cache, team);
                 cache.in_cursor = 0;
+                assignment
             });
-            let roster = build_roster_options(app, team, tui.season)?;
-            CACHE.with(|c| c.borrow_mut().target_roster = Some(roster));
+            match assignment {
+                TeamAssignment::First(team) => {
+                    let roster = build_roster_options(app, team, tui.season)?;
+                    CACHE.with(|c| c.borrow_mut().target_roster = Some(roster));
+                }
+                TeamAssignment::Second(team) => {
+                    let roster = build_roster_options(app, team, tui.season)?;
+                    CACHE.with(|c| c.borrow_mut().third_roster = Some(roster));
+                }
+                TeamAssignment::None => {}
+            }
             Ok(true)
         }
         Some(BuilderAction::ToggleOut(pid)) => {
@@ -1204,6 +1378,10 @@ fn builder_activate(app: &mut AppState, tui: &mut TuiApp) -> Result<bool> {
         }
         Some(BuilderAction::ToggleIn(pid)) => {
             CACHE.with(|c| toggle(&mut c.borrow_mut().selected_in, pid));
+            Ok(true)
+        }
+        Some(BuilderAction::ToggleThird(pid)) => {
+            CACHE.with(|c| toggle(&mut c.borrow_mut().selected_third, pid));
             Ok(true)
         }
         Some(BuilderAction::Submit) => submit_builder(app, tui),
@@ -1215,47 +1393,178 @@ enum BuilderAction {
     SetTeam(TeamId),
     ToggleOut(PlayerId),
     ToggleIn(PlayerId),
+    ToggleThird(PlayerId),
     Submit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TeamAssignment {
+    First(TeamId),
+    Second(TeamId),
+    None,
+}
+
+fn select_builder_team(cache: &mut TradesCache, team: TeamId) -> TeamAssignment {
+    match cache.builder_mode {
+        BuilderMode::TwoTeam => {
+            cache.target_team = Some(team);
+            cache.target_roster = None;
+            cache.selected_in.clear();
+            TeamAssignment::First(team)
+        }
+        BuilderMode::ThreeTeam => {
+            if cache.target_team == Some(team) {
+                cache.target_team = None;
+                cache.target_roster = None;
+                cache.selected_in.clear();
+                if cache.incoming_slot == IncomingSlot::First {
+                    cache.incoming_slot = IncomingSlot::Second;
+                }
+                TeamAssignment::None
+            } else if cache.third_team == Some(team) {
+                cache.third_team = None;
+                cache.third_roster = None;
+                cache.selected_third.clear();
+                if cache.incoming_slot == IncomingSlot::Second {
+                    cache.incoming_slot = IncomingSlot::First;
+                }
+                TeamAssignment::None
+            } else if cache.target_team.is_none() {
+                cache.target_team = Some(team);
+                cache.target_roster = None;
+                cache.selected_in.clear();
+                cache.incoming_slot = IncomingSlot::First;
+                TeamAssignment::First(team)
+            } else {
+                cache.third_team = Some(team);
+                cache.third_roster = None;
+                cache.selected_third.clear();
+                cache.incoming_slot = IncomingSlot::Second;
+                TeamAssignment::Second(team)
+            }
+        }
+    }
 }
 
 fn submit_builder(app: &mut AppState, tui: &mut TuiApp) -> Result<bool> {
     let payload = CACHE.with(|c| {
         let cache = c.borrow();
-        let target = cache
+        let first = cache
             .teams
             .as_ref()
             .and_then(|teams| teams.iter().find(|t| Some(t.id) == cache.target_team))
+            .cloned();
+        let second = cache
+            .teams
+            .as_ref()
+            .and_then(|teams| teams.iter().find(|t| Some(t.id) == cache.third_team))
             .cloned();
         let send = selected_names(
             cache.user_roster.as_deref().unwrap_or(&[]),
             &cache.selected_out,
         );
-        let receive = selected_names(
+        let first_send = selected_names(
             cache.target_roster.as_deref().unwrap_or(&[]),
             &cache.selected_in,
         );
-        target.map(|t| (t, send, receive))
-    });
-    let Some((target, send, receive)) = payload else {
-        tui.last_msg = Some("pick a trade partner first".into());
-        return Ok(true);
-    };
-    if send.is_empty() || receive.is_empty() {
-        tui.last_msg = Some("pick at least one player from each side".into());
-        return Ok(true);
-    }
-    let cmd = Command::Trade(TradeArgs {
-        action: TradeAction::Propose {
-            from: tui.user_abbrev.clone(),
-            to: target.abbrev.clone(),
+        let second_send = selected_names(
+            cache.third_roster.as_deref().unwrap_or(&[]),
+            &cache.selected_third,
+        );
+        (
+            cache.builder_mode,
+            first,
+            second,
             send,
-            receive,
-            json: false,
-        },
+            first_send,
+            second_send,
+        )
     });
-    let res = with_silenced_io(|| dispatch(app, cmd));
-    after_trade_mutation(tui, res, &format!("proposed trade with {}", target.abbrev));
+
+    let (mode, first, second, send, first_send, second_send) = payload;
+    match mode {
+        BuilderMode::TwoTeam => {
+            let Some(target) = first else {
+                tui.last_msg = Some("pick a trade partner first".into());
+                return Ok(true);
+            };
+            if send.is_empty() || first_send.is_empty() {
+                tui.last_msg = Some("pick at least one player from each side".into());
+                return Ok(true);
+            }
+            let cmd = Command::Trade(TradeArgs {
+                action: TradeAction::Propose {
+                    from: tui.user_abbrev.clone(),
+                    to: target.abbrev.clone(),
+                    send,
+                    receive: first_send,
+                    json: false,
+                },
+            });
+            let res = with_silenced_io(|| dispatch(app, cmd));
+            after_trade_mutation(tui, res, &format!("proposed trade with {}", target.abbrev));
+        }
+        BuilderMode::ThreeTeam => {
+            let (Some(first), Some(second)) = (first, second) else {
+                tui.last_msg = Some("pick two trade partners for a 3-team proposal".into());
+                return Ok(true);
+            };
+            let legs = match build_propose3_legs(
+                &tui.user_abbrev,
+                &send,
+                &first.abbrev,
+                &first_send,
+                &second.abbrev,
+                &second_send,
+            ) {
+                Ok(legs) => legs,
+                Err(e) => {
+                    tui.last_msg = Some(e.to_string());
+                    return Ok(true);
+                }
+            };
+            let cmd = Command::Trade(TradeArgs {
+                action: TradeAction::Propose3 {
+                    leg: legs,
+                    json: false,
+                },
+            });
+            let res = with_silenced_io(|| dispatch(app, cmd));
+            after_trade_mutation(
+                tui,
+                res,
+                &format!(
+                    "proposed 3-team trade with {}/{}",
+                    first.abbrev, second.abbrev
+                ),
+            );
+        }
+    }
     Ok(true)
+}
+
+fn build_propose3_legs(
+    user_abbrev: &str,
+    user_sends: &[String],
+    first_abbrev: &str,
+    first_sends: &[String],
+    second_abbrev: &str,
+    second_sends: &[String],
+) -> Result<Vec<String>> {
+    if user_sends.is_empty() || first_sends.is_empty() || second_sends.is_empty() {
+        return Err(anyhow!("pick at least one player from each team"));
+    }
+    if user_abbrev.eq_ignore_ascii_case(first_abbrev)
+        || user_abbrev.eq_ignore_ascii_case(second_abbrev)
+        || first_abbrev.eq_ignore_ascii_case(second_abbrev)
+    {
+        return Err(anyhow!("3-team proposal needs three distinct teams"));
+    }
+    Ok(vec![
+        format!("{}:{}", user_abbrev, user_sends.join(",")),
+        format!("{}:{}", first_abbrev, first_sends.join(",")),
+        format!("{}:{}", second_abbrev, second_sends.join(",")),
+    ])
 }
 
 fn selected_names(rows: &[PlayerOption], selected: &HashSet<PlayerId>) -> Vec<String> {
@@ -1319,6 +1628,7 @@ fn after_trade_mutation(tui: &mut TuiApp, res: Result<()>, success_msg: &str) {
                 let mut cache = c.borrow_mut();
                 cache.selected_out.clear();
                 cache.selected_in.clear();
+                cache.selected_third.clear();
             });
         }
         Err(e) => tui.last_msg = Some(format!("trade error: {}", e)),
@@ -1473,7 +1783,7 @@ fn players_out(offer: &TradeOffer, team: TeamId) -> &[PlayerId] {
         .unwrap_or(&[])
 }
 
-fn offer_detail_lines(store: &mut nba3k_store::Store, offer: &TradeOffer) -> Result<Vec<String>> {
+fn offer_detail_lines(store: &nba3k_store::Store, offer: &TradeOffer) -> Result<Vec<String>> {
     let mut lines = vec![
         format!("Round: {}", offer.round),
         format!("Initiator: {}", team_abbrev(store, offer.initiator)?),
@@ -1487,7 +1797,7 @@ fn offer_detail_lines(store: &mut nba3k_store::Store, offer: &TradeOffer) -> Res
     Ok(lines)
 }
 
-fn teams_for_offer(store: &mut nba3k_store::Store, offer: &TradeOffer) -> Result<String> {
+fn teams_for_offer(store: &nba3k_store::Store, offer: &TradeOffer) -> Result<String> {
     offer
         .assets_by_team
         .keys()
@@ -1496,7 +1806,7 @@ fn teams_for_offer(store: &mut nba3k_store::Store, offer: &TradeOffer) -> Result
         .map(|v| v.join("/"))
 }
 
-fn render_players(store: &mut nba3k_store::Store, pids: &[PlayerId]) -> Result<String> {
+fn render_players(store: &nba3k_store::Store, pids: &[PlayerId]) -> Result<String> {
     if pids.is_empty() {
         return Ok("(nothing)".into());
     }
@@ -1512,7 +1822,7 @@ fn render_players(store: &mut nba3k_store::Store, pids: &[PlayerId]) -> Result<S
     Ok(names.join(", "))
 }
 
-fn team_abbrev(store: &mut nba3k_store::Store, team: TeamId) -> Result<String> {
+fn team_abbrev(store: &nba3k_store::Store, team: TeamId) -> Result<String> {
     Ok(store
         .team_abbrev(team)?
         .unwrap_or_else(|| format!("T{}", team.0)))
@@ -1559,4 +1869,54 @@ fn shorten(s: &str, max: usize) -> String {
     }
     let keep = max.saturating_sub(3);
     format!("{}...", s.chars().take(keep).collect::<String>())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_builds_three_team_propose_legs_in_trade_order() {
+        let legs = build_propose3_legs(
+            "BOS",
+            &["Jayson Tatum".to_string()],
+            "LAL",
+            &["LeBron James".to_string()],
+            "DAL",
+            &["Anthony Davis".to_string()],
+        )
+        .expect("valid 3-team legs");
+
+        assert_eq!(
+            legs,
+            vec![
+                "BOS:Jayson Tatum".to_string(),
+                "LAL:LeBron James".to_string(),
+                "DAL:Anthony Davis".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn builder_rejects_incomplete_or_duplicate_three_team_legs() {
+        let empty = build_propose3_legs(
+            "BOS",
+            &["Jayson Tatum".to_string()],
+            "LAL",
+            &[],
+            "DAL",
+            &["Anthony Davis".to_string()],
+        );
+        assert!(empty.is_err());
+
+        let duplicate = build_propose3_legs(
+            "BOS",
+            &["Jayson Tatum".to_string()],
+            "bos",
+            &["Jaylen Brown".to_string()],
+            "DAL",
+            &["Anthony Davis".to_string()],
+        );
+        assert!(duplicate.is_err());
+    }
 }
