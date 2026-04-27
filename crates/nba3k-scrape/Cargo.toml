@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 nba3k-core = { workspace = true }
+nba3k-models = { workspace = true }
 nba3k-store = { workspace = true }
 reqwest = { workspace = true }
 scraper = { workspace = true }

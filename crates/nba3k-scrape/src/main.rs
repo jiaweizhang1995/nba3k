@@ -111,15 +111,26 @@ fn run() -> Result<()> {
         eprintln!("overrides: loaded {} entries", overrides.len());
     }
 
-    // Stage 1: BBRef rosters per team (best-effort; fall back to a
-    // synthetic generator if the network/cache yields nothing).
+    // Stage 1: BBRef rosters per team. Pull stats from the PRIOR season
+    // (2024-25 for a 2025-26 game) — the in-progress year has incomplete
+    // games-played samples (Tatum's Achilles injury, mid-season trades,
+    // etc.) which inflate or wipe star ratings. 2K games rate using the
+    // last completed season the same way. Best-effort; fall back to
+    // synthetic generator if the network / cache yields nothing.
     let bbref = BbrefSource {
         fetcher: &fetcher,
         cache: &cache,
-        end_year: season.0,
+        end_year: season.0.saturating_sub(1),
     };
 
-    let mut rated_by_team: HashMap<u8, Vec<ratings::RatedPlayer>> = HashMap::new();
+    // Collect EVERY player league-wide first, then run percentile-rank ratings
+    // ONCE across the whole pool. Old code rated per-team — Tatum's pct_pts
+    // was always ~0.95 within BOS, so every team's top scorer landed at 95+
+    // regardless of how they actually compared league-wide. League-wide ranks
+    // give Shai a true 0.99 and Queta a true 0.55.
+    let mut team_player_counts: Vec<(u8, &str)> = Vec::new();
+    let mut all_players: Vec<RawPlayerStats> = Vec::new();
+    let mut team_player_offsets: HashMap<u8, (usize, usize)> = HashMap::new();
     let mut total_real = 0u32;
     let mut total_synth = 0u32;
 
@@ -154,8 +165,20 @@ fn run() -> Result<()> {
             total_real += players.len() as u32;
         }
 
-        let rated = ratings::rate_all(&players);
-        rated_by_team.insert(team.id, rated);
+        let start = all_players.len();
+        let count = players.len();
+        all_players.extend(players);
+        team_player_offsets.insert(team.id, (start, start + count));
+        team_player_counts.push((team.id, team.abbrev));
+    }
+
+    // Single league-wide rating pass.
+    let rated_all = ratings::rate_all(&all_players);
+    let mut rated_by_team: HashMap<u8, Vec<ratings::RatedPlayer>> = HashMap::new();
+    for (team_id, _) in &team_player_counts {
+        if let Some(&(s, e)) = team_player_offsets.get(team_id) {
+            rated_by_team.insert(*team_id, rated_all[s..e].to_vec());
+        }
     }
 
     if total_real == 0 {

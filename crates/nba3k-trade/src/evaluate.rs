@@ -25,8 +25,11 @@ use nba3k_core::{
 use rand::RngCore;
 use rand_distr::{Distribution, Normal};
 
-const ACCEPT_THRESHOLD_PCT: f64 = 0.05;
-const REJECT_THRESHOLD_PCT: f64 = -0.15;
+// Loosen the value gates so peer-OVR fair trades land in Accept/Counter
+// instead of Reject. NBA-realistic: most trades that aren't lopsided get a
+// counter rather than an outright rejection.
+const ACCEPT_THRESHOLD_PCT: f64 = -0.02;
+const REJECT_THRESHOLD_PCT: f64 = -0.30;
 
 /// Top-level entry. Runs the M4 realism pipeline:
 ///   1. CBA gate FIRST. On violation → Reject(CbaViolation).
@@ -167,10 +170,12 @@ pub fn evaluate_with_traits(
     }
 }
 
-/// Sum (outgoing_value, incoming_value) for `evaluator` from the offer's two
-/// sides. Outgoing = what evaluator gives up; incoming = what evaluator
-/// receives. Multi-team offers are valued correctly because we look at every
-/// side and treat the evaluator's side as outgoing.
+/// Sum (outgoing_value, incoming_value) for `evaluator` from the offer's
+/// sides. Outgoing = what evaluator gives up; incoming = what every other
+/// side ships into the deal (the trade-acceptance model values the entire
+/// pot of incoming assets, not just whichever leg is round-robin-routed to
+/// this team — that abstraction matches how 3-team trades are negotiated in
+/// practice, where each team weighs the whole package they're getting).
 fn sum_sides(
     offer: &TradeOffer,
     evaluator: TeamId,

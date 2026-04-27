@@ -1,0 +1,32 @@
+# Scripted full-season run — M7 integration test.
+#
+# Walks the canonical loop: new save -> sim regular -> trade -> sim playoffs
+# -> awards -> draft -> season-advance -> sim season 2 to playoffs.
+# Run via: ./target/release/nba3k --save /tmp/season1.db --script tests/scripts/season1.txt
+#
+# Lines starting with # are comments. Empty lines are skipped.
+
+status
+sim-day 30
+standings --json
+chemistry BOS
+
+# trade some bench piece for another team's bench piece (god mode in main bin
+# can short-circuit CBA; here we just exercise the propose path)
+trade list
+
+sim-to playoffs
+playoffs bracket
+playoffs sim
+awards
+season-summary
+
+draft board
+draft order
+season-advance
+status
+
+sim-day 30
+status
+
+quit

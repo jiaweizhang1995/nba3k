@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 nba3k-core = { workspace = true }
 nba3k-models = { workspace = true }
+nba3k-season = { workspace = true }
 rusqlite = { workspace = true }
 refinery = { workspace = true }
 serde = { workspace = true }
@@ -15,3 +16,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

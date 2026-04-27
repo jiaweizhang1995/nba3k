@@ -308,10 +308,10 @@ pub fn infer_archetype(player: &Player) -> String {
 
     match player.primary_position {
         Position::PG => {
-            // Distributor needs both high passing AND high ball_handle —
-            // a primary creator. Curry (high three_point, mediocre passing)
-            // falls through to PG-scorer, which is correct.
-            if pass >= 80 && make >= 75 {
+            // Distributor is rare — true pass-first hubs (Halliburton, Trae,
+            // Cade) with elite passing AND handle but moderate volume shooting.
+            // SGA / Curry / Brunson get scorer because they take the shots.
+            if pass >= 92 && make >= 88 && three < 90 {
                 "PG-distributor".to_string()
             } else {
                 "PG-scorer".to_string()
@@ -334,8 +334,12 @@ pub fn infer_archetype(player: &Player) -> String {
             }
         }
         Position::PF => {
-            // Stretch (3PT shooter) vs banger (rebound + paint defense).
-            if three >= 70 {
+            // Creator (Tatum/Giannis/LeBron/Durant tier — high handle + finish or
+            // pass) outranks stretch/banger. PF-creator covers franchise wing-PFs
+            // who actually run offense, not just space the floor.
+            if make >= 80 || (finish >= 82 && pass >= 75) {
+                "PF-creator".to_string()
+            } else if three >= 70 {
                 "PF-stretch".to_string()
             } else if reb >= def_per || def_int >= 75 {
                 "PF-banger".to_string()
@@ -344,8 +348,11 @@ pub fn infer_archetype(player: &Player) -> String {
             }
         }
         Position::C => {
-            // Stretch (3PT) vs finisher (paint + boards + blocks).
-            if three >= 65 {
+            // Hub (Jokić/Sabonis tier — elite passing big) outranks stretch/finisher.
+            // High passing_accuracy is the discriminator.
+            if pass >= 82 && make >= 70 {
+                "C-hub".to_string()
+            } else if three >= 65 {
                 "C-stretch".to_string()
             } else {
                 "C-finisher".to_string()

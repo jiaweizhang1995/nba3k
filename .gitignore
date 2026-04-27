@@ -14,3 +14,7 @@ data/cache/
 .idea/
 *.swp
 .DS_Store
+
+# Claude Code / agent scratch
+.claude/
+playtest/

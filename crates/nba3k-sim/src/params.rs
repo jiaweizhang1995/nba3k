@@ -25,7 +25,7 @@ impl Default for SimParams {
         Self {
             pace_mean: 99.0,
             pace_sigma: 3.0,
-            score_sigma: 9.0,
+            score_sigma: 7.5,
             home_court_advantage: 2.0,
             injury_rate_per_game: 0.005,
             max_overtimes: 4,

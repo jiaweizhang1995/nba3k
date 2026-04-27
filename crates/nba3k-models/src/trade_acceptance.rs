@@ -268,10 +268,12 @@ pub fn trade_acceptance_with_providers(
 // Verdict thresholds — sampled from the logistic.
 // ---------------------------------------------------------------------------
 
-/// p ≥ this → Accept. Tuned in 2026-04 calibration.
-pub const ACCEPT_PROBABILITY: f64 = 0.55;
-/// p ≤ this → Reject. Tuned in 2026-04 calibration.
-pub const REJECT_PROBABILITY: f64 = 0.20;
+/// p ≥ this → Accept. Tuned 2026-04: lowered from 0.55 to 0.50 so peer-OVR
+/// fair trades aren't penalized into Reject.
+pub const ACCEPT_PROBABILITY: f64 = 0.50;
+/// p ≤ this → Reject. Tuned 2026-04: lowered from 0.20 to 0.12 so the
+/// counter-offer band widens (most "fair-but-not-great" trades counter).
+pub const REJECT_PROBABILITY: f64 = 0.12;
 
 // ---------------------------------------------------------------------------
 // Internal helpers

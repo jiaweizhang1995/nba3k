@@ -103,6 +103,28 @@ pub fn write_seed(out: &Path, keep_existing: bool, input: SeedInput<'_>) -> Resu
     let players_count = all_players.len() as u32;
     store.bulk_upsert_players(&all_players).context("bulk upsert players")?;
 
+    // Contract backfill: every active player must end up with a contract.
+    // HoopsHype gives real salaries to ~stars when their name normalization
+    // matches, but the long tail (and synthetic-fallback rosters) lands here
+    // with `contract = None`. Generate a tier-based contract via
+    // `contract_gen` and apply a deterministic per-player ±10% salary
+    // perturbation so OVR-90 players don't all get the same flat number.
+    let mut generated_contracts = 0u32;
+    for player in &mut all_players {
+        if player.team.is_none() || player.contract.is_some() {
+            continue;
+        }
+        let mut contract = nba3k_models::contract_gen::generate_contract(player, input.season);
+        perturb_contract(&mut contract, player.id);
+        player.contract = Some(contract);
+        store.upsert_player(player).context("upsert player with generated contract")?;
+        with_contract += 1;
+        generated_contracts += 1;
+    }
+    if generated_contracts > 0 {
+        tracing::info!(generated_contracts, "backfilled contracts via contract_gen");
+    }
+
     // Prospects
     let mut prospects_count = 0u32;
     for mp in input.prospects {
@@ -171,6 +193,25 @@ fn contract_for(
         signed_in_season: season,
         bird_rights: BirdRights::Full,
     })
+}
+
+/// Deterministic ±10% salary perturbation seeded by player id. Same id → same
+/// factor, so re-runs of the scraper produce identical output. The factor is
+/// applied per-year so the contract stays flat (no escalators) but each player
+/// drifts off the tier mid-point.
+fn perturb_contract(contract: &mut Contract, pid: PlayerId) {
+    // Splitmix-style hash on the u32 id → factor in [0.90, 1.10].
+    let mut x = pid.0 as u64;
+    x = x.wrapping_add(0x9E3779B97F4A7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D049BB133111EB);
+    x ^= x >> 31;
+    let frac = (x % 20_001) as f64 / 20_000.0; // [0, 1] in 1/20000 steps
+    let factor = 0.90 + frac * 0.20; // [0.90, 1.10]
+    for year in &mut contract.years {
+        let cents = (year.salary.0 as f64 * factor).round() as i64;
+        year.salary = Cents(cents);
+    }
 }
 
 fn apply_override(player: &mut Player, overrides: &OverridesIndex) {

@@ -1,6 +1,8 @@
 use crate::StoreResult;
 use nba3k_core::*;
 use nba3k_models::progression::PlayerDevelopment;
+use nba3k_season::career::{aggregate_career, SeasonAvgRow};
+use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 
@@ -177,8 +179,9 @@ impl Store {
             "INSERT INTO players(
                 id, name, primary_position, secondary_position, age,
                 overall, potential, ratings_json, contract_json, team_id,
-                injury_json, no_trade_clause, trade_kicker_pct
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                injury_json, no_trade_clause, trade_kicker_pct,
+                role_str, morale
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 primary_position = excluded.primary_position,
@@ -191,7 +194,9 @@ impl Store {
                 team_id = excluded.team_id,
                 injury_json = excluded.injury_json,
                 no_trade_clause = excluded.no_trade_clause,
-                trade_kicker_pct = excluded.trade_kicker_pct",
+                trade_kicker_pct = excluded.trade_kicker_pct,
+                role_str = excluded.role_str,
+                morale = excluded.morale",
             params![
                 p.id.0 as i64,
                 p.name,
@@ -206,6 +211,8 @@ impl Store {
                 injury,
                 if p.no_trade_clause { 1_i64 } else { 0 },
                 p.trade_kicker_pct.map(|n| n as i64),
+                p.role.to_string(),
+                p.morale as f64,
             ],
         )?;
         Ok(())
@@ -225,8 +232,8 @@ impl Store {
                 "INSERT INTO players(
                     id, name, primary_position, secondary_position, age,
                     overall, potential, ratings_json, contract_json, team_id,
-                    injury_json, no_trade_clause, trade_kicker_pct
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
                  ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     primary_position = excluded.primary_position,
@@ -239,7 +246,9 @@ impl Store {
                     team_id = excluded.team_id,
                     injury_json = excluded.injury_json,
                     no_trade_clause = excluded.no_trade_clause,
-                    trade_kicker_pct = excluded.trade_kicker_pct",
+                    trade_kicker_pct = excluded.trade_kicker_pct,
+                    role_str = excluded.role_str,
+                    morale = excluded.morale",
                 params![
                     p.id.0 as i64,
                     p.name,
@@ -254,6 +263,8 @@ impl Store {
                     injury,
                     if p.no_trade_clause { 1_i64 } else { 0 },
                     p.trade_kicker_pct.map(|n| n as i64),
+                    p.role.to_string(),
+                    p.morale as f64,
                 ],
             )?;
         }
@@ -344,8 +355,8 @@ impl Store {
             "INSERT INTO players(
                 id, name, primary_position, secondary_position, age,
                 overall, potential, ratings_json, contract_json, team_id,
-                injury_json, no_trade_clause, trade_kicker_pct
-             ) VALUES (?1,?2,?3,NULL,?4,?5,?6,?7,NULL,NULL,NULL,0,NULL)
+                injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+             ) VALUES (?1,?2,?3,NULL,?4,?5,?6,?7,NULL,NULL,NULL,0,NULL,'Prospect',0.5)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 primary_position = excluded.primary_position,
@@ -367,9 +378,152 @@ impl Store {
         Ok(())
     }
 
+    /// List all prospects (players with no team) ordered best-first by
+    /// (potential desc, overall desc, id asc). Result is `Vec<Player>` —
+    /// callers map back to `DraftProspect` if they need the full shape.
+    pub fn list_prospects(&self) -> StoreResult<Vec<Player>> {
+        // Prospects vs free agents are disjoint pools post-V006: prospects
+        // keep is_free_agent = 0 so the FA pool never leaks into the draft
+        // board.
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, primary_position, secondary_position, age,
+                    overall, potential, ratings_json, contract_json, team_id,
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+             FROM players WHERE team_id IS NULL AND is_free_agent = 0
+             ORDER BY potential DESC, overall DESC, id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], read_player_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().map(deserialize_player).collect()
+    }
+
+    /// Assign a prospect (or any player with no team) to a team. Used by
+    /// the draft pipeline to convert prospects → roster players, and by the
+    /// FA pool when signing free agents. Clears `is_free_agent` so a signed
+    /// FA stops appearing in the FA pool.
+    pub fn assign_player_to_team(&self, player_id: PlayerId, team: TeamId) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE players SET team_id = ?1, is_free_agent = 0 WHERE id = ?2",
+            params![team.0 as i64, player_id.0 as i64],
+        )?;
+        Ok(())
+    }
+
     pub fn count_prospects(&self) -> StoreResult<u32> {
+        // Prospects = unsigned players that are NOT in the free-agent pool.
         let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM players WHERE team_id IS NULL",
+            "SELECT COUNT(*) FROM players
+             WHERE team_id IS NULL AND is_free_agent = 0",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n as u32)
+    }
+
+    // ------------------------------------------------------------------
+    // scouting fog (M14)
+    //
+    // `scouted` defaults to 0. The CLI hides un-scouted prospects' OVR,
+    // POT, and full Ratings; `cmd_scout` flips the flag to 1 to reveal.
+    // The store keeps the truthful values regardless — fog is a render
+    // concern, not a data concern.
+    // ------------------------------------------------------------------
+
+    /// Flip the `scouted` flag on a single player. Idempotent.
+    pub fn set_player_scouted(&self, player_id: PlayerId, scouted: bool) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE players SET scouted = ?1 WHERE id = ?2",
+            params![if scouted { 1_i64 } else { 0 }, player_id.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Read the `scouted` flag for one player. Returns `Ok(false)` when the
+    /// row doesn't exist — the caller's existing player-lookup will surface
+    /// that case explicitly.
+    pub fn is_player_scouted(&self, player_id: PlayerId) -> StoreResult<bool> {
+        let v: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT scouted FROM players WHERE id = ?1",
+                params![player_id.0 as i64],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v.unwrap_or(0) != 0)
+    }
+
+    /// List prospects paired with their `scouted` flag. Sorted so the
+    /// scouted prospects bubble to the top by potential desc, with the
+    /// un-scouted tail ordered alphabetically — matches the draft-board
+    /// fog rules in `cmd_draft_board`.
+    pub fn list_prospects_visible(&self) -> StoreResult<Vec<(Player, bool)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, primary_position, secondary_position, age,
+                    overall, potential, ratings_json, contract_json, team_id,
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale,
+                    scouted
+             FROM players
+             WHERE team_id IS NULL AND is_free_agent = 0 AND is_retired = 0
+             ORDER BY scouted DESC,
+                      CASE WHEN scouted = 1 THEN -potential ELSE 0 END ASC,
+                      CASE WHEN scouted = 1 THEN -overall   ELSE 0 END ASC,
+                      CASE WHEN scouted = 0 THEN lower(name) END ASC,
+                      id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                let row = read_player_row(r)?;
+                let scouted: i64 = r.get(15)?;
+                Ok((row, scouted != 0))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(row, scouted)| Ok((deserialize_player(row)?, scouted)))
+            .collect()
+    }
+
+    // ------------------------------------------------------------------
+    // free-agent pool (M10)
+    //
+    // A player is a free agent when `team_id IS NULL AND is_free_agent = 1`.
+    // Prospects keep `is_free_agent = 0`, so the two pools never overlap.
+    // ------------------------------------------------------------------
+
+    /// List all free agents ordered best-first by overall (then potential,
+    /// then id, for deterministic tiebreak).
+    pub fn list_free_agents(&self) -> StoreResult<Vec<Player>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, primary_position, secondary_position, age,
+                    overall, potential, ratings_json, contract_json, team_id,
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+             FROM players
+             WHERE team_id IS NULL AND is_free_agent = 1
+             ORDER BY overall DESC, potential DESC, id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], read_player_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().map(deserialize_player).collect()
+    }
+
+    /// Cut a player from their team into the free-agent pool. Clears the
+    /// team assignment and flips `is_free_agent = 1`.
+    pub fn cut_player(&self, player_id: PlayerId) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE players
+             SET team_id = NULL, is_free_agent = 1
+             WHERE id = ?1",
+            params![player_id.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_free_agents(&self) -> StoreResult<u32> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM players
+             WHERE team_id IS NULL AND is_free_agent = 1",
             [],
             |r| r.get(0),
         )?;
@@ -428,13 +582,62 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, primary_position, secondary_position, age,
                     overall, potential, ratings_json, contract_json, team_id,
-                    injury_json, no_trade_clause, trade_kicker_pct
-             FROM players WHERE team_id = ?1 ORDER BY overall DESC, id ASC",
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+             FROM players
+             WHERE team_id = ?1 AND is_retired = 0
+             ORDER BY overall DESC, id ASC",
         )?;
         let rows = stmt
             .query_map(params![team.0 as i64], read_player_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows.into_iter().map(deserialize_player).collect()
+    }
+
+    /// Mark `player_id` as retired. Clears the team assignment and the
+    /// free-agent flag so retirees never appear in active rosters, the FA
+    /// pool, or the prospect pool. Idempotent — re-retiring is a no-op.
+    pub fn set_player_retired(&self, player_id: PlayerId) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE players
+             SET team_id = NULL, is_free_agent = 0, is_retired = 1
+             WHERE id = ?1",
+            params![player_id.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    /// All retired players, ordered by overall desc — for future HOF UI.
+    pub fn list_retired_players(&self) -> StoreResult<Vec<Player>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, primary_position, secondary_position, age,
+                    overall, potential, ratings_json, contract_json, team_id,
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+             FROM players
+             WHERE is_retired = 1
+             ORDER BY overall DESC, id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], read_player_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().map(deserialize_player).collect()
+    }
+
+    /// Sum of every roster player's contract salary for `season`.
+    /// Players with no contract or no matching season-year contribute zero —
+    /// matches NBA cap-hold accounting where empty roster slots are not a
+    /// liability. Use `LeagueYear::for_season` to compare against cap/tax/aprons.
+    pub fn team_salary(&self, team: TeamId, season: SeasonId) -> StoreResult<Cents> {
+        let roster = self.roster_for_team(team)?;
+        let total = roster
+            .iter()
+            .map(|p| {
+                p.contract
+                    .as_ref()
+                    .map(|c| c.salary_for(season))
+                    .unwrap_or(Cents::ZERO)
+            })
+            .sum();
+        Ok(total)
     }
 
     pub fn find_player_by_name(&self, name: &str) -> StoreResult<Option<Player>> {
@@ -443,7 +646,7 @@ impl Store {
             .query_row(
                 "SELECT id, name, primary_position, secondary_position, age,
                         overall, potential, ratings_json, contract_json, team_id,
-                        injury_json, no_trade_clause, trade_kicker_pct
+                        injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
                  FROM players
                  WHERE lower(name) = lower(?1)
                     OR lower(name) LIKE lower(?2)
@@ -484,6 +687,17 @@ impl Store {
             )?;
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Wipe schedule rows for `season`. Used by season-advance to drop
+    /// last year's slate before regenerating fresh games. The historical
+    /// `games` table is untouched so prior-season records remain available.
+    pub fn clear_schedule_for_season(&self, season: SeasonId) -> StoreResult<()> {
+        self.conn.execute(
+            "DELETE FROM schedule WHERE season = ?1",
+            params![season.0 as i64],
+        )?;
         Ok(())
     }
 
@@ -656,6 +870,34 @@ impl Store {
         Ok(out)
     }
 
+    /// Distinct seasons that have at least one row in `games` (any phase).
+    /// Returned ascending. Used by career-stats walks that span the whole save.
+    pub fn distinct_game_seasons(&self) -> StoreResult<Vec<SeasonId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT season FROM games ORDER BY season ASC")?;
+        let rows = stmt
+            .query_map([], |r| {
+                let s: i64 = r.get(0)?;
+                Ok(SeasonId(s as u16))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Aggregate career stats for one player across every season recorded in
+    /// `games`. Empty Vec when the player never appears in any box score.
+    /// Per-season rows are ordered by `SeasonId` ascending — same order as
+    /// `distinct_game_seasons`.
+    pub fn read_career_stats(&self, player: PlayerId) -> StoreResult<Vec<SeasonAvgRow>> {
+        let mut out: Vec<SeasonAvgRow> = Vec::new();
+        for season in self.distinct_game_seasons()? {
+            let games = self.read_games(season)?;
+            out.extend(aggregate_career(&games, player));
+        }
+        Ok(out)
+    }
+
     pub fn scheduled_games_per_team(&self) -> StoreResult<std::collections::HashMap<TeamId, u32>> {
         let mut stmt = self.conn.prepare(
             "SELECT team, COUNT(*) FROM (
@@ -682,8 +924,8 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, primary_position, secondary_position, age,
                     overall, potential, ratings_json, contract_json, team_id,
-                    injury_json, no_trade_clause, trade_kicker_pct
-             FROM players WHERE team_id IS NOT NULL",
+                    injury_json, no_trade_clause, trade_kicker_pct, role_str, morale
+             FROM players WHERE team_id IS NOT NULL AND is_retired = 0",
         )?;
         let rows = stmt
             .query_map([], read_player_row)?
@@ -799,6 +1041,30 @@ impl Store {
         Ok(out)
     }
 
+    /// Open chains for `season` where `team` is a participant but is NOT the
+    /// initiator — i.e. "incoming" offers from `team`'s perspective. Used by
+    /// M17 `offers` to surface AI proposals to the user.
+    pub fn read_open_chains_targeting(
+        &self,
+        season: SeasonId,
+        team: TeamId,
+    ) -> StoreResult<Vec<(TradeId, NegotiationState)>> {
+        let chains = self.list_trade_chains(season)?;
+        let mut out = Vec::new();
+        for (id, state) in chains {
+            let NegotiationState::Open { ref chain } = state else { continue };
+            let Some(latest) = chain.last() else { continue };
+            if latest.initiator == team {
+                continue;
+            }
+            if !latest.assets_by_team.contains_key(&team) {
+                continue;
+            }
+            out.push((id, state));
+        }
+        Ok(out)
+    }
+
     // ------------------------------------------------------------------
     // awards
     // ------------------------------------------------------------------
@@ -831,6 +1097,303 @@ impl Store {
                 let award: String = r.get(0)?;
                 let pid: i64 = r.get(1)?;
                 Ok((award, PlayerId(pid as u32)))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    // ------------------------------------------------------------------
+    // all-star (M15-A)
+    // ------------------------------------------------------------------
+
+    /// Insert one All-Star roster row. Idempotent on (season, player_id) —
+    /// re-running the day-41 trigger overwrites the same player's row instead
+    /// of duplicating it.
+    pub fn record_all_star(
+        &self,
+        season: SeasonId,
+        conf: Conference,
+        player: PlayerId,
+        role: &str,
+    ) -> StoreResult<()> {
+        let conf_tag = match conf {
+            Conference::East => "East",
+            Conference::West => "West",
+        };
+        self.conn.execute(
+            "INSERT INTO all_star(season, conf, player_id, role) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(season, player_id) DO UPDATE SET
+                conf = excluded.conf,
+                role = excluded.role",
+            params![season.0 as i64, conf_tag, player.0 as i64, role],
+        )?;
+        Ok(())
+    }
+
+    /// All-Star rows for `season` as `(conference, role, player_id)`. Ordered
+    /// by conference asc then role asc so callers get a stable display order.
+    pub fn read_all_star(
+        &self,
+        season: SeasonId,
+    ) -> StoreResult<Vec<(Conference, String, PlayerId)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT conf, role, player_id FROM all_star
+             WHERE season = ?1
+             ORDER BY conf ASC, role ASC, player_id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![season.0 as i64], |r| {
+                let conf: String = r.get(0)?;
+                let role: String = r.get(1)?;
+                let pid: i64 = r.get(2)?;
+                Ok((conf, role, PlayerId(pid as u32)))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let out = rows
+            .into_iter()
+            .map(|(conf, role, pid)| {
+                let c = if conf == "West" { Conference::West } else { Conference::East };
+                (c, role, pid)
+            })
+            .collect();
+        Ok(out)
+    }
+
+    // ------------------------------------------------------------------
+    // news feed (M13)
+    // ------------------------------------------------------------------
+
+    /// Append one news row. `kind` is a free-form tag (e.g. "trade", "signing",
+    /// "cut", "retire", "draft", "award", "injury"); callers pick what fits.
+    pub fn record_news(
+        &self,
+        season: SeasonId,
+        day: u32,
+        kind: &str,
+        headline: &str,
+        body: Option<&str>,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO news(season, day, kind, headline, body)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![season.0 as i64, day as i64, kind, headline, body],
+        )?;
+        Ok(())
+    }
+
+    /// Most recent N news rows, newest first (by insertion id).
+    pub fn recent_news(&self, limit: u32) -> StoreResult<Vec<NewsRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT season, day, kind, headline, body
+             FROM news
+             ORDER BY id DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |r| {
+                let season: i64 = r.get(0)?;
+                let day: i64 = r.get(1)?;
+                let kind: String = r.get(2)?;
+                let headline: String = r.get(3)?;
+                let body: Option<String> = r.get(4)?;
+                Ok(NewsRow {
+                    season: SeasonId(season as u16),
+                    day: day as u32,
+                    kind,
+                    headline,
+                    body,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    // ------------------------------------------------------------------
+    // NBA Cup (M16-A)
+    //
+    // Cup matches live in their own table so they don't pollute `standings`
+    // or the regular-season box-score readers. Group rows carry a non-NULL
+    // `group_id` ("east-A".."west-C"); KO rows leave it NULL.
+    // ------------------------------------------------------------------
+
+    /// Append one cup match. `round` is "group" | "qf" | "sf" | "final";
+    /// `group_id` should be `Some("east-A")` etc. for group rows and `None`
+    /// for KO rounds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_cup_match(
+        &self,
+        season: SeasonId,
+        round: &str,
+        group_id: Option<&str>,
+        home: TeamId,
+        away: TeamId,
+        home_score: u16,
+        away_score: u16,
+        day: u32,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO cup_match(season, round, group_id, home_team, away_team,
+                                   home_score, away_score, day)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                season.0 as i64,
+                round,
+                group_id,
+                home.0 as i64,
+                away.0 as i64,
+                home_score as i64,
+                away_score as i64,
+                day as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// All cup rows for `season` ordered by id ascending — preserves the
+    /// (round → match) insertion order the trigger produced.
+    pub fn read_cup_matches(&self, season: SeasonId) -> StoreResult<Vec<CupMatchRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT season, round, group_id, home_team, away_team,
+                    home_score, away_score, day
+             FROM cup_match WHERE season = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![season.0 as i64], |r| {
+                let season: i64 = r.get(0)?;
+                let round: String = r.get(1)?;
+                let group_id: Option<String> = r.get(2)?;
+                let home: i64 = r.get(3)?;
+                let away: i64 = r.get(4)?;
+                let hs: i64 = r.get(5)?;
+                let aw: i64 = r.get(6)?;
+                let day: i64 = r.get(7)?;
+                Ok(CupMatchRow {
+                    season: SeasonId(season as u16),
+                    round,
+                    group_id,
+                    home_team: TeamId(home as u8),
+                    away_team: TeamId(away as u8),
+                    home_score: hs as u16,
+                    away_score: aw as u16,
+                    day: day as u32,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    // ------------------------------------------------------------------
+    // notes / favorites (M17-C)
+    //
+    // One row per player; UPSERT so re-adding a note replaces the text.
+    // `created_at` is stamped on the most recent write.
+    // ------------------------------------------------------------------
+
+    /// Upsert a note for `player_id`. Re-inserting overwrites the text
+    /// and refreshes `created_at`.
+    pub fn insert_note(&self, player_id: PlayerId, text: &str) -> StoreResult<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO notes(player_id, text, created_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(player_id) DO UPDATE SET
+                text = excluded.text,
+                created_at = excluded.created_at",
+            params![player_id.0 as i64, text, now],
+        )?;
+        Ok(())
+    }
+
+    /// Delete the note for `player_id`. No-op if no note exists; returns
+    /// the number of rows removed (0 or 1).
+    pub fn delete_note(&self, player_id: PlayerId) -> StoreResult<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM notes WHERE player_id = ?1",
+            params![player_id.0 as i64],
+        )?;
+        Ok(n)
+    }
+
+    /// All notes ordered by `created_at` ascending (oldest first).
+    pub fn list_notes(&self) -> StoreResult<Vec<NoteRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT player_id, text, created_at
+             FROM notes
+             ORDER BY created_at ASC, player_id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                let pid: i64 = r.get(0)?;
+                let text: Option<String> = r.get(1)?;
+                let created_at: String = r.get(2)?;
+                Ok(NoteRow {
+                    player_id: PlayerId(pid as u32),
+                    text,
+                    created_at,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    // ------------------------------------------------------------------
+    // owner mandate (M18-A)
+    //
+    // Three season goals per team auto-seeded at season start. UPSERT on
+    // (season, team, kind) so re-running auto-gen replaces the target/weight
+    // instead of duplicating rows.
+    // ------------------------------------------------------------------
+
+    pub fn record_mandate(
+        &self,
+        season: SeasonId,
+        team: TeamId,
+        kind: &str,
+        target: i32,
+        weight: f32,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO mandate(season, team, kind, target, weight)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(season, team, kind) DO UPDATE SET
+                target = excluded.target,
+                weight = excluded.weight",
+            params![
+                season.0 as i64,
+                team.0 as i64,
+                kind,
+                target as i64,
+                weight as f64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn read_mandates(
+        &self,
+        season: SeasonId,
+        team: TeamId,
+    ) -> StoreResult<Vec<MandateRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT season, team, kind, target, weight
+             FROM mandate
+             WHERE season = ?1 AND team = ?2
+             ORDER BY kind ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![season.0 as i64, team.0 as i64], |r| {
+                let season: i64 = r.get(0)?;
+                let team: i64 = r.get(1)?;
+                let kind: String = r.get(2)?;
+                let target: i64 = r.get(3)?;
+                let weight: f64 = r.get(4)?;
+                Ok(MandateRow {
+                    season: SeasonId(season as u16),
+                    team: TeamId(team as u8),
+                    kind,
+                    target: target as i32,
+                    weight: weight as f32,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -925,6 +1488,89 @@ impl Store {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
+
+    // ------------------------------------------------------------------
+    // export (M18-C)
+    //
+    // Dump every persistent user table as `{tables: {name: [{col: val,
+    // ...}, ...], ...}}`. Schema is read from `sqlite_master` so new
+    // migrations are picked up automatically. Refinery's bookkeeping
+    // table and SQLite internals are skipped.
+    // ------------------------------------------------------------------
+
+    pub fn dump_to_json(&self) -> StoreResult<serde_json::Value> {
+        let table_names: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name NOT LIKE 'sqlite_%'
+                   AND name NOT LIKE '_refinery%'
+                   AND name NOT LIKE 'refinery_%'
+                 ORDER BY name ASC",
+            )?;
+            let names = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            names
+        };
+
+        let mut tables = serde_json::Map::with_capacity(table_names.len());
+        for name in table_names {
+            let rows = self.dump_table_rows(&name)?;
+            tables.insert(name, serde_json::Value::Array(rows));
+        }
+        Ok(serde_json::json!({ "tables": tables }))
+    }
+
+    fn dump_table_rows(&self, table: &str) -> StoreResult<Vec<serde_json::Value>> {
+        // SQLite identifier quoting: double the embedded quotes. Table
+        // names come from sqlite_master so they're already valid, but we
+        // quote defensively to handle any reserved words.
+        let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+        let sql = format!("SELECT * FROM {}", quoted);
+        let mut stmt = self.conn.prepare(&sql)?;
+        let col_names: Vec<String> = stmt
+            .column_names()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        let col_count = col_names.len();
+        let mut rows_iter = stmt.query([])?;
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        while let Some(row) = rows_iter.next()? {
+            let mut obj = serde_json::Map::with_capacity(col_count);
+            for (i, col) in col_names.iter().enumerate() {
+                let v = row.get_ref(i)?;
+                obj.insert(col.clone(), value_ref_to_json(v));
+            }
+            out.push(serde_json::Value::Object(obj));
+        }
+        Ok(out)
+    }
+}
+
+fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
+    match v {
+        ValueRef::Null => serde_json::Value::Null,
+        ValueRef::Integer(n) => serde_json::Value::Number(n.into()),
+        ValueRef::Real(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        ValueRef::Text(bytes) => match std::str::from_utf8(bytes) {
+            Ok(s) => serde_json::Value::String(s.to_string()),
+            Err(_) => serde_json::Value::String(String::from_utf8_lossy(bytes).into_owned()),
+        },
+        ValueRef::Blob(bytes) => {
+            // Blobs become arrays of byte values. Keeps the dump
+            // round-trippable without dragging base64 in.
+            serde_json::Value::Array(
+                bytes
+                    .iter()
+                    .map(|b| serde_json::Value::Number((*b as u64).into()))
+                    .collect(),
+            )
+        }
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -964,6 +1610,53 @@ pub struct StandingRow {
     pub conf_rank: Option<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct NewsRow {
+    pub season: SeasonId,
+    pub day: u32,
+    pub kind: String,
+    pub headline: String,
+    pub body: Option<String>,
+}
+
+/// Row representation of one NBA Cup match (M16-A). `round` is one of
+/// "group" | "qf" | "sf" | "final"; `group_id` is `Some("east-A".."west-C")`
+/// for group rows, `None` for KO rounds.
+#[derive(Debug, Clone)]
+pub struct CupMatchRow {
+    pub season: SeasonId,
+    pub round: String,
+    pub group_id: Option<String>,
+    pub home_team: TeamId,
+    pub away_team: TeamId,
+    pub home_score: u16,
+    pub away_score: u16,
+    pub day: u32,
+}
+
+/// Row representation of one player note (M17-C). `text` is optional so
+/// callers can flag a player without leaving prose; `created_at` is
+/// stamped on the most recent write.
+#[derive(Debug, Clone)]
+pub struct NoteRow {
+    pub player_id: PlayerId,
+    pub text: Option<String>,
+    pub created_at: String,
+}
+
+/// One owner-mandate goal (M18-A). `kind` is one of
+/// `"wins" | "make_playoffs" | "develop_to" | "champion" | "lottery_top3"`;
+/// `target` is the goal value (wins count, OVR threshold, or 1 for boolean
+/// goals); `weight` ∈ [0, 1] is its contribution to the season grade.
+#[derive(Debug, Clone)]
+pub struct MandateRow {
+    pub season: SeasonId,
+    pub team: TeamId,
+    pub kind: String,
+    pub target: i32,
+    pub weight: f32,
+}
+
 type PlayerRow = (
     i64,                  // 0  id
     String,               // 1  name
@@ -978,6 +1671,8 @@ type PlayerRow = (
     Option<String>,       // 10 injury_json
     i64,                  // 11 no_trade_clause
     Option<i64>,          // 12 trade_kicker_pct
+    String,               // 13 role_str
+    f64,                  // 14 morale
 );
 
 fn read_player_row(r: &rusqlite::Row) -> rusqlite::Result<PlayerRow> {
@@ -995,6 +1690,8 @@ fn read_player_row(r: &rusqlite::Row) -> rusqlite::Result<PlayerRow> {
         r.get(10)?,
         r.get(11)?,
         r.get(12)?,
+        r.get(13)?,
+        r.get(14)?,
     ))
 }
 
@@ -1021,9 +1718,20 @@ fn deserialize_player(r: PlayerRow) -> StoreResult<Player> {
         injury,
         no_trade_clause: r.11 != 0,
         trade_kicker_pct: r.12.map(|n| n as u8),
-        role: PlayerRole::default(),
-        morale: 0.5,
+        role: parse_role(&r.13),
+        morale: r.14 as f32,
     })
+}
+
+fn parse_role(s: &str) -> PlayerRole {
+    match s {
+        "Star" => PlayerRole::Star,
+        "Starter" => PlayerRole::Starter,
+        "SixthMan" => PlayerRole::SixthMan,
+        "BenchWarmer" => PlayerRole::BenchWarmer,
+        "Prospect" => PlayerRole::Prospect,
+        _ => PlayerRole::RolePlayer,
+    }
 }
 
 fn parse_position(s: &str) -> Position {

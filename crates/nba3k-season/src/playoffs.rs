@@ -92,7 +92,7 @@ impl SeriesResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bracket {
     pub season: SeasonId,
-    /// 16 R1 series (8 East + 8 West / 2 sides each).
+    /// 8 R1 series — 4 East + 4 West, one per canonical matchup (1v8/4v5/3v6/2v7).
     pub r1: Vec<Series>,
 }
 
@@ -108,7 +108,7 @@ pub fn generate_bracket(standings: &Standings, season: SeasonId) -> Bracket {
     let east = top_eight(standings, Conference::East);
     let west = top_eight(standings, Conference::West);
 
-    let mut r1 = Vec::with_capacity(16);
+    let mut r1 = Vec::with_capacity(8);
     for conf_seeds in [&east, &west] {
         let conf = if std::ptr::eq(conf_seeds, &east) {
             Conference::East

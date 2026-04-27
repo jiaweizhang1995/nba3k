@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod repl;
 mod state;
+mod tui;
 
 use cli::Cli;
 use clap::Parser;

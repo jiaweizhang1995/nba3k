@@ -144,13 +144,38 @@ fn parse_roster(doc: &Html) -> Result<Vec<RosterRow>> {
     for tr in table.select(&row_sel) {
         let name = cell_text(&tr, "player").unwrap_or_default();
         let position = cell_text(&tr, "pos").unwrap_or_default();
-        let age = cell_text(&tr, "age").and_then(|s| s.trim().parse::<u8>().ok());
+        // Roster table no longer carries a direct `age` column — derive it
+        // from `birth_date` (csk encoded as YYYYMMDD on BBRef) against the
+        // current season's Feb 1 reference date (BBRef's NBA convention).
+        let age = roster_age_from_tr(&tr);
         if name.trim().is_empty() {
             continue;
         }
         rows.push(RosterRow { name, position, age });
     }
     Ok(rows)
+}
+
+fn roster_age_from_tr(tr: &scraper::ElementRef<'_>) -> Option<u8> {
+    // Try direct `age` first (very old caches), then derive from birth_date.
+    if let Some(s) = cell_text(tr, "age") {
+        if let Ok(n) = s.trim().parse::<u8>() {
+            return Some(n);
+        }
+    }
+    let csk_sel = Selector::parse(r#"[data-stat="birth_date"]"#).ok()?;
+    let cell = tr.select(&csk_sel).next()?;
+    // Prefer the `csk="19980902"` numeric form — easier to parse.
+    if let Some(csk) = cell.value().attr("csk") {
+        if csk.len() >= 4 {
+            if let Ok(year) = csk[..4].parse::<i32>() {
+                let now_year: i32 = chrono::Utc::now().date_naive().format("%Y").to_string().parse().unwrap_or(2026);
+                let age = (now_year - year).clamp(17, 50);
+                return Some(age as u8);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -181,14 +206,20 @@ fn parse_per_game(doc: &Html) -> Result<Vec<PerGameRow>> {
         if let Some(table) = doc.select(&table_sel).next() {
             let mut out = Vec::new();
             for tr in table.select(&row_sel) {
-                let name = cell_text(&tr, "player").unwrap_or_default();
+                // BBRef switched the player-column data-stat to `name_display`
+                // in 2024+ tables; fall back to legacy `player` for older
+                // cached HTML.
+                let name = cell_text(&tr, "name_display")
+                    .or_else(|| cell_text(&tr, "player"))
+                    .unwrap_or_default();
                 if name.trim().is_empty() {
                     continue;
                 }
                 out.push(PerGameRow {
                     name,
                     age: cell_text(&tr, "age").and_then(|s| s.trim().parse::<u8>().ok()),
-                    games: f(&tr, "g"),
+                    // BBRef per_game uses `games` (full word) not `g`.
+                    games: f_any(&tr, &["games", "g"]),
                     mpg: f(&tr, "mp_per_g"),
                     pts: f(&tr, "pts_per_g"),
                     trb: f(&tr, "trb_per_g"),
@@ -207,6 +238,15 @@ fn parse_per_game(doc: &Html) -> Result<Vec<PerGameRow>> {
         }
     }
     Ok(vec![])
+}
+
+fn f_any(tr: &scraper::ElementRef<'_>, stats: &[&str]) -> f32 {
+    for s in stats {
+        if let Some(v) = cell_text(tr, s).and_then(|s| s.trim().parse::<f32>().ok()) {
+            return v;
+        }
+    }
+    0.0
 }
 
 fn cell_text(tr: &scraper::ElementRef<'_>, stat: &str) -> Option<String> {

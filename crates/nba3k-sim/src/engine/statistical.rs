@@ -1,6 +1,6 @@
 use crate::params::SimParams;
 use crate::{Engine, GameContext, RotationSlot, TeamSnapshot};
-use nba3k_core::{BoxScore, GameResult, PlayerId, PlayerLine};
+use nba3k_core::{BoxScore, GameResult, InjuryStatus, InjurySeverity, PlayerId, PlayerLine, Ratings};
 use rand::{Rng, RngCore};
 use rand_distr::{Distribution, Normal};
 
@@ -40,8 +40,8 @@ const OT_MINUTES: u16 = 25; // 5 min × 5 players
 
 fn derive_profile(team: &TeamSnapshot, base_pace: f32) -> TeamProfile {
     if team.rotation.is_empty() {
-        // Fall back to overall-only sim. Each rating point = ~0.4 ORtg.
-        let delta = (team.overall as f32 - FALLBACK_OVERALL) * 0.4;
+        // Fall back to overall-only sim. Each rating point = ~0.6 ORtg.
+        let delta = (team.overall as f32 - FALLBACK_OVERALL) * 0.6;
         return TeamProfile {
             ortg: BASE_ORTG + delta,
             drtg: BASE_DRTG - delta,
@@ -49,39 +49,33 @@ fn derive_profile(team: &TeamSnapshot, base_pace: f32) -> TeamProfile {
         };
     }
 
+    // M19.2: replace the per-attribute weighted sum with a 9-feature
+    // team-quality vector (see `engine::team_quality`). The new model captures
+    // structural signals the linear sum couldn't: perimeter_containment (MIN
+    // not AVG), top-3 star concentration, position-aware spacing, top-2 product
+    // for rim protection. Coefficients are hand-tuned to NBA 2024-25 anchors.
+    use crate::engine::team_quality::{ratings_from_vector, vector_from_rotation, QualityToRatingWeights};
+    let v = vector_from_rotation(&team.rotation);
+    let weights = QualityToRatingWeights::default();
+    let (ortg, drtg) = ratings_from_vector(&v, &weights);
+
+    // Pace adjustment from rotation athleticism; small magnitude.
     let total_minutes_share: f32 = team.rotation.iter().map(|r| r.minutes_share).sum();
     let norm = if total_minutes_share > 0.0 { total_minutes_share } else { 1.0 };
+    let pace_acc: f32 = team
+        .rotation
+        .iter()
+        .map(|slot| {
+            let w = slot.minutes_share / norm;
+            let r = &slot.ratings;
+            let pace_score = (r.speed as f32 + r.agility as f32) * 0.5 - 70.0;
+            w * pace_score * 0.05
+        })
+        .sum();
 
-    let mut off_acc = 0.0f32;
-    let mut def_acc = 0.0f32;
-    let mut pace_acc = 0.0f32;
-    for slot in &team.rotation {
-        let w = slot.minutes_share / norm;
-        let r = &slot.ratings;
-        // Offensive contribution: shooting + finishing + playmaking.
-        // (No IQ in the 21-attribute schema — passing_accuracy substitutes.)
-        let off_score = (r.three_point as f32 * 0.30
-            + r.mid_range as f32 * 0.15
-            + r.driving_layup as f32 * 0.20
-            + r.ball_handle as f32 * 0.15
-            + r.passing_accuracy as f32 * 0.20)
-            - 70.0;
-        // Defensive contribution: perimeter + interior + steal/block.
-        let def_score = (r.perimeter_defense as f32 * 0.30
-            + r.interior_defense as f32 * 0.30
-            + r.steal as f32 * 0.20
-            + r.block as f32 * 0.20)
-            - 70.0;
-        // Pace contribution: speed + agility (athleticism category).
-        let pace_score = (r.speed as f32 + r.agility as f32) * 0.5 - 70.0;
-
-        off_acc += w * off_score * 0.45;
-        def_acc += w * def_score * 0.45;
-        pace_acc += w * pace_score * 0.05;
-    }
     TeamProfile {
-        ortg: BASE_ORTG + off_acc,
-        drtg: BASE_DRTG - def_acc,
+        ortg,
+        drtg,
         pace: base_pace + pace_acc,
     }
 }
@@ -101,7 +95,16 @@ fn sample_score(
     sigma: f32,
     rng: &mut dyn RngCore,
 ) -> u16 {
-    let expected_per_100 = own.ortg - opp.drtg + 100.0 + hca;
+    // M19.2 fix: original formula `own.ortg - opp.drtg + 100` was sign-inverted —
+    // a low opp.drtg (good defense, NBA convention = lower is better) reduced
+    // own subtraction therefore RAISED the expected score, the opposite of what
+    // good defense should do. Corrected to `own.ortg + opp.drtg - LEAGUE_AVG`
+    // which gives the right behavior:
+    //   opp DRtg low (elite D) → I score less than my ORtg
+    //   opp DRtg high (sieve)  → I score more than my ORtg
+    //   neutral (own.ortg = opp.drtg = 115) → I score 115.
+    const LEAGUE_AVG_RTG: f32 = 115.0;
+    let expected_per_100 = own.ortg + opp.drtg - LEAGUE_AVG_RTG + hca;
     let mean = expected_per_100 * possessions / 100.0;
     let dist = Normal::new(mean as f64, sigma.max(0.1) as f64).expect("valid sigma");
     let raw = dist.sample(rng) as f32;
@@ -117,7 +120,8 @@ fn sample_ot_score(
 ) -> u16 {
     // 5-minute period ≈ 10.8 possessions per team.
     let possessions = 10.8f32;
-    let expected_per_100 = own.ortg - opp.drtg + 100.0 + hca;
+    const LEAGUE_AVG_RTG: f32 = 115.0;
+    let expected_per_100 = own.ortg + opp.drtg - LEAGUE_AVG_RTG + hca;
     let mean = expected_per_100 * possessions / 100.0;
     let dist = Normal::new(mean as f64, (sigma * 0.5).max(0.1) as f64).expect("valid sigma");
     let raw = dist.sample(rng) as f32;
@@ -159,6 +163,136 @@ fn distribute_u16(total: u16, weights: &[f32]) -> Vec<u16> {
 
 fn distribute_u8(total: u16, weights: &[f32]) -> Vec<u8> {
     distribute_u16(total, weights).into_iter().map(|v| v.min(u8::MAX as u16) as u8).collect()
+}
+
+// ---- Per-game shooting-percentage calibration ------------------------------
+//
+// Per-player game FG/3P/FT% are sampled from a tight Normal centered on the
+// player's rating-driven mean. The bands match NBA reality:
+//   FG% : mean ~0.45, band [0.30, 0.65]
+//   3P% : mean ~0.35, band [0.20, 0.50]
+//   FT% : mean ~0.80, band [0.65, 0.95]
+//
+// `mid_range` + `free_throw` drive overall FG%; `three_point` drives 3P%;
+// `free_throw` drives FT%. Per-game sigma = 0.05 — tight enough to keep a
+// season aggregate inside the band, wide enough that a hot/cold game shows.
+
+/// Per-player FG% mean as a function of their shooting ratings. Output range
+/// roughly [0.38, 0.55] — peak shooters sit near the top, weak shooters near
+/// the bottom. Per-game samples then add ±0.05 sigma.
+fn fg_pct_mean(r: &Ratings) -> f32 {
+    // Composite of mid_range, free_throw, close_shot, driving_layup —
+    // the "make-shots" cluster. Center at rating 75 → 0.45 league avg.
+    let composite = (r.mid_range as f32 * 0.30
+        + r.free_throw as f32 * 0.20
+        + r.close_shot as f32 * 0.25
+        + r.driving_layup as f32 * 0.25) - 75.0;
+    (0.45 + composite * 0.005).clamp(0.38, 0.55)
+}
+
+/// Per-player 3P% mean. Center at rating 75 → 0.35.
+fn three_pct_mean(r: &Ratings) -> f32 {
+    let lift = (r.three_point as f32 - 75.0) * 0.005;
+    (0.35 + lift).clamp(0.28, 0.45)
+}
+
+/// Per-player FT% mean. Center at rating 75 → 0.80.
+fn ft_pct_mean(r: &Ratings) -> f32 {
+    let lift = (r.free_throw as f32 - 75.0) * 0.006;
+    (0.80 + lift).clamp(0.70, 0.92)
+}
+
+/// Sample one game's FG% from `Normal(mean, 0.05)`, clamped to NBA-realistic
+/// per-game band [0.30, 0.65].
+fn sample_game_fg_pct(r: &Ratings, rng: &mut dyn RngCore) -> f32 {
+    let mean = fg_pct_mean(r);
+    let dist = Normal::new(mean as f64, 0.05).expect("valid sigma");
+    (dist.sample(rng) as f32).clamp(0.30, 0.65)
+}
+
+fn sample_game_three_pct(r: &Ratings, rng: &mut dyn RngCore) -> f32 {
+    let mean = three_pct_mean(r);
+    let dist = Normal::new(mean as f64, 0.05).expect("valid sigma");
+    (dist.sample(rng) as f32).clamp(0.20, 0.50)
+}
+
+fn sample_game_ft_pct(r: &Ratings, rng: &mut dyn RngCore) -> f32 {
+    let mean = ft_pct_mean(r);
+    let dist = Normal::new(mean as f64, 0.05).expect("valid sigma");
+    (dist.sample(rng) as f32).clamp(0.65, 0.95)
+}
+
+/// Rebuild a PlayerLine's shooting line so per-game FG/3P/FT% are sampled
+/// from realistic per-game distributions tied to the player's ratings.
+///
+/// Strategy:
+///   1. Sample target fg_pct, three_pct, ft_pct from the player's ratings.
+///   2. Hold approximate FT and 3PT volume from the existing line (these are
+///      structural — usage and shot diet, not efficiency).
+///   3. Derive `fg_att` so that `fg_pct * fg_att * 2` plus the 3PT lift and
+///      FT contribution lands near `target_pts`.
+///   4. Compute `fg_made = round(fg_pct * fg_att)` — never sample fg_made
+///      independently. This is the calibration anchor M11-C requires.
+///   5. Recompute pts = 2*two_made + 3*three_made + ft_made.
+fn rebuild_shooting_line(
+    line: &mut PlayerLine,
+    ratings: &Ratings,
+    target_pts: u8,
+    rng: &mut dyn RngCore,
+) {
+    if target_pts == 0 {
+        line.pts = 0;
+        line.fg_made = 0;
+        line.fg_att = 0;
+        line.three_made = 0;
+        line.three_att = 0;
+        line.ft_made = 0;
+        line.ft_att = 0;
+        return;
+    }
+
+    let fg_pct = sample_game_fg_pct(ratings, rng);
+    let three_pct = sample_game_three_pct(ratings, rng);
+    let ft_pct = sample_game_ft_pct(ratings, rng);
+
+    // 3PA share of FGA: scaled by player's three_point appetite. Shooters take
+    // ~0.50 of their FGA from 3; bigs take ~0.05. Linear in three_point rating.
+    let three_share = ((ratings.three_point as f32 - 50.0) / 100.0).clamp(0.05, 0.55);
+
+    // FT rate ≈ 0.25 × FGA — league average. Hold whatever the upstream
+    // sampler produced if reasonable; otherwise estimate from target_pts.
+    let ft_att = line.ft_att;
+    let ft_made = ((ft_att as f32 * ft_pct).round() as u16).min(ft_att as u16) as u8;
+    let ft_pts = ft_made as u16;
+
+    // Solve for fg_att given target_pts:
+    //   pts = ft_pts + 2 * (1 - share) * fg_pct * fga + 3 * share * three_pct * fga
+    // Let blended_pts_per_fga = 2 * (1 - share) * fg_pct + 3 * share * three_pct
+    let blended = 2.0 * (1.0 - three_share) * fg_pct + 3.0 * three_share * three_pct;
+    let needed_field_pts = (target_pts as f32 - ft_pts as f32).max(0.0);
+    let fg_att = if blended > 0.05 {
+        (needed_field_pts / blended).round().clamp(0.0, 60.0) as u16
+    } else {
+        ((target_pts as f32) / 1.1).round() as u16
+    };
+    let fg_att = fg_att.min(60) as u8;
+
+    let three_att = ((fg_att as f32 * three_share).round() as u16).min(fg_att as u16) as u8;
+    let two_att = fg_att.saturating_sub(three_att);
+
+    let three_made = ((three_att as f32 * three_pct).round() as u16).min(three_att as u16) as u8;
+    let two_made = ((two_att as f32 * fg_pct).round() as u16).min(two_att as u16) as u8;
+    let fg_made = three_made.saturating_add(two_made);
+
+    let pts_total = (two_made as u16) * 2 + (three_made as u16) * 3 + ft_pts;
+
+    line.pts = pts_total.min(u8::MAX as u16) as u8;
+    line.fg_made = fg_made;
+    line.fg_att = fg_att.max(fg_made);
+    line.three_made = three_made;
+    line.three_att = three_att.max(three_made);
+    line.ft_made = ft_made;
+    line.ft_att = ft_att.max(ft_made);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -209,18 +343,10 @@ fn build_lines(
 
     let pts_per_player = distribute_u8(points, &usage_weights);
 
-    // Field-goal attempts ≈ points / 1.1 (rough TS conversion).
+    // Field-goal attempts ≈ points / 1.1 (rough TS conversion). Only used
+    // to seed FT volume; per-player FGA is derived inside `rebuild_shooting_line`
+    // from the sampled fg_pct.
     let total_fg_att: u16 = ((points as f32) / 1.1).round() as u16;
-    let fg_att_per = distribute_u8(total_fg_att, &usage_weights);
-
-    // 3PA share by 3-point rating.
-    let three_weights: Vec<f32> = rotation
-        .iter()
-        .zip(usage_weights.iter())
-        .map(|(r, u)| (r.ratings.three_point as f32 / 99.0).powf(1.5) * u)
-        .collect();
-    let total_3p_att: u16 = ((total_fg_att as f32) * 0.40).round() as u16;
-    let three_att_per = distribute_u8(total_3p_att, &three_weights);
 
     // Free-throw attempts ≈ 0.25 × FGA.
     let total_ft_att: u16 = ((total_fg_att as f32) * 0.25).round() as u16;
@@ -270,29 +396,28 @@ fn build_lines(
         let m = minutes[i].min(u8::MAX as u16) as u8;
         let pts = pts_per_player[i];
 
-        // Per-player FG-made = player_pts / 1.1 floor (split between 2 and 3).
-        let three_att = three_att_per[i].min(fg_att_per[i]);
-        let fg_att = fg_att_per[i];
-        // Make rates: weighted by ratings.
-        let three_make_rate = (slot.ratings.three_point as f32 / 99.0).clamp(0.20, 0.55) * 0.65;
-        let two_make_rate = (slot.ratings.mid_range as f32 * 0.4
-            + slot.ratings.driving_layup as f32 * 0.6) / 99.0;
-        let two_make_rate = two_make_rate.clamp(0.30, 0.70);
-        // Slight noise so makes aren't deterministic per player profile.
-        let noise: f32 = rng.gen_range(-0.05..0.05);
-
-        let three_made = ((three_att as f32 * (three_make_rate + noise)).round() as i16)
-            .clamp(0, three_att as i16) as u8;
-        let two_att = fg_att.saturating_sub(three_att);
-        let two_made = ((two_att as f32 * (two_make_rate + noise)).round() as i16)
-            .clamp(0, two_att as i16) as u8;
-        let fg_made = three_made.saturating_add(two_made);
-
-        // FT made = whatever's needed to hit player's points; clamp to attempts.
-        let scored_field = (two_made as u16) * 2 + (three_made as u16) * 3;
-        let ft_att = ft_att_per[i];
-        let ft_made_target = (pts as u16).saturating_sub(scored_field);
-        let ft_made = ft_made_target.min(ft_att as u16) as u8;
+        // Build shooting line with rating-driven per-game FG/3P/FT% (M11-C).
+        // Seed FT attempts from the upstream usage distribution; FG attempts
+        // get re-derived from `pts` and the sampled fg_pct so per-game FG%
+        // lands in NBA-realistic ranges.
+        let mut line = PlayerLine {
+            player: slot.player,
+            minutes: m,
+            pts: 0,
+            reb: 0, ast: 0, stl: 0, blk: 0, tov: 0,
+            fg_made: 0, fg_att: 0,
+            three_made: 0, three_att: 0,
+            ft_made: 0, ft_att: ft_att_per[i],
+            plus_minus: 0,
+        };
+        rebuild_shooting_line(&mut line, &slot.ratings, pts, rng);
+        let fg_made = line.fg_made;
+        let fg_att = line.fg_att;
+        let three_made = line.three_made;
+        let three_att = line.three_att;
+        let ft_made = line.ft_made;
+        let ft_att = line.ft_att;
+        let pts = line.pts;
 
         // Per-player +/- ≈ team diff × (minutes / 48).
         let pm_player = (plus_minus as f32 * (m as f32 / 48.0)).round() as i16;
@@ -332,7 +457,7 @@ fn build_lines_realism(
     team_abbrev: &str,
     rng: &mut dyn RngCore,
 ) -> Vec<PlayerLine> {
-    use nba3k_core::Player;
+    
     use nba3k_models::stat_projection::{
         infer_archetype, project_player_line, StatProjectionInput,
     };
@@ -381,15 +506,37 @@ fn build_lines_realism(
     }
 
     // Reconcile total PTS to the simmed `team_score`. Scale each player's
-    // points proportionally; rebuild FG/FT made counts to match.
+    // points proportionally; **then** rebuild the shooting line so per-game
+    // FG/3P/FT% are sampled from rating-driven Normals (M11-C calibration).
+    //
+    // Scale CAP at 1.20: archetype baselines target real NBA distribution,
+    // and an unbounded scale up can dump the entire residual team_score onto
+    // slot-1, inflating top-scorer PPG (Tatum 34, SGA 40) when raw_total is
+    // low. Capping at 1.20 + spreading leftover across bench keeps top-slot
+    // share realistic (~24% of team, not 33%).
     let raw_total: u32 = lines.iter().map(|l| l.pts as u32).sum();
+    let pts_cap = weights.single_game_pts_cap as f64;
     if raw_total > 0 {
-        let scale = team_score as f64 / raw_total as f64;
-        let pts_cap = weights.single_game_pts_cap as f64;
-        for line in &mut lines {
+        let raw_scale = team_score as f64 / raw_total as f64;
+        let scale = raw_scale.min(1.20);
+        for (line, slot) in lines.iter_mut().zip(rotation.iter()) {
             let scaled = (line.pts as f64 * scale).round().min(pts_cap);
             let new_pts = scaled.clamp(0.0, 99.0) as u8;
-            scale_points_inplace(line, new_pts);
+            rebuild_shooting_line(line, &slot.ratings, new_pts, rng);
+        }
+        // If we capped, spread the leftover team_score evenly across bench
+        // (slots 4-7 by minutes_share — middle of rotation, not deep bench).
+        let after_total: u32 = lines.iter().map(|l| l.pts as u32).sum();
+        let leftover = (team_score as i32 - after_total as i32).max(0) as u32;
+        if leftover > 0 && lines.len() > 3 {
+            let bench_slots: Vec<usize> = (3..lines.len().min(7)).collect();
+            if !bench_slots.is_empty() {
+                let per = (leftover as usize / bench_slots.len()) as u8;
+                for &i in &bench_slots {
+                    let new_pts = lines[i].pts.saturating_add(per).min(pts_cap as u8);
+                    rebuild_shooting_line(&mut lines[i], &rotation[i].ratings, new_pts, rng);
+                }
+            }
         }
     } else if !lines.is_empty() {
         // No realism-side scoring (stars all 0 — shouldn't happen). Fall
@@ -401,10 +548,51 @@ fn build_lines_realism(
             .map(|(i, _)| i)
             .unwrap_or(0);
         let pts = team_score.min(99) as u8;
-        scale_points_inplace(&mut lines[target_idx], pts);
+        rebuild_shooting_line(&mut lines[target_idx], &rotation[target_idx].ratings, pts, rng);
+    }
+
+    // PTS may now drift from the simmed team_score by a few points (rounding
+    // through the FG% pipeline). Distribute the residual onto the highest-PTS
+    // line as FT to preserve the headline score without smearing FG%.
+    let new_total: u32 = lines.iter().map(|l| l.pts as u32).sum();
+    let target = team_score as i32;
+    let drift = target - new_total as i32;
+    if drift != 0 && !lines.is_empty() {
+        let idx = lines
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, l)| l.pts)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        apply_pts_drift(&mut lines[idx], drift);
     }
 
     lines
+}
+
+/// Add (or subtract) up to `drift` points from a line via FT only — keeps
+/// FG% untouched. Drift is bounded by the natural FG% pipeline rounding so
+/// 1-3 points per line is the typical magnitude.
+fn apply_pts_drift(line: &mut PlayerLine, drift: i32) {
+    if drift > 0 {
+        let bump = drift.min(20) as u8;
+        line.pts = line.pts.saturating_add(bump);
+        line.ft_made = line.ft_made.saturating_add(bump);
+        line.ft_att = line.ft_att.saturating_add(bump);
+    } else if drift < 0 {
+        let cut = (-drift).min(line.pts as i32) as u8;
+        // Remove from FT first, then 2P (each = 2 pts), then 3P (each = 3 pts).
+        let mut remaining = cut as u16;
+        let ft_cut = (line.ft_made as u16).min(remaining);
+        line.ft_made = line.ft_made.saturating_sub(ft_cut as u8);
+        line.pts = line.pts.saturating_sub(ft_cut as u8);
+        remaining = remaining.saturating_sub(ft_cut);
+        if remaining >= 2 && line.fg_made > line.three_made {
+            let two_makes_to_remove = (remaining / 2).min((line.fg_made - line.three_made) as u16) as u8;
+            line.fg_made = line.fg_made.saturating_sub(two_makes_to_remove);
+            line.pts = line.pts.saturating_sub(two_makes_to_remove * 2);
+        }
+    }
 }
 
 /// Build a minimal `Player` carrying the fields `stat_projection` actually reads
@@ -430,22 +618,6 @@ fn synthesize_player(slot: &RotationSlot) -> nba3k_core::Player {
     }
 }
 
-/// Rewrite a PlayerLine's PTS + reconcile FG/FT counts to match.
-fn scale_points_inplace(line: &mut PlayerLine, new_pts: u8) {
-    line.pts = new_pts;
-    // Keep three-attempts as-is; rebuild made counts to hit `new_pts`.
-    let three_attempts_made = line.three_made.min(line.three_att);
-    let three_pts = three_attempts_made as u16 * 3;
-    let remaining = (new_pts as u16).saturating_sub(three_pts);
-    // Two-pointers fill in next.
-    let two_made = (remaining / 2).min(line.fg_att.saturating_sub(three_attempts_made) as u16) as u8;
-    let two_pts = two_made as u16 * 2;
-    let ft_pts = (new_pts as u16).saturating_sub(three_pts).saturating_sub(two_pts);
-    let ft_made = ft_pts.min(line.ft_att as u16) as u8;
-    line.fg_made = three_attempts_made.saturating_add(two_made);
-    line.three_made = three_attempts_made;
-    line.ft_made = ft_made;
-}
 
 mod realism_resources {
     //! Lazy-loaded archetype profiles + weights + star roster. Same pattern
@@ -488,21 +660,102 @@ mod realism_resources {
     }
 }
 
-fn apply_injury_rolls(
-    rotation: &[RotationSlot],
-    rate: f32,
-    rng: &mut dyn RngCore,
-) -> u32 {
-    if rate <= 0.0 || rotation.is_empty() {
-        return 0;
+/// Roll a single injury for a player who logged `minutes` in a game.
+///
+/// Probability scales with workload: 0.5% baseline, +0.5% for every 10 minutes
+/// played above 30. A 48-min game → ~1.4%. Severity mix on hit: DayToDay 70%,
+/// ShortTerm 25%, LongTerm 5%. Returns `None` if no injury rolled.
+fn roll_one_injury(minutes: u8, rng: &mut dyn RngCore) -> Option<InjuryStatus> {
+    if minutes == 0 {
+        return None;
     }
-    let mut count = 0u32;
-    for _ in rotation {
-        if rng.gen::<f32>() < rate {
-            count += 1;
+    let extra = (minutes as f32 - 30.0).max(0.0);
+    let p = 0.005 + (extra / 10.0) * 0.005;
+    if rng.gen::<f32>() >= p {
+        return None;
+    }
+    let s: f32 = rng.gen();
+    let (severity, games_remaining, description) = if s < 0.70 {
+        let games = rng.gen_range(1..=3);
+        (InjurySeverity::DayToDay, games, day_to_day_desc(rng))
+    } else if s < 0.95 {
+        let games = rng.gen_range(5..=15);
+        (InjurySeverity::ShortTerm, games, short_term_desc(rng))
+    } else {
+        let games = rng.gen_range(20..=50);
+        (InjurySeverity::LongTerm, games, long_term_desc(rng))
+    };
+    Some(InjuryStatus { description, games_remaining, severity })
+}
+
+fn day_to_day_desc(rng: &mut dyn RngCore) -> String {
+    const POOL: &[&str] = &[
+        "ankle sprain",
+        "sore knee",
+        "lower back tightness",
+        "bruised hip",
+        "wrist soreness",
+    ];
+    POOL[rng.gen_range(0..POOL.len())].to_string()
+}
+
+fn short_term_desc(rng: &mut dyn RngCore) -> String {
+    const POOL: &[&str] = &[
+        "strained hamstring",
+        "high ankle sprain",
+        "groin strain",
+        "calf strain",
+        "AC joint sprain",
+    ];
+    POOL[rng.gen_range(0..POOL.len())].to_string()
+}
+
+fn long_term_desc(rng: &mut dyn RngCore) -> String {
+    const POOL: &[&str] = &[
+        "torn meniscus",
+        "stress fracture in foot",
+        "torn plantar fascia",
+        "labrum tear",
+        "broken hand",
+    ];
+    POOL[rng.gen_range(0..POOL.len())].to_string()
+}
+
+/// Tick down an injury by one game/day. Returns the updated status — `None`
+/// when `games_remaining` reaches zero so the caller can clear the slot.
+pub fn tick_injury(status: &InjuryStatus) -> Option<InjuryStatus> {
+    if status.games_remaining <= 1 {
+        None
+    } else {
+        Some(InjuryStatus {
+            description: status.description.clone(),
+            games_remaining: status.games_remaining - 1,
+            severity: status.severity,
+        })
+    }
+}
+
+/// Public injury-roll API. After `simulate_game`, callers feed the resulting
+/// box score back through this function to discover which players picked up
+/// new injuries. Caller is responsible for persisting via `Store::upsert_player`.
+///
+/// Each player who logged minutes gets one roll; probability scales with
+/// minutes (see `roll_one_injury`). Output preserves source-of-truth ordering
+/// (home lines first, then away lines) so downstream news/log output is stable.
+pub fn roll_injuries_from_box(
+    box_score: &BoxScore,
+    rng: &mut dyn RngCore,
+) -> Vec<(PlayerId, InjuryStatus)> {
+    let mut out = Vec::new();
+    for line in box_score.home_lines.iter().chain(box_score.away_lines.iter()) {
+        if line.minutes == 0 {
+            continue;
+        }
+        if let Some(inj) = roll_one_injury(line.minutes, rng) {
+            out.push((line.player, inj));
         }
     }
-    count
+    out
 }
 
 impl Engine for StatisticalEngine {
@@ -566,11 +819,10 @@ impl Engine for StatisticalEngine {
         let home_lines = build_lines(&home.rotation, 1, home_score, team_minutes, home_pm, rng, &home.abbrev);
         let away_lines = build_lines(&away.rotation, 2, away_score, team_minutes, away_pm, rng, &away.abbrev);
 
-        // Injury rolls — currently surfaced only via the box (no struct slot).
-        // Rolling here keeps the RNG stream advance deterministic per seed and
-        // reserves the stream for the future injury-application pipeline.
-        let _ = apply_injury_rolls(&home.rotation, p.injury_rate_per_game, rng);
-        let _ = apply_injury_rolls(&away.rotation, p.injury_rate_per_game, rng);
+        // Injury rolls happen in `roll_injuries_from_box`, called by the CLI
+        // after `simulate_game` so it can persist via `Store::upsert_player`.
+        // We still touch `injury_rate_per_game` so the param survives loaders.
+        let _ = p.injury_rate_per_game;
 
         GameResult {
             id: ctx.game_id,

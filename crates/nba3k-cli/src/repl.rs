@@ -11,7 +11,7 @@ const PROMPT: &str = "nba3k> ";
 pub fn run_interactive(app: &mut AppState) -> Result<()> {
     use rustyline::{error::ReadlineError, DefaultEditor};
     let mut rl = DefaultEditor::new()?;
-    eprintln!("nba3k REPL — `help` for commands, `quit` to exit.");
+    eprintln!("nba3k REPL — type `help` for commands, `quit` to exit.");
     loop {
         match rl.readline(PROMPT) {
             Ok(line) => {
@@ -20,8 +20,14 @@ pub fn run_interactive(app: &mut AppState) -> Result<()> {
                     continue;
                 }
                 let _ = rl.add_history_entry(line);
+                // Treat `help` as a synonym for the global `--help` so users
+                // don't get clap's "unrecognized subcommand" path.
+                if matches!(line, "help" | "?") {
+                    print_help();
+                    continue;
+                }
                 if let Err(e) = exec_line(app, line) {
-                    eprintln!("error: {:#}", e);
+                    eprintln!("{}", format_repl_error(&e));
                 }
                 if app.should_quit {
                     break;
@@ -31,11 +37,28 @@ pub fn run_interactive(app: &mut AppState) -> Result<()> {
             Err(e) => return Err(e.into()),
         }
     }
+    eprintln!("bye.");
     Ok(())
+}
+
+fn print_help() {
+    use clap::CommandFactory;
+    let mut cmd = ReplLine::command();
+    let _ = cmd.print_help();
+    eprintln!();
+}
+
+/// Strip the leading "error: " (clap adds one) so the REPL doesn't print
+/// "error: error: ..." when surfacing parse errors.
+fn format_repl_error(e: &anyhow::Error) -> String {
+    let raw = format!("{:#}", e);
+    let stripped = raw.strip_prefix("error: ").unwrap_or(&raw);
+    format!("error: {}", stripped)
 }
 
 pub fn run_pipe(app: &mut AppState) -> Result<()> {
     let stdin = io::stdin();
+    let mut had_error = false;
     for line in stdin.lock().lines() {
         let line = line?;
         let line = line.trim();
@@ -43,12 +66,17 @@ pub fn run_pipe(app: &mut AppState) -> Result<()> {
             continue;
         }
         if let Err(e) = exec_line(app, line) {
-            eprintln!("error: {:#}", e);
-            return Err(e);
+            eprintln!("{}", format_repl_error(&e));
+            had_error = true;
+            // Don't bail — match interactive REPL behavior so a single bad
+            // line doesn't kill the whole pipe.
         }
         if app.should_quit {
             break;
         }
+    }
+    if had_error {
+        anyhow::bail!("one or more piped commands failed");
     }
     Ok(())
 }

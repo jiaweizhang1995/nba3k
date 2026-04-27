@@ -127,6 +127,12 @@ fn season_with(
         stl,
         blk,
         tov,
+        fg_made: 0,
+        fg_att: 0,
+        three_made: 0,
+        three_att: 0,
+        ft_made: 0,
+        ft_att: 0,
     }
 }
 

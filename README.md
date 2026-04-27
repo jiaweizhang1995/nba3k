@@ -1,0 +1,307 @@
+# nba3k
+
+NBA 2K MyGM 风格的命令行总经理模拟器。Rust 实现，CLI + REPL + 只读 TUI 三种交互方式，单文件 SQLite 存档。
+
+> 个人 / 非商业项目。NBA 数据来自 Basketball-Reference 公开页面，仅做引导式抓取并本地缓存，不做再分发。
+
+## 快速开始
+
+### 1. 环境要求
+
+- macOS / Linux
+- Rust ≥ 1.80（推荐通过 `rustup` 安装）
+- Python 3 + `pip install nba_api`（仅在重建种子时需要，已自带的 `data/seed_2025_26.sqlite` 不需要）
+- SQLite 已经被 `rusqlite = bundled` 静态链接，无需系统 SQLite
+
+### 2. 编译
+
+```bash
+git clone https://github.com/jiaweizhang1995/nba3k.git
+cd nba3k
+cargo build --release
+```
+
+二进制产物在 `target/release/nba3k`。开发期可直接 `cargo run -- ...` 或 `cargo build` 后用 `target/debug/nba3k`。
+
+### 3. 创建第一份存档并开局
+
+```bash
+# 用波士顿凯尔特人开 2025-26 赛季新档
+./target/release/nba3k --save my.db new --team BOS
+
+# 看一眼初始状态
+./target/release/nba3k --save my.db status
+
+# 进入 REPL 慢慢玩
+./target/release/nba3k --save my.db
+```
+
+也可以直接进 TUI 仪表盘：
+
+```bash
+./target/release/nba3k --save my.db tui
+```
+
+### 4. 删除存档
+
+存档就是单个 SQLite 文件（连同 `-shm` / `-wal` 副本）。两种删除方式：
+
+**方式 A：用 CLI 自带命令（带二次确认）**
+
+```bash
+./target/release/nba3k saves list                 # 列出当前目录 + /tmp 下的存档
+./target/release/nba3k saves show --path my.db    # 看存档元信息
+./target/release/nba3k saves delete --path my.db --yes   # --yes 是必需的安全开关
+```
+
+**方式 B：直接删文件**
+
+```bash
+rm my.db my.db-shm my.db-wal      # 三个文件一起删，不留 WAL 残留
+```
+
+存档之间相互独立，删一份不会影响其他文件。`data/seed_2025_26.sqlite` 是只读的 league 种子，**不要删**——所有 `new` 都从它复制。
+
+## 三种交互方式
+
+### CLI 子命令（脚本友好）
+
+每个读类命令都有 `--json` 开关，方便和 `jq` 串联。
+
+```bash
+nba3k --save my.db sim-day --days 5
+nba3k --save my.db standings --json | jq '.east[0]'
+nba3k --save my.db trade propose --from BOS --to LAL --send "Jaylen Brown" --recv "LeBron James"
+```
+
+### REPL（交互式）
+
+```bash
+nba3k --save my.db
+> roster
+> sim-week
+> messages
+> trade list
+> quit
+```
+
+REPL 用 `rustyline` 提供历史 / 编辑功能。同一个 `Command` 枚举既解析 argv 也解析 REPL 行（通过 `shlex`），所以 CLI 能干的 REPL 都能干。
+
+### 脚本模式
+
+```bash
+nba3k --save my.db --script my_season.txt
+# 或者
+echo "sim-to season-end\nstandings" | nba3k --save my.db
+```
+
+### TUI（只读仪表盘）
+
+```bash
+nba3k --save my.db tui
+```
+
+基于 `ratatui 0.29` + `crossterm 0.28`，单二进制无外部依赖。
+
+**5 个标签页**（`1`-`5` 或 `Tab` / `Shift-Tab` 切换）：
+
+| 键 | 标签 | 内容 |
+|----|------|------|
+| `1` | Status | 玩家球队 / 当前赛季 / 比赛日 / 战绩 / 薪资概览 |
+| `2` | Roster | 你队当前球员，按 OVR 降序，可滚动 |
+| `3` | Standings | 东西部并排，含胜场差 GB |
+| `4` | Trades | 当前进行中的交易谈判 + 最近 20 条交易历史 |
+| `5` | News | 最近 50 条联盟动态 |
+
+**通用按键**：
+
+- `↑` `↓` 滚动
+- `PgUp` `PgDn` 翻页（±10 行）
+- `Home` 回到顶部
+- `q` / `Esc` 退出
+
+**约束**：
+
+- 终端宽度 < 80 列时显示「请放大窗口」占位
+- TUI 完全只读。所有写操作（交易、签人、训练、模拟）都回 REPL / CLI。
+
+## 命令清单（CLI / REPL 通用）
+
+> 下面所有命令在 CLI（`nba3k --save x.db <cmd>`）和 REPL（`> <cmd>`）下都能用。
+
+### 存档与流程
+
+| 命令 | 作用 |
+|------|------|
+| `new --team BOS` | 从种子建新档，选定一支球队当玩家 GM |
+| `load <path>` | 加载存档（`--save` 已经指定路径时是 no-op）|
+| `status` | 当前赛季 / 比赛日 / 阶段 / 模式 |
+| `save` | 显式 flush（SQLite 自动持久化，这里是占位）|
+| `quit` / `exit` | 退出 REPL |
+| `saves list/show/delete/export` | 存档管理 + JSON 导出 |
+
+### 模拟时间
+
+| 命令 | 作用 |
+|------|------|
+| `sim-day --days N` | 模拟 N 天 |
+| `sim-week` / `sim-month` | 模拟 7 / 30 天，遇到交易报价或自队球员伤病自动暂停（`--no-pause` 关闭）|
+| `sim-to <target>` | 模拟到目标。阶段：`regular` / `regular-end` / `playoffs` / `trade-deadline` / `offseason`；标记日：`all-star`（第 41 天）/ `cup-final`（第 55 天）/ `season-end`（自动跑季后赛 + 翻页 OffSeason）|
+| `season-advance` | 推进到下个赛季（球员成长 + 自动选秀 + FA 桩）|
+
+### 阵容与球员
+
+| 命令 | 作用 |
+|------|------|
+| `roster [--team BOS]` | 看球队阵容（默认你的队）|
+| `roster-set-role <player> <role>` | 标记角色：star / starter / sixth / role / bench / prospect |
+| `player <name>` | 模糊匹配单个球员详情 |
+| `chemistry --team BOS` | 球队化学反应分解 |
+| `career <name>` | 球员历年生涯数据 |
+| `training <name> --attr shoot` | 训练营加点：shoot / inside / def / reb / ath / handle（每赛季每人一次）|
+
+### 交易
+
+| 命令 | 作用 |
+|------|------|
+| `trade propose --from BOS --to LAL --send "A,B" --recv "C"` | 发起两队交易 |
+| `trade propose3 --leg BOS:A --leg LAL:B --leg DAL:C` | 三方交易（M10）|
+| `trade list` | 进行中的谈判 |
+| `trade respond <id> <accept\|reject\|counter>` | 回应反报价 |
+| `trade chain <id>` | 看完整谈判链 |
+| `offers` | AI 主动发来的报价收件箱 |
+| `rumors` | 全联盟交易传闻（AI 兴趣信号）|
+| `messages` | GM 收件箱：球星不满 / 阵容警报 |
+
+支持 2025-26 真实 CBA：薪资匹配、奢侈税 / 第一第二土豪线、交易加薪 (kicker) 不对称、不可交易条款 (NTC)。**God 模式**（`--god` 或建档时选）跳过 CBA 与拒绝逻辑。
+
+### 球队管理
+
+| 命令 | 作用 |
+|------|------|
+| `cap [--team BOS]` | 工资 / 奢侈税 / 各条线状态 |
+| `extend <player> --salary 25 --years 4` | 自队球员续约谈判（士气影响接受率）|
+| `fa list` | 自由球员市场 |
+| `fa sign <name>` | 签自由球员 |
+| `fa cut <name>` | 裁人 |
+| `coach show/fire/pool` | 主教练查看 / 解雇 / 候选池 |
+
+### 选秀
+
+| 命令 | 作用 |
+|------|------|
+| `draft board` | 60 人新秀板凳 |
+| `draft order` | 当年选秀顺位（含彩票排序）|
+| `draft sim` | AI 一键完成整个选秀 |
+| `draft pick <name>` | 你的顺位人工选人 |
+| `scout <name>` | 花一次球探名额揭示新秀真实评分（每赛季 5 次）|
+
+### 季后赛与赛季奖项
+
+| 命令 | 作用 |
+|------|------|
+| `playoffs bracket` | 首轮对阵图 |
+| `playoffs sim` | 一键模拟整个季后赛 |
+| `season-summary` | 总冠军 + 总决赛 MVP + 全奖项打包 |
+| `awards [--season YYYY]` | 赛季末 MVP / DPOY / ROY / 6MOY / MIP / All-NBA |
+| `awards-race` | 赛季中段奖项榜（前 5 + 票数）|
+| `all-star [--season YYYY]` | 全明星阵容 + 比赛结果 |
+| `cup [--season YYYY]` | 季中 NBA Cup 杯赛对阵 + 结果 |
+
+### 联盟历史与排行
+
+| 命令 | 作用 |
+|------|------|
+| `standings [--season YYYY]` | 东西部排名（支持回看历年）|
+| `news [--limit N]` | 联盟动态：交易 / 签约 / 退役 / 伤病 / 奖项 |
+| `recap --days N` | 最近 N 天比赛回顾（含每场最佳得分手）|
+| `compare BOS LAL` | 两队并排对比：薪资 / 前 8 / 化学反应 |
+| `records --scope season\|career --stat ppg` | 排行榜：ppg / rpg / apg / spg / bpg / three_made / fg_pct |
+| `hof` | 名人堂（退役球员按生涯产出排）|
+| `retire <name>` | 强制退役 |
+| `mandate` | 老板下达的赛季目标 + 评分 |
+
+### 笔记
+
+| 命令 | 作用 |
+|------|------|
+| `notes add <player> --comment "..."` | 收藏球员 + 备注 |
+| `notes remove <player>` | 取消收藏 |
+| `notes list` | 看所有收藏（也会出现在 `messages` 里）|
+
+### 开发 / 调试
+
+| 命令 | 作用 |
+|------|------|
+| `dev calibrate-trade` | 跨 GM 配对随机交易评估，校准用 |
+| `dev team-strength <abbrev>` | 球队 9 维实力向量 + 派生 ORtg / DRtg |
+
+## 游戏模式
+
+建档时通过 `--mode` 指定，或运行时 `--god` 强制覆盖：
+
+- **standard**：完整 2025-26 CBA。薪资必须匹配、不可交易条款生效、AI 会拒绝亏本交易。默认。
+- **god**：跳过 CBA 校验、AI 强制接受、可手动改评分 / 合同 / 抽彩票。
+- **hardcore**：限制更严的 standard（保留位）。
+- **sandbox**：跳过校验但保留 AI 拒绝（保留位）。
+
+## 数据来源
+
+- 球员名单 + 历史数据：Basketball-Reference 公开页面（限速 1 req / 3s，仅引导抓取，本地缓存到 `data/cache/`）
+- 2026 选秀新秀：公开 mock draft（Cooper Flagg 等）
+- CBA 数字：写死 2025-26 工资帽 / 奢侈税 / 第一土豪线 / 第二土豪线 / 中产 / BAE
+- 合同：scraper 落库后用合成的按 OVR 分级合约回填（HoopsHype 改成 React 渲染了）
+
+种子产物 `data/seed_2025_26.sqlite` 已被 `.gitignore` 排除。要重新生成种子：
+
+```bash
+cargo run -p nba3k-scrape --release -- --out data/seed_2025_26.sqlite
+```
+
+## 项目结构
+
+```
+crates/
+  nba3k-core/        # 公共类型：Player / Team / LeagueYear / TradeOffer / LeagueSnapshot
+  nba3k-models/      # 7 个可解释的评分模型（球员价值 / 合同 / 球队语境 / 球星保护 / 阵容契合 / 交易接受 / 数据投射）
+  nba3k-sim/         # 比赛模拟引擎（统计分布；逐回合留作 v2）+ 9 维球队实力向量
+  nba3k-trade/       # 交易引擎（评估 + CBA 校验 + 性格 + 多轮谈判）
+  nba3k-season/      # 赛程生成 / 季后赛 / 奖项 / 名人堂
+  nba3k-store/       # SQLite 持久层 + refinery 迁移
+  nba3k-scrape/      # 引导抓取 + 评分校准
+  nba3k-cli/         # CLI 解析 + REPL + TUI + 命令实现
+data/
+  archetype_profiles.toml   # 10 种球员原型
+  personalities.toml        # 30 队 GM 性格
+  realism_weights.toml      # 模型权重
+  star_roster.toml          # 24 队 / 28 个球星标签
+  rating_overrides.toml     # 手维护的合同特殊条款
+  sim_params.toml           # 模拟引擎参数
+phases/                     # M1-M19 的开发日志
+```
+
+## 测试
+
+```bash
+cargo test --workspace
+```
+
+当前 275 个单测 + 1 个集成测试通过。
+
+## 已完成里程碑
+
+M1 骨架 → M2 数据 + 模拟 → M3 交易引擎 → M4 评分模型 → M5 21 维属性 + 化学反应 + 季后赛 → M6 选秀 + 休赛期 → M7 整赛季 e2e → M8 真实年龄曲线 → M9 交易评估器 → M10 三方交易 + 生涯 + FA + 训练 → M11 合同 + 退役 → M12 联盟经济 → M13 联盟生命力（伤病 + 新闻 + 奖项榜）→ M14 元游戏（教练 + 球探 + 排行榜）→ M15 全明星 + 历史回看 + 存档管理 → M16 NBA Cup + 传闻 + 队伍对比 → M17 GM 工具（报价 + 续约 + 笔记）→ M18 老板任务 + 复盘 + 导出 → M19 TUI 仪表盘。
+
+## 已知短板
+
+- 没有「看比赛」体验：当前是统计分布出最终比分，没有逐回合 / 逐场流播放。
+- 部分球队战绩失真：年初阵容快照导致 KD-on-PHO 等不合时宜的强阵；CLE 因主控位置识别不准受影响。
+- 没有受限自由球员（RFA）/ 资格报价 / Bird 权 / 签换 / 合同回购 / 交易特例的细节流程。
+- 教练只有 overall 与解雇阈值，没有体系树 / 助教 / 训练加成。
+- 老板只下任务，不会因为成绩差炒掉 GM。
+
+下一阶段方向：M20 看比赛逐节 box score / M21 RFA 全套 / M22 逐回合模拟试点。
+
+## 许可
+
+MIT。仅个人非商业用途。NBA、所有球队、球员名称归各自版权方所有，本项目不附属于、不被 NBA / 2K Games 背书。

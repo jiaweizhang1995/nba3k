@@ -15,18 +15,25 @@
 
 pub mod player_value;
 pub mod contract_value;
+pub mod contract_gen;
+pub mod contract_extension;
 pub mod team_context;
 pub mod star_protection;
 pub mod asset_fit;
 pub mod trade_acceptance;
 pub mod stat_projection;
 pub mod progression;
+pub mod retirement;
+pub mod team_chemistry;
+pub mod training;
 pub mod weights;
 
 pub use progression::{
     apply_progression_step, progress_player, regress_player, update_dynamic_potential,
     AttributeDelta, PlayerDevelopment,
 };
+pub use retirement::should_retire;
+pub use training::{apply_training_focus, TrainingDelta, TrainingFocus};
 
 // ---------------------------------------------------------------------------
 // Common output types — every model uses these.

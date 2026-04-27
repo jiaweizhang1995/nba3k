@@ -202,7 +202,7 @@ fn bracket_sixteen_teams_split_8_8() {
     let standings = make_standings(&teams, &wins);
 
     let bracket = generate_bracket(&standings, SeasonId(2026));
-    assert_eq!(bracket.r1.len(), 16, "R1 should have 16 series (8 East + 8 West / 2 sides)");
+    assert_eq!(bracket.r1.len(), 8, "R1 has 8 series (4 East + 4 West)");
 
     let east_series: Vec<_> = bracket
         .r1
@@ -214,8 +214,8 @@ fn bracket_sixteen_teams_split_8_8() {
         .iter()
         .filter(|s| s.conference == Some(Conference::West))
         .collect();
-    assert_eq!(east_series.len(), 8, "expected 8 East R1 series (matchup pairs counted twice)");
-    assert_eq!(west_series.len(), 8, "expected 8 West R1 series");
+    assert_eq!(east_series.len(), 4, "expected 4 East R1 series (1v8/4v5/3v6/2v7)");
+    assert_eq!(west_series.len(), 4, "expected 4 West R1 series");
 }
 
 #[test]

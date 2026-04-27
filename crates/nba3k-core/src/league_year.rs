@@ -49,9 +49,39 @@ pub struct LeagueYear {
 
 impl LeagueYear {
     /// Look up the encoded constants for a season's *ending* year
-    /// (e.g. `SeasonId(2026)` → 2025-26 league year).
+    /// (e.g. `SeasonId(2026)` → 2025-26 league year). Future seasons that
+    /// aren't explicitly encoded auto-extrapolate from the most recent
+    /// encoded year using a 5%/year cap-growth rule (matches NBA's recent
+    /// trajectory; mild over-estimate for far-future seasons but better
+    /// than panicking).
     pub fn for_season(season: SeasonId) -> Option<Self> {
-        LEAGUE_YEARS.iter().copied().find(|y| y.season == season)
+        if let Some(exact) = LEAGUE_YEARS.iter().copied().find(|y| y.season == season) {
+            return Some(exact);
+        }
+        let latest = LEAGUE_YEARS.iter().copied().max_by_key(|y| y.season.0)?;
+        if season.0 < latest.season.0 {
+            // Past seasons we never encoded — fall back to the earliest known.
+            let earliest = LEAGUE_YEARS.iter().copied().min_by_key(|y| y.season.0)?;
+            return Some(earliest);
+        }
+        let years_ahead = season.0.saturating_sub(latest.season.0) as u32;
+        let factor = 1.0_f64 + 0.05 * years_ahead as f64;
+        let scale = |c: Cents| -> Cents {
+            Cents(((c.0 as f64) * factor).round() as i64)
+        };
+        Some(LeagueYear {
+            season,
+            cap: scale(latest.cap),
+            tax: scale(latest.tax),
+            apron_1: scale(latest.apron_1),
+            apron_2: scale(latest.apron_2),
+            mle_non_taxpayer: scale(latest.mle_non_taxpayer),
+            mle_taxpayer: scale(latest.mle_taxpayer),
+            mle_room: scale(latest.mle_room),
+            bae: scale(latest.bae),
+            min_team_salary: scale(latest.min_team_salary),
+            max_trade_cash: scale(latest.max_trade_cash),
+        })
     }
 
     /// Parse "YYYY-YY" (e.g. "2025-26") into the matching `LeagueYear`.

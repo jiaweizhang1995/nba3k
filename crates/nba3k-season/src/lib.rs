@@ -2,6 +2,7 @@
 //! M2 fills schedule/standings; M4 fills playoff bracket; M5 fills draft.
 
 pub mod awards;
+pub mod career;
 pub mod phases;
 pub mod playoffs;
 pub mod progression_pass;
@@ -10,10 +11,12 @@ pub mod standings;
 
 pub use awards::{
     aggregate_season, compute_all_awards, compute_all_defensive, compute_all_nba,
-    compute_all_star, compute_coy, compute_dpoy, compute_mip, compute_mvp, compute_roy,
-    compute_sixth_man, AllStarRoster, AwardKind, AwardResult, AwardsBundle, PlayerSeason,
-    SeasonAggregate, TeamAwardResult,
+    compute_all_star, compute_coy, compute_dpoy, compute_dpoy_race, compute_mip,
+    compute_mip_race, compute_mvp, compute_mvp_race, compute_roy, compute_roy_race,
+    compute_sixth_man, compute_sixth_man_race, AllStarRoster, AwardKind, AwardResult,
+    AwardsBundle, PlayerSeason, SeasonAggregate, TeamAwardResult,
 };
+pub use career::{aggregate_career, career_totals, SeasonAvgRow};
 pub use playoffs::{
     compute_finals_mvp, generate_bracket, simulate_series, Bracket, PlayoffRound, Series,
     SeriesResult,

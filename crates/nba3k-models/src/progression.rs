@@ -247,16 +247,15 @@ fn work_ethic_modulator(we: u8) -> f32 {
 /// integer-bucket overall_for math.
 fn growth_budget(age: u8, dev: &PlayerDevelopment) -> f32 {
     match age_phase(age, dev) {
-        // Steeper growth far from peak; tapers as player approaches peak.
+        // overall_for averages 6 buckets (5/3/3/4/2/4 fields each) before
+        // weighting — to lift OVR by +2 every bucket needs ~+2 average,
+        // which costs ~40-50 raw points spread across the 21 fields.
         AgePhase::PrePeak => {
             let years_to_peak = dev.peak_start_age.saturating_sub(age) as f32;
-            // ~12 pts per year far from peak, ~7 pts at the boundary —
-            // landed by tuning against the M5 acceptance test (22yo OVR-78
-            // workhorse gains +2-3 OVR).
-            6.0 + years_to_peak * 1.4
+            25.0 + years_to_peak * 5.0
         }
         // Mild gain at peak — rookie-contract-extension years.
-        AgePhase::AtPeak => 2.5,
+        AgePhase::AtPeak => 6.0,
         AgePhase::PostPeak => 0.0,
     }
 }
@@ -530,11 +529,11 @@ pub fn update_dynamic_potential(
             // What we'd need to gain per year to still hit dynamic_potential.
             let gap = (dev.dynamic_potential as i32 - cur_ovr as i32).max(0);
             let needed_per_year = gap as f32 / years_left as f32;
-            // Realistic per-year overall gain ranges roughly 0.3..=2.5.
+            // Realistic per-year overall gain ranges roughly 0.3..=2.0.
             // If `needed_per_year` is outside that, projection has slipped.
-            if needed_per_year > 2.5 {
-                // Falling behind — shave 1-3 off projection (more for bigger gaps).
-                let shave = ((needed_per_year - 2.5) * 1.5).round().clamp(1.0, 3.0) as u8;
+            if needed_per_year > 2.0 {
+                // Falling behind — shave 1-4 off projection (more for bigger gaps).
+                let shave = ((needed_per_year - 2.0) * 2.5).round().clamp(1.0, 4.0) as u8;
                 dev.dynamic_potential.saturating_sub(shave)
             } else if needed_per_year < 0.0_f32.max(0.0) {
                 // Already above projection — bump it slightly.

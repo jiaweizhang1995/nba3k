@@ -48,18 +48,29 @@ pub fn rate_all(players: &[RawPlayerStats]) -> Vec<RatedPlayer> {
     let pct_ft = percentile_ranks(players.iter().map(|p| p.ft_pct).collect());
     let pct_min = percentile_ranks(players.iter().map(|p| p.minutes_per_game).collect());
 
+    // Per-game production composite — a single all-around impact signal that
+    // captures stars who don't lead in any one stat but are top-shelf across
+    // the board (Tatum 27/9/6, LeBron 25/8/9, Wembanyama 24/11/4 with blocks).
+    // Weights are the standard fantasy-style impact proxy.
+    let production: Vec<f32> = players
+        .iter()
+        .map(|p| p.pts + 1.5 * p.ast + 1.2 * p.trb + 2.0 * (p.stl + p.blk) - 0.7 * p.tov)
+        .collect();
+    let pct_prod = percentile_ranks(production);
+
     let mut out = Vec::with_capacity(players.len());
     for (i, p) in players.iter().enumerate() {
-        // Map percentile signals → 21-attribute schema. Shared signals
-        // populate clusters of attributes (3P% drives all ranged-shooting
-        // fields; trb drives both off_reb + def_reb; etc.).
-        let three = scale(pct_3p[i].max(pct_pts[i] * 0.7));
-        let mid = scale((pct_fg[i] + pct_pts[i]) / 2.0);
-        let finish = scale((pct_fg[i] * 0.6 + pct_pts[i] * 0.4).max(0.0));
-        let pmk = scale(pct_ast[i]);
+        // Map percentile signals → 21-attribute schema. Volume (PPG) is
+        // the primary star signal — accuracy % and rate stats are noisy at
+        // the per-game level. Heavy weight on pct_pts so a 27-PPG alpha
+        // doesn't get washed out by a middling 3P%.
+        let three = scale(pct_3p[i] * 0.5 + pct_pts[i] * 0.5);
+        let mid = scale(pct_pts[i] * 0.7 + pct_fg[i] * 0.3);
+        let finish = scale(pct_pts[i] * 0.7 + pct_fg[i] * 0.3);
+        let pmk = scale(pct_ast[i] * 0.6 + pct_pts[i] * 0.4);
         let reb_score = scale(pct_trb[i]);
-        let d_peri = scale((pct_stl[i] + pct_min[i]) / 2.0);
-        let d_int = scale((pct_blk[i] + pct_trb[i]) / 2.0);
+        let d_peri = scale(pct_stl[i] * 0.4 + pct_min[i] * 0.6);
+        let d_int = scale(pct_blk[i] * 0.5 + pct_trb[i] * 0.3 + pct_min[i] * 0.2);
         let ath = scale((pct_min[i] + pct_stl[i] + pct_blk[i]) / 3.0);
         let ft = scale(pct_ft[i]);
         let care = scale(1.0 - p.tov.min(5.0) / 5.0); // ball-protection signal
@@ -99,7 +110,15 @@ pub fn rate_all(players: &[RawPlayerStats]) -> Vec<RatedPlayer> {
         position_tweak(&mut ratings, p.primary_position);
 
         let overall = blended_overall(&ratings, p.primary_position);
-        let overall_age = apply_age_curve(overall, p.age);
+        // Only uplift players who actually played a meaningful sample. A
+        // 30-game stint with elite per-game numbers is hot streak, not
+        // star-caliber baseline (Jalen Johnson 2024-25, etc.).
+        let overall_uplifted = if p.games >= 30.0 {
+            apply_production_uplift(overall, pct_prod[i])
+        } else {
+            overall
+        };
+        let overall_age = apply_age_curve(overall_uplifted, p.age);
         let potential = potential_from(overall_age, p.age);
 
         out.push(RatedPlayer {
@@ -143,9 +162,29 @@ fn percentile_ranks(values: Vec<f32>) -> Vec<f32> {
 }
 
 fn scale(pct: f32) -> u8 {
-    // Map 0..1 percentile into ~50..99 range.
-    let clamped = pct.clamp(0.0, 1.0);
-    (50.0 + 49.0 * clamped).round().clamp(0.0, 99.0) as u8
+    // Piecewise-linear non-linear mapping that stretches the top end so
+    // stars (top 5% by signal) actually land at 95-99, not 94. Old linear
+    // mapping (50 + 49*p) compressed top stars and inflated mid-tier role
+    // players. Anchors:
+    //   p=0.00 → 50  (worst end-of-bench)
+    //   p=0.50 → 73  (median rotation player)
+    //   p=0.70 → 80
+    //   p=0.85 → 88
+    //   p=0.95 → 95
+    //   p=1.00 → 99
+    let p = pct.clamp(0.0, 1.0);
+    let v = if p < 0.40 {
+        50.0 + (p / 0.40) * 19.0           // 0.00..0.40 → 50..69
+    } else if p < 0.70 {
+        69.0 + ((p - 0.40) / 0.30) * 11.0  // 0.40..0.70 → 69..80
+    } else if p < 0.85 {
+        80.0 + ((p - 0.70) / 0.15) * 8.0   // 0.70..0.85 → 80..88
+    } else if p < 0.95 {
+        88.0 + ((p - 0.85) / 0.10) * 7.0   // 0.85..0.95 → 88..95
+    } else {
+        95.0 + ((p - 0.95) / 0.05) * 4.0   // 0.95..1.00 → 95..99
+    };
+    v.round().clamp(0.0, 99.0) as u8
 }
 
 fn position_tweak(r: &mut Ratings, pos: Position) {
@@ -170,12 +209,11 @@ fn position_tweak(r: &mut Ratings, pos: Position) {
             r.interior_defense = r.interior_defense.saturating_add(2).min(99);
         }
         Position::C => {
-            r.off_reb = r.off_reb.saturating_add(8).min(99);
-            r.def_reb = r.def_reb.saturating_add(8).min(99);
-            r.interior_defense = r.interior_defense.saturating_add(8).min(99);
-            r.driving_layup = r.driving_layup.saturating_add(2).min(99);
-            r.standing_dunk = r.standing_dunk.saturating_add(4).min(99);
-            r.block = r.block.saturating_add(4).min(99);
+            r.off_reb = r.off_reb.saturating_add(4).min(99);
+            r.def_reb = r.def_reb.saturating_add(4).min(99);
+            r.interior_defense = r.interior_defense.saturating_add(4).min(99);
+            r.standing_dunk = r.standing_dunk.saturating_add(2).min(99);
+            r.block = r.block.saturating_add(2).min(99);
             r.three_point = r.three_point.saturating_sub(8);
             r.ball_handle = r.ball_handle.saturating_sub(6);
         }
@@ -187,11 +225,42 @@ fn blended_overall(r: &Ratings, pos: Position) -> u8 {
     r.overall_for(pos)
 }
 
+/// Production-percentile floor: a top-tier all-around impact player should
+/// never land below the floor for their tier, even if individual sub-ratings
+/// undershoot due to noisy shooting %. Anchors:
+///   prod_pct >= 0.99 → floor 95  (top 5 player league-wide)
+///   prod_pct >= 0.96 → floor 90  (all-NBA tier)
+///   prod_pct >= 0.90 → floor 85  (all-star tier)
+///   prod_pct >= 0.80 → floor 80  (high-end starter)
+fn apply_production_uplift(overall: u8, prod_pct: f32) -> u8 {
+    let floor = if prod_pct >= 0.99 {
+        95
+    } else if prod_pct >= 0.96 {
+        90
+    } else if prod_pct >= 0.90 {
+        85
+    } else if prod_pct >= 0.80 {
+        80
+    } else {
+        0
+    };
+    overall.max(floor)
+}
+
 fn apply_age_curve(overall: u8, age: u8) -> u8 {
-    // Peak 27. ±2/yr away from peak (gentler than RESEARCH says, but the
-    // base data is per-game so already age-loaded).
+    // Peak 27. Pre-peak: 2pts/yr (rookies have growth ahead). Post-peak:
+    // 0.5pts/yr because real NBA vets hold skill — Curry at 38 is still 90+,
+    // not 77. Hard cap at -6 either way so apply_age_curve never wipes a
+    // genuine star. The base per-game data is already age-loaded so we just
+    // soften the edges.
     let peak: i32 = 27;
-    let drop = ((age as i32 - peak).abs()).min(10);
+    let delta = age as i32 - peak;
+    let drop = if delta < 0 {
+        (-delta).min(6) // young: -2 to -6 (rookie cap)
+    } else {
+        ((delta as f32) * 0.5).round() as i32  // older: half a point per year
+    }
+    .min(6);
     let adjusted = (overall as i32 - drop).clamp(35, 99);
     adjusted as u8
 }

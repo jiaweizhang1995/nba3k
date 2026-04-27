@@ -12,120 +12,142 @@
 # rebound + assist bonus tied to high usage so triple-doubles emerge from
 # the players who actually create them (not random rolls).
 #
-# Real-world calibration anchors (NBA 2024-25 starter band, per 100 poss):
-#   PTS:  18-38   primary creators 28-38, role wings 12-18
-#   REB:  4-15    bigs 11-15, wings 5-8, guards 3-6
-#   AST:  3-13    primary creators 9-13, off-ball wings 2-4
-#   TOV:  2-4
-#   3PA:  1-10    shooters 8-10, slashers 4-6, bigs 0-3
-#   FTA:  3-9     slashers 7-9, shooters 2-4
+# Calibrated 2026-04-26 vs real NBA 2024-25 starter band (per 100):
+#   SGA 32.7/6.4/5.0   Jokić 29.6/10.2/12.7   Tatum 26.8/6.0/8.7
+#   Curry 24.5/6.0/4.4 Halliburton 18.6/9.2/3.5  Brunson 26/7.3/3.6
+#   Wemby 24.3/3.7/11  Edwards 27.6/4.5/5.7  Mitchell 24.0/5.0/4.5
+#   LeBron 24.4/8.2/7.8  KD 26.6/4.2/6.0  Giannis 30.4/6.5/12.0
 
 [PG-distributor]
 default_usage = 0.22
 pts_per_100 = 22.0
-reb_per_100 = 5.5
-ast_per_100 = 13.0
+reb_per_100 = 5.0
+ast_per_100 = 9.5
 stl_per_100 = 1.8
 blk_per_100 = 0.3
-tov_per_100 = 4.0
+tov_per_100 = 3.5
 three_pa_per_100 = 6.5
-fta_per_100 = 4.5
+fta_per_100 = 4.0
 
 [PG-scorer]
 default_usage = 0.30
-pts_per_100 = 38.0
-reb_per_100 = 6.5
-ast_per_100 = 10.0
+pts_per_100 = 36.0
+reb_per_100 = 5.5
+ast_per_100 = 7.5
 stl_per_100 = 1.5
 blk_per_100 = 0.3
-tov_per_100 = 3.8
-three_pa_per_100 = 11.0
-fta_per_100 = 8.0
+tov_per_100 = 3.4
+three_pa_per_100 = 9.5
+fta_per_100 = 7.0
 
 [SG-shooter]
 default_usage = 0.20
 pts_per_100 = 22.0
-reb_per_100 = 4.5
-ast_per_100 = 3.5
-stl_per_100 = 1.3
+reb_per_100 = 4.0
+ast_per_100 = 3.0
+stl_per_100 = 1.2
 blk_per_100 = 0.3
-tov_per_100 = 2.0
-three_pa_per_100 = 11.0
-fta_per_100 = 3.0
+tov_per_100 = 1.8
+three_pa_per_100 = 10.0
+fta_per_100 = 2.5
 
 [SG-slasher]
 default_usage = 0.24
 pts_per_100 = 26.0
-reb_per_100 = 5.0
-ast_per_100 = 4.5
-stl_per_100 = 1.4
+reb_per_100 = 4.5
+ast_per_100 = 4.0
+stl_per_100 = 1.3
 blk_per_100 = 0.4
-tov_per_100 = 2.8
-three_pa_per_100 = 5.5
-fta_per_100 = 8.5
+tov_per_100 = 2.5
+three_pa_per_100 = 5.0
+fta_per_100 = 7.0
 
 [SF-3andD]
 default_usage = 0.16
-pts_per_100 = 14.5
-reb_per_100 = 6.0
-ast_per_100 = 2.5
-stl_per_100 = 1.6
+pts_per_100 = 14.0
+reb_per_100 = 5.5
+ast_per_100 = 2.0
+stl_per_100 = 1.5
 blk_per_100 = 0.7
-tov_per_100 = 1.5
-three_pa_per_100 = 7.5
-fta_per_100 = 2.5
+tov_per_100 = 1.3
+three_pa_per_100 = 7.0
+fta_per_100 = 2.0
 
 [SF-creator]
 default_usage = 0.28
 pts_per_100 = 30.0
-reb_per_100 = 8.5
-ast_per_100 = 8.0
-stl_per_100 = 1.4
+reb_per_100 = 7.5
+ast_per_100 = 6.5
+stl_per_100 = 1.3
 blk_per_100 = 0.6
-tov_per_100 = 3.4
-three_pa_per_100 = 7.0
-fta_per_100 = 7.0
+tov_per_100 = 2.8
+three_pa_per_100 = 6.5
+fta_per_100 = 6.0
+
+# Tatum/Giannis/LeBron/Durant tier — primary scorer who also creates.
+[PF-creator]
+default_usage = 0.28
+pts_per_100 = 28.0
+reb_per_100 = 9.0
+ast_per_100 = 6.0
+stl_per_100 = 1.2
+blk_per_100 = 0.8
+tov_per_100 = 2.8
+three_pa_per_100 = 6.0
+fta_per_100 = 6.0
 
 [PF-stretch]
 default_usage = 0.20
-pts_per_100 = 19.0
-reb_per_100 = 8.0
-ast_per_100 = 2.5
-stl_per_100 = 1.0
+pts_per_100 = 18.0
+reb_per_100 = 7.0
+ast_per_100 = 2.0
+stl_per_100 = 0.9
 blk_per_100 = 0.9
-tov_per_100 = 1.8
+tov_per_100 = 1.5
 three_pa_per_100 = 7.0
-fta_per_100 = 3.0
+fta_per_100 = 2.5
 
 [PF-banger]
 default_usage = 0.20
-pts_per_100 = 18.0
-reb_per_100 = 12.0
+pts_per_100 = 17.0
+reb_per_100 = 11.0
 ast_per_100 = 2.0
 stl_per_100 = 0.9
-blk_per_100 = 1.4
-tov_per_100 = 2.0
+blk_per_100 = 1.3
+tov_per_100 = 1.8
 three_pa_per_100 = 1.0
-fta_per_100 = 5.0
+fta_per_100 = 4.5
 
 [C-finisher]
 default_usage = 0.22
 pts_per_100 = 22.0
-reb_per_100 = 14.0
-ast_per_100 = 2.5
-stl_per_100 = 0.8
-blk_per_100 = 2.4
-tov_per_100 = 2.6
+reb_per_100 = 12.0
+ast_per_100 = 2.8
+stl_per_100 = 0.7
+blk_per_100 = 2.0
+tov_per_100 = 2.2
 three_pa_per_100 = 0.3
-fta_per_100 = 6.5
+fta_per_100 = 5.5
+
+# Jokić-tier hub center: passes like a guard, rebounds + scores like a star big.
+[C-hub]
+default_usage = 0.30
+pts_per_100 = 28.0
+reb_per_100 = 13.0
+ast_per_100 = 8.0
+stl_per_100 = 1.0
+blk_per_100 = 0.9
+tov_per_100 = 3.0
+three_pa_per_100 = 3.0
+fta_per_100 = 5.0
 
 [C-stretch]
 default_usage = 0.22
 pts_per_100 = 22.0
-reb_per_100 = 11.0
-ast_per_100 = 4.0
+reb_per_100 = 10.0
+ast_per_100 = 3.5
 stl_per_100 = 0.9
-blk_per_100 = 1.6
-tov_per_100 = 2.4
-three_pa_per_100 = 5.5
-fta_per_100 = 4.5
+blk_per_100 = 1.4
+tov_per_100 = 2.0
+three_pa_per_100 = 5.0
+fta_per_100 = 4.0

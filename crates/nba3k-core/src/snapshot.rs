@@ -76,10 +76,15 @@ impl<'a> LeagueSnapshot<'a> {
     }
 
     /// All players currently on `team`'s roster (active = team_id matches).
+    /// Sorted by `(overall desc, id asc)` so callers get a stable order
+    /// across HashMap iteration shuffles.
     pub fn roster(&self, team: TeamId) -> Vec<&Player> {
-        self.players_by_id
+        let mut out: Vec<&Player> = self
+            .players_by_id
             .values()
             .filter(|p| p.team == Some(team))
-            .collect()
+            .collect();
+        out.sort_by(|a, b| b.overall.cmp(&a.overall).then_with(|| a.id.0.cmp(&b.id.0)));
+        out
     }
 }

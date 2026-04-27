@@ -78,12 +78,16 @@ impl Ratings {
         let rebounding = (self.off_reb as u32 + self.def_reb as u32) / 2;
         let athletic = (self.speed as u32 + self.agility as u32 + self.strength as u32 + self.vertical as u32) / 4;
 
+        // Rebalanced 2026-04-26 (M19.1 realism patch): centers were over-weighted
+        // on rebounding+interior-defense (53% combined) which inverted role-player
+        // bigs above wing stars. New weights flatten the C bias and bump shooting
+        // for SF/PF so volume scorers (Tatum, Booker) land where reality puts them.
         let (w_in, w_sh, w_ha, w_de, w_re, w_at) = match pos {
-            Position::PG => (5, 25, 30, 18, 5, 17),
-            Position::SG => (10, 30, 18, 18, 8, 16),
-            Position::SF => (15, 22, 14, 22, 12, 15),
-            Position::PF => (20, 14, 8, 22, 22, 14),
-            Position::C => (25, 6, 4, 24, 28, 13),
+            Position::PG => (5, 27, 28, 18, 5, 17),
+            Position::SG => (10, 32, 18, 18, 6, 16),
+            Position::SF => (15, 26, 14, 18, 12, 15),
+            Position::PF => (20, 18, 8, 22, 18, 14),
+            Position::C => (22, 12, 8, 20, 18, 20),
         };
         let total = inside * w_in + shooting * w_sh + handling * w_ha
             + defense * w_de + rebounding * w_re + athletic * w_at;
@@ -232,10 +236,13 @@ impl Player {
 }
 
 /// Morale shift when a player's role changes. Demotion = negative,
-/// promotion = small positive. Demotions hurt 2x more than promotions help —
+/// promotion = small positive. Demotions hurt ~2× more than promotions help —
 /// matches 2K MyGM published behavior where Star→BenchWarmer is a
-/// near-instant trade-request trigger.
+/// near-instant trade-request trigger. Same-role assignment is a no-op.
 pub fn role_morale_drift(old: PlayerRole, new: PlayerRole) -> f32 {
+    if old == new {
+        return 0.0;
+    }
     let rank = |r: PlayerRole| -> i32 {
         match r {
             PlayerRole::Star => 5,
@@ -248,8 +255,10 @@ pub fn role_morale_drift(old: PlayerRole, new: PlayerRole) -> f32 {
     };
     let rank_delta = rank(new) - rank(old);
     if rank_delta < 0 {
-        (rank_delta as f32) * 0.20
+        // Star (5) → Bench (1) = -4 ranks → -0.40 morale (matches 2K).
+        (rank_delta as f32) * 0.10
     } else if rank_delta > 0 {
+        // Bench (1) → Star (5) = +4 ranks → +0.40 morale (symmetric).
         (rank_delta as f32) * 0.10
     } else {
         0.0

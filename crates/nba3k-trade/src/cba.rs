@@ -118,25 +118,46 @@ pub fn outgoing_salary_pre_kicker(
 /// holding a kicker, the bump (pct of remaining base) is prorated over the
 /// remaining guaranteed years and added to year-1 cap hit. Cash received is
 /// included.
+///
+/// Multi-team offers (`len() >= 3`) route assets via round-robin: team `i`'s
+/// outgoing flows to team `(i+1) % n` (same convention as
+/// `apply_accepted_trade`). For salary matching that means each team's
+/// "incoming" is the assets sent by exactly *one* prior team, not the union
+/// of every other side. The 2-team case degenerates correctly: prev(team[1])
+/// = team[0] and prev(team[0]) = team[1], so each team sees the other's
+/// outgoing — same behavior as the original simple sum.
 pub fn incoming_salary_post_kicker(
     team: TeamId,
     offer: &TradeOffer,
     league: &LeagueSnapshot,
 ) -> Cents {
-    let mut total = Cents::ZERO;
-    for (other_team, other_side) in &offer.assets_by_team {
-        if *other_team == team {
-            continue;
-        }
-        // Cash from the other side flows in.
-        total += other_side.cash_out;
-        for pid in &other_side.players_out {
-            if let Some(p) = league.player(*pid) {
-                total += incoming_year_one_cap_hit(p, league.current_season);
-            }
+    let Some(origin) = incoming_origin(team, offer) else {
+        return Cents::ZERO;
+    };
+    let Some(other_side) = offer.assets_by_team.get(&origin) else {
+        return Cents::ZERO;
+    };
+    let mut total = other_side.cash_out;
+    for pid in &other_side.players_out {
+        if let Some(p) = league.player(*pid) {
+            total += incoming_year_one_cap_hit(p, league.current_season);
         }
     }
     total
+}
+
+/// Round-robin origin: the team whose outgoing assets are routed to `team`
+/// under `apply_accepted_trade`'s `(i+1) % n` rule. Returns `None` if `team`
+/// is not part of the offer.
+pub fn incoming_origin(team: TeamId, offer: &TradeOffer) -> Option<TeamId> {
+    let teams: Vec<TeamId> = offer.assets_by_team.keys().copied().collect();
+    let n = teams.len();
+    if n < 2 {
+        return None;
+    }
+    let idx = teams.iter().position(|t| *t == team)?;
+    let prev = (idx + n - 1) % n;
+    Some(teams[prev])
 }
 
 /// Year-1 cap hit on the new team for a single incoming player, including a

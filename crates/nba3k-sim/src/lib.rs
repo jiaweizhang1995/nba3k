@@ -6,7 +6,7 @@ use rand::RngCore;
 pub mod engine;
 pub mod params;
 
-pub use engine::statistical::StatisticalEngine;
+pub use engine::statistical::{roll_injuries_from_box, tick_injury, StatisticalEngine};
 pub use params::SimParams;
 
 /// One slot in a team's rotation. The StatisticalEngine reads `minutes_share`,

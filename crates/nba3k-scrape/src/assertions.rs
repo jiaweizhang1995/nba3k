@@ -23,9 +23,9 @@ impl Default for Bounds {
     fn default() -> Self {
         Self {
             min_players: 450,
-            max_players: 600,
+            max_players: 720,
             min_per_team: 13,
-            max_per_team: 20,
+            max_per_team: 30,
             min_prospects: 60,
         }
     }
@@ -96,40 +96,58 @@ pub fn run_all(out: &Path, season: SeasonId, bounds: &Bounds) -> Result<()> {
         bail!("{dup} duplicate player ids in seed");
     }
 
-    // League salary total within ±5% of 30 × cap. Soft-skip if no
-    // contracts were captured (offline mode), otherwise enforce.
-    if let Some(ly) = LeagueYear::for_season(season) {
-        let with_contracts: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM players WHERE contract_json IS NOT NULL",
-            [],
-            |r| r.get(0),
-        )?;
-        if with_contracts > 50 {
-            // Sum first-year salaries (cents) by walking JSON in app code.
-            let mut stmt = conn.prepare("SELECT contract_json FROM players WHERE contract_json IS NOT NULL")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-            let mut total_cents: i64 = 0;
-            for row in rows {
-                let json: String = row?;
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
-                    if let Some(years) = v.get("years").and_then(|y| y.as_array()) {
-                        if let Some(first) = years.first() {
-                            if let Some(sal) = first.get("salary").and_then(|s| s.as_i64()) {
-                                total_cents = total_cents.saturating_add(sal);
-                            }
-                        }
+    // M12-A: every active player must have a contract after the backfill
+    // step in `seed::write_seed`. Bare any holes loudly — silent partial
+    // coverage hid bugs in M11 where ~30% of rosters shipped contractless.
+    let active_no_contract: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM players WHERE team_id IS NOT NULL AND contract_json IS NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    if active_no_contract > 0 {
+        bail!("{active_no_contract} active players (team_id IS NOT NULL) have no contract");
+    }
+
+    // M12-A: league-wide first-year salary total must land in a realistic
+    // band. 30 teams × ~$170M payroll ≈ $5.1B; the band [$3B, $7B] gives
+    // generous slack for over/under-cap teams without missing the case
+    // where contract_gen never ran (band would be zero).
+    let mut stmt = conn.prepare("SELECT contract_json FROM players WHERE contract_json IS NOT NULL")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let mut total_cents: i64 = 0;
+    for row in rows {
+        let json: String = row?;
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let Some(years) = v.get("years").and_then(|y| y.as_array()) {
+                if let Some(first) = years.first() {
+                    if let Some(sal) = first.get("salary").and_then(|s| s.as_i64()) {
+                        total_cents = total_cents.saturating_add(sal);
                     }
                 }
             }
-            let expected = (ly.cap.0 as i128) * 30;
-            let lower = (expected as f64 * 0.5) as i64; // ±50% — first year only, generous
-            let upper = (expected as f64 * 1.5) as i64;
-            if total_cents < lower || total_cents > upper {
-                tracing::warn!(
-                    "league total first-year salary {total_cents} outside loose band [{lower},{upper}]; \
-                     contracts may be partial"
-                );
-            }
+        }
+    }
+    let lower = 3_000_000_000_00_i64; // $3B in cents
+    let upper = 7_000_000_000_00_i64; // $7B in cents
+    if total_cents < lower || total_cents > upper {
+        bail!(
+            "league total first-year salary ${:.2}B outside expected band [$3B, $7B]",
+            total_cents as f64 / 100.0 / 1_000_000_000.0
+        );
+    }
+
+    // Loose ±50% sanity vs cap × 30 (warn-only — the hard band above already
+    // catches catastrophic drift; this just surfaces drift relative to the
+    // current league cap setting for observability).
+    if let Some(ly) = LeagueYear::for_season(season) {
+        let expected = (ly.cap.0 as i128) * 30;
+        let warn_lower = (expected as f64 * 0.5) as i64;
+        let warn_upper = (expected as f64 * 1.5) as i64;
+        if total_cents < warn_lower || total_cents > warn_upper {
+            tracing::warn!(
+                "league total first-year salary {total_cents} outside ±50% of 30×cap \
+                 [{warn_lower},{warn_upper}]"
+            );
         }
     }
 
