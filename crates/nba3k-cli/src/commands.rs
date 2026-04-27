@@ -1275,11 +1275,17 @@ fn build_snapshot(app: &mut AppState, team: &Team) -> Result<TeamSnapshot> {
             .unwrap_or(true)
     });
 
-    // Position-aware rotation: 5 starters (one per position) + 3 bench (filling
-    // the weakest starter's position). Replaces the OVR-greedy top-8 pick which
-    // produced 4-PG and 2-C lineups that the team-strength model couldn't
-    // distinguish from a real spread.
-    let rotation = build_position_aware_rotation(&roster, roster_index, &team.abbrev);
+    // M21 Rotation Level A: if the user has set a complete starting 5 for
+    // this team AND all 5 are still on the active roster, honor it. Bench
+    // and minutes stay auto. Any partial / stale override falls through to
+    // the position-aware auto-builder below.
+    let user_starters = app.store()?.read_starters(team.id)?;
+    let rotation = user_starters_or_auto(
+        &user_starters,
+        &roster,
+        roster_index,
+        &team.abbrev,
+    );
 
     let team_overall = if rotation.is_empty() {
         50
@@ -1306,6 +1312,158 @@ fn build_snapshot(app: &mut AppState, team: &Team) -> Result<TeamSnapshot> {
         home_court_advantage: 2.0,
         rotation,
     })
+}
+
+/// M21 Rotation Level A entry point. If the user has saved a complete +
+/// roster-valid starting 5 for this team, lock those 5 as the positional
+/// starters and let the existing auto-builder fill the 3 bench slots
+/// around them. Any partial override or trade-stale player_id falls
+/// through to the pure auto rotation — no half-apply.
+fn user_starters_or_auto(
+    starters: &Starters,
+    roster: &[Player],
+    star_roster: &nba3k_models::star_protection::StarRoster,
+    team_abbrev: &str,
+) -> Vec<RotationSlot> {
+    if let Some(rotation) = apply_user_starters(starters, roster, star_roster, team_abbrev) {
+        return rotation;
+    }
+    build_position_aware_rotation(roster, star_roster, team_abbrev)
+}
+
+/// Returns `Some` only when every slot is filled AND every player_id is
+/// present in `roster` (which is already filtered to "on this team, not
+/// active-injured"). A traded / retired / FA'd starter collapses the
+/// override and the caller falls back to auto.
+fn apply_user_starters(
+    starters: &Starters,
+    roster: &[Player],
+    star_roster: &nba3k_models::star_protection::StarRoster,
+    team_abbrev: &str,
+) -> Option<Vec<RotationSlot>> {
+    if !starters.is_complete() {
+        return None;
+    }
+    let starter_share = |pos: Position| -> f32 {
+        match pos {
+            Position::PG => 0.71,
+            Position::SG => 0.69,
+            Position::SF => 0.67,
+            Position::PF => 0.65,
+            Position::C => 0.58,
+        }
+    };
+    let starter_usage = |pos: Position| -> f32 {
+        match pos {
+            Position::PG => 0.24,
+            Position::SG => 0.22,
+            Position::SF => 0.20,
+            Position::PF => 0.20,
+            Position::C => 0.16,
+        }
+    };
+
+    use std::collections::HashSet;
+    let mut used: HashSet<PlayerId> = HashSet::new();
+    let mut rotation: Vec<RotationSlot> = Vec::with_capacity(8);
+    for (pos, pid) in starters.iter_assigned() {
+        let player = roster.iter().find(|p| p.id == pid)?;
+        if !used.insert(player.id) {
+            // Same player picked twice across slots — invalid, fall back.
+            return None;
+        }
+        rotation.push(RotationSlot {
+            player: player.id,
+            name: player.name.clone(),
+            position: pos,
+            minutes_share: starter_share(pos),
+            usage: starter_usage(pos),
+            ratings: player.ratings,
+            age: player.age,
+            overall: player.overall,
+            potential: player.potential,
+        });
+    }
+
+    // Bench (3 slots) reuses the auto-builder's "weakest starter position
+    // gets a backup" logic, but seeded with the user's chosen starters.
+    let bench_share = |pos: Position| -> f32 {
+        match pos {
+            Position::C => 0.42,
+            _ => 0.36,
+        }
+    };
+    let mut bench_used_positions: HashSet<Position> = HashSet::new();
+    for _ in 0..3 {
+        let weakest_pos = rotation
+            .iter()
+            .take(5)
+            .filter(|s| !bench_used_positions.contains(&s.position))
+            .min_by_key(|s| s.ratings.overall_for(s.position) as u32)
+            .map(|s| s.position)
+            .or_else(|| {
+                rotation
+                    .iter()
+                    .take(5)
+                    .min_by_key(|s| s.ratings.overall_for(s.position) as u32)
+                    .map(|s| s.position)
+            })
+            .unwrap_or(Position::SF);
+        bench_used_positions.insert(weakest_pos);
+
+        let adjacent = |a: Position, b: Position| -> bool {
+            let idx = |p: Position| -> i32 {
+                match p {
+                    Position::PG => 0,
+                    Position::SG => 1,
+                    Position::SF => 2,
+                    Position::PF => 3,
+                    Position::C => 4,
+                }
+            };
+            (idx(a) - idx(b)).abs() <= 1
+        };
+        let fits = |p: &Player, pos: Position| -> bool {
+            p.primary_position == pos
+                || p.secondary_position == Some(pos)
+                || adjacent(p.primary_position, pos)
+        };
+        let score_for = |p: &Player, pos: Position| -> u32 {
+            let base = p.ratings.overall_for(pos) as u32;
+            if star_roster.is_tagged(team_abbrev, &p.name) && p.primary_position == pos {
+                base + 5
+            } else {
+                base
+            }
+        };
+
+        let bench = roster
+            .iter()
+            .filter(|p| !used.contains(&p.id) && fits(p, weakest_pos))
+            .max_by_key(|p| score_for(p, weakest_pos));
+        let chosen = bench.or_else(|| {
+            roster
+                .iter()
+                .filter(|p| !used.contains(&p.id))
+                .max_by_key(|p| p.overall as u32)
+        });
+        if let Some(p) = chosen {
+            used.insert(p.id);
+            rotation.push(RotationSlot {
+                player: p.id,
+                name: p.name.clone(),
+                position: weakest_pos,
+                minutes_share: bench_share(weakest_pos),
+                usage: starter_usage(weakest_pos) * 0.55,
+                ratings: p.ratings,
+                age: p.age,
+                overall: p.overall,
+                potential: p.potential,
+            });
+        }
+    }
+
+    Some(rotation)
 }
 
 /// Build an 8-man rotation respecting position constraints: 1 PG / 1 SG / 1 SF

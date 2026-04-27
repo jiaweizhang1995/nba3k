@@ -13,6 +13,7 @@ mod coach;
 mod money;
 mod league_year;
 mod snapshot;
+pub mod rotation;
 
 pub use ids::*;
 pub use player::*;
@@ -27,6 +28,7 @@ pub use coach::*;
 pub use money::*;
 pub use league_year::*;
 pub use snapshot::*;
+pub use rotation::Starters;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {

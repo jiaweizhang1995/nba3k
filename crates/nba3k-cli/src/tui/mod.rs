@@ -385,9 +385,9 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         Screen::Calendar => inner_screen_key(app, tui, k, screens::calendar::handle_key),
         Screen::Saves => inner_screen_key(app, tui, k, screens::saves::handle_key),
         Screen::NewGame => inner_screen_key(app, tui, k, screens::new_game::handle_key),
-        Screen::Roster | Screen::Rotation | Screen::Trades | Screen::Draft | Screen::Finance => {
-            stub_key(tui, k)
-        }
+        Screen::Roster => inner_screen_key(app, tui, k, screens::roster::handle_key),
+        Screen::Rotation => inner_screen_key(app, tui, k, screens::rotation::handle_key),
+        Screen::Trades | Screen::Draft | Screen::Finance => stub_key(tui, k),
         Screen::QuitConfirm => Ok(false), // unreachable
     }
 }
@@ -602,8 +602,8 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
         Screen::Calendar => screens::calendar::render(f, area, &tui.theme, app, tui),
         Screen::Saves => screens::saves::render(f, area, &tui.theme, app, tui),
         Screen::NewGame => screens::new_game::render(f, area, &tui.theme, app, tui),
-        Screen::Roster => screens::render_stub(f, area, &tui.theme, "Roster", "M21"),
-        Screen::Rotation => screens::render_stub(f, area, &tui.theme, "Rotation", "M21"),
+        Screen::Roster => screens::roster::render(f, area, &tui.theme, app, tui),
+        Screen::Rotation => screens::rotation::render(f, area, &tui.theme, app, tui),
         Screen::Trades => screens::render_stub(f, area, &tui.theme, "Trades", "M22"),
         Screen::Draft => screens::render_stub(f, area, &tui.theme, "Draft", "M22"),
         Screen::Finance => screens::render_stub(f, area, &tui.theme, "Finance", "M22"),

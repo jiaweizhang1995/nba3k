@@ -6,6 +6,8 @@ pub mod calendar;
 pub mod home;
 pub mod legacy;
 pub mod new_game;
+pub mod roster;
+pub mod rotation;
 pub mod saves;
 pub mod stub;
 

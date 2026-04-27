@@ -14,6 +14,8 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;

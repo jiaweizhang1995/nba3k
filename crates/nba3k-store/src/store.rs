@@ -1490,6 +1490,83 @@ impl Store {
     }
 
     // ------------------------------------------------------------------
+    // rotation level A — user-set starters per team (M21, V014)
+    //
+    // `team_starters` stores at most 5 rows per team, one per canonical
+    // position string. The CHECK constraint guards SQL-side; we still
+    // validate `pos` at API entry so callers fail fast with a clear
+    // error rather than a sqlite constraint violation.
+    // ------------------------------------------------------------------
+
+    /// Read the user-set starters for a team. Empty / partial overrides
+    /// return as `Default` slots — callers use `Starters::is_complete`
+    /// to decide whether to honor the override.
+    pub fn read_starters(&self, team_id: TeamId) -> StoreResult<nba3k_core::Starters> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pos, player_id FROM team_starters WHERE team_id = ?1")?;
+        let rows = stmt
+            .query_map(params![team_id.0 as i64], |r| {
+                let pos: String = r.get(0)?;
+                let pid: i64 = r.get(1)?;
+                Ok((pos, pid))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut starters = nba3k_core::Starters::default();
+        for (pos, pid) in rows {
+            let player = PlayerId(pid as u32);
+            match pos.as_str() {
+                "PG" => starters.pg = Some(player),
+                "SG" => starters.sg = Some(player),
+                "SF" => starters.sf = Some(player),
+                "PF" => starters.pf = Some(player),
+                "C" => starters.c = Some(player),
+                // Unknown rows can't exist thanks to the CHECK constraint,
+                // but we treat them as no-ops rather than panicking — the
+                // sim hook gracefully falls back when slots are missing.
+                _ => {}
+            }
+        }
+        Ok(starters)
+    }
+
+    /// Set or replace the starter at one positional slot.
+    pub fn upsert_starter(
+        &self,
+        team_id: TeamId,
+        pos: &str,
+        player_id: PlayerId,
+    ) -> StoreResult<()> {
+        validate_starter_pos(pos)?;
+        self.conn.execute(
+            "INSERT INTO team_starters(team_id, pos, player_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(team_id, pos) DO UPDATE SET player_id = excluded.player_id",
+            params![team_id.0 as i64, pos, player_id.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Clear one positional slot. No-op if the slot was already empty.
+    pub fn clear_starter(&self, team_id: TeamId, pos: &str) -> StoreResult<()> {
+        validate_starter_pos(pos)?;
+        self.conn.execute(
+            "DELETE FROM team_starters WHERE team_id = ?1 AND pos = ?2",
+            params![team_id.0 as i64, pos],
+        )?;
+        Ok(())
+    }
+
+    /// Wipe all five slots for a team. Used by the "Clear all" UI action.
+    pub fn clear_all_starters(&self, team_id: TeamId) -> StoreResult<()> {
+        self.conn.execute(
+            "DELETE FROM team_starters WHERE team_id = ?1",
+            params![team_id.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
     // export (M18-C)
     //
     // Dump every persistent user table as `{tables: {name: [{col: val,
@@ -1576,6 +1653,19 @@ fn value_ref_to_json(v: ValueRef<'_>) -> serde_json::Value {
 // ----------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------
+
+/// Reject any `pos` that doesn't match the canonical 5-position string.
+/// Mirrors the V014 `CHECK(pos IN ('PG','SG','SF','PF','C'))` so callers
+/// fail fast with a typed error instead of an opaque sqlite constraint
+/// violation.
+fn validate_starter_pos(pos: &str) -> StoreResult<()> {
+    match pos {
+        "PG" | "SG" | "SF" | "PF" | "C" => Ok(()),
+        _ => Err(crate::StoreError::InvalidInput(format!(
+            "invalid starter position: {pos:?} (expected PG|SG|SF|PF|C)"
+        ))),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ScheduledRow {
