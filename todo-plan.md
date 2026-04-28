@@ -636,7 +636,9 @@ User goal: most TUI interactions should be possible with arrows + Enter + Tab + 
 
 ## T19 — Calendar: drop `1`-`6` sub-tab jump
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 296 unit tests passed; Calendar 1-6 jump grep clean.
 
 **Goal**: Remove the `KeyCode::Char(c @ '1'..='6')` direct sub-tab jumps. Tab / Shift-Tab already cycle the 6 sub-tabs (Schedule / Standings / Playoffs / Awards / All-Star / Cup).
 

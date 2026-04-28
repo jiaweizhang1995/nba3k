@@ -1035,14 +1035,6 @@ pub fn handle_key(_app: &mut AppState, _tui: &mut TuiApp, key: KeyEvent) -> Resu
                 consumed = true;
                 return;
             }
-            KeyCode::Char(c @ '1'..='6') => {
-                let idx = (c as u8 - b'1') as usize;
-                if idx < SubTab::ALL.len() {
-                    st.sub_tab = SubTab::ALL[idx];
-                    consumed = true;
-                    return;
-                }
-            }
             _ => {}
         }
 

@@ -1295,7 +1295,6 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("← / ↑ / ↓ / →", "Move selected date"),
             ("[ / ]", "Previous or next month"),
             ("Tab", "Switch Calendar sub-page"),
-            ("1-6", "Jump to Calendar sub-page"),
             ("Esc", "Back to menu"),
         ],
         Screen::Saves => &[
