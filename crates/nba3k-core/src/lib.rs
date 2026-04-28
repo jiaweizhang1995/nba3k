@@ -13,6 +13,9 @@ mod coach;
 mod money;
 mod league_year;
 mod snapshot;
+pub mod i18n;
+mod i18n_en;
+mod i18n_zh;
 pub mod rotation;
 
 pub use ids::*;
@@ -28,6 +31,7 @@ pub use coach::*;
 pub use money::*;
 pub use league_year::*;
 pub use snapshot::*;
+pub use i18n::{t, Lang, T};
 pub use rotation::Starters;
 
 #[derive(Debug, thiserror::Error)]

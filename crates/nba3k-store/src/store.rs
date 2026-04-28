@@ -72,6 +72,31 @@ impl Store {
     }
 
     // ------------------------------------------------------------------
+    // settings
+    // ------------------------------------------------------------------
+
+    pub fn write_setting(&self, key: &str, value: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn read_setting(&self, key: &str) -> StoreResult<Option<String>> {
+        let v: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v)
+    }
+
+    // ------------------------------------------------------------------
     // season_state
     // ------------------------------------------------------------------
 
