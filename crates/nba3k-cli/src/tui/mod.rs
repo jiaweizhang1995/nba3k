@@ -1075,7 +1075,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
     if !tui.has_save() && tui.current != Screen::QuitConfirm {
         let hints: &[(&str, &str)] = match tui.current {
             Screen::Launch => &[("↑↓", "Navigate"), ("Enter", "Select"), ("Esc", "Quit")],
-            Screen::Saves => &[("↑↓", "Navigate"), ("l", "Load"), ("Esc", "Back")],
+            Screen::Saves => &[("↑↓", "Navigate"), ("Enter", "Load"), ("Esc", "Back")],
             Screen::Settings => &[("↑↓", "Move"), ("Enter", "Apply"), ("Esc", "Back")],
             _ => &[("Ctrl+S", "Load Save"), ("?", "Help"), ("Esc", "Quit")],
         };
@@ -1300,7 +1300,7 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
         ],
         Screen::Saves => &[
             ("↑ / ↓", "Move selected save"),
-            ("l / n / d / e", "Load, new, delete, or export"),
+            ("Enter / l / n / d / e", "Load, new, delete, or export"),
             ("Esc", "Back"),
         ],
         Screen::Settings => &[

@@ -513,7 +513,9 @@ User goal: most TUI interactions should be possible with arrows + Enter + Tab + 
 
 ## T15 — Saves screen: Enter = Load
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 296 unit tests passed; Enter and l/L share the saves load handler.
 
 **Goal**: On Saves overlay, pressing `Enter` on the highlighted row loads that save. Currently requires `l` / `L`.
 

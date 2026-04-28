@@ -203,7 +203,7 @@ fn draw_hints(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         Span::styled(format!(" {}   ", t(lang, T::CommonMove)), theme.text()),
         Span::styled(" n ", theme.accent_style()),
         Span::styled(format!(" {}   ", t(lang, T::SavesNew)), theme.text()),
-        Span::styled(" l ", theme.accent_style()),
+        Span::styled(" Enter ", theme.accent_style()),
         Span::styled(format!(" {}   ", t(lang, T::SavesLoad)), theme.text()),
         Span::styled(" d ", theme.accent_style()),
         Span::styled(format!(" {}   ", t(lang, T::SavesDelete)), theme.text()),
@@ -440,7 +440,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             crate::tui::screens::new_game::reset();
             Ok(true)
         }
-        KeyCode::Char('l') | KeyCode::Char('L') => {
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('L') => {
             let path = STATE.with(|s| {
                 let s = s.borrow();
                 s.rows
