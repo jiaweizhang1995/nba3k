@@ -1,23 +1,16 @@
-//! Calendar screen — the headline screen of M20. Houses the time-control
-//! UI (sim day/week/month/sim-to-event) plus six sub-tabs that surface league
-//! state: Schedule (month grid), Standings, Playoffs, Awards, All-Star, Cup.
+//! Calendar screen — a view-only schedule hub with six sub-tabs that surface
+//! league state: Schedule (month grid), Standings, Playoffs, Awards, All-Star,
+//! Cup. Time controls live in the global TUI banner.
 //!
 //! Architecture notes:
-//! - All state mutation routes through `commands::dispatch` wrapped in
-//!   `with_silenced_io` so inner `println!`s don't corrupt the alt-screen.
+//! - This screen is read-only. Time controls live in the global TUI banner.
 //! - Per-screen state lives in a module-level `OnceCell` keyed by save day —
 //!   actually we keep state inside this module via `static mut`-free pattern:
 //!   we pass the state through `TuiApp` indirectly by recomputing on each
 //!   render. To avoid excess store reads, a local `Cache` struct is held in a
 //!   `RefCell` keyed by `(season, day)`. Invalidated automatically when the
 //!   day advances after a sim.
-//! - Pause-on-event modal is surfaced when `sim_paced` notices a new offer or
-//!   user-team injury during a sim-week or sim-month run.
-//!
-//! Constraints honored:
-//! - Does not touch `tui/mod.rs` or `tui/widgets.rs`.
-//! - Does not modify `commands.rs`.
-//! - Reads schedule via `Store::pending_games_through` + `Store::read_games`.
+//! Reads schedule via `Store::pending_games_through` + `Store::read_games`.
 
 use anyhow::Result;
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDate, Weekday};
@@ -32,10 +25,9 @@ use ratatui::{
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::cli::{Command, JsonFlag, PlayoffsAction, PlayoffsArgs};
 use crate::state::AppState;
-use crate::tui::widgets::{centered_block, kv_table, Confirm, FormWidget, Theme, WidgetEvent};
-use crate::tui::{with_silenced_io, TuiApp};
+use crate::tui::widgets::{centered_block, kv_table, Theme};
+use crate::tui::TuiApp;
 use nba3k_core::{t, Conference, Lang, PlayerId, SeasonId, SeasonPhase, TeamId, T};
 use nba3k_store::StandingRow;
 
@@ -47,19 +39,9 @@ use nba3k_store::StandingRow;
 // runtime dependency on `commands.rs` internals — when those constants move
 // or change, the build error here forces a coordinated update.
 
-const ALL_STAR_DAY: u32 = 41;
 const CUP_GROUP_DAY: u32 = 30;
 const CUP_QF_DAY: u32 = 45;
 const CUP_SF_DAY: u32 = 53;
-const CUP_FINAL_DAY: u32 = 55;
-/// Approximate trade-deadline day-of-season (mid-Feb of the 2025-26 calendar
-/// — the actual deadline date is February 5, which falls around day 114 of
-/// our 174-day calendar starting October 14).
-const TRADE_DEADLINE_DAY: u32 = 114;
-/// Approximate first day of the playoff bracket. The bracket runs after the
-/// regular season completes — since regular season ends ~day 165, this is the
-/// earliest a Playoffs phase will be entered.
-const PLAYOFFS_START_DAY: u32 = 168;
 /// Calendar length used for "Day X of Y" — the schedule generator typically
 /// produces an 82-game slate inside this window. Extends past playoff start
 /// so the grid can navigate into the postseason.
@@ -74,10 +56,6 @@ fn day_zero() -> NaiveDate {
 
 fn day_to_date(day: u32) -> NaiveDate {
     day_zero() + ChronoDuration::days(day as i64)
-}
-
-fn date_to_day(date: NaiveDate) -> i64 {
-    (date - day_zero()).num_days()
 }
 
 // ---------------------------------------------------------------------------
@@ -148,9 +126,6 @@ struct CalendarState {
     cached_for: Option<(SeasonId, u32)>,
     schedule: Vec<ScheduleEntry>,
     awards_season_offset: i32,
-    pause_modal: Option<PauseModal>,
-    advance_confirm: Option<Confirm>,
-    playoffs_confirm: Option<Confirm>,
 }
 
 #[derive(Clone)]
@@ -165,12 +140,6 @@ struct ScheduleEntry {
     away_score: Option<u16>,
 }
 
-#[derive(Clone)]
-struct PauseModal {
-    title: String,
-    body: String,
-}
-
 impl CalendarState {
     fn new() -> Self {
         Self {
@@ -180,16 +149,7 @@ impl CalendarState {
             cached_for: None,
             schedule: Vec::new(),
             awards_season_offset: 0,
-            pause_modal: None,
-            advance_confirm: None,
-            playoffs_confirm: None,
         }
-    }
-
-    fn modal_active(&self) -> bool {
-        self.pause_modal.is_some()
-            || self.advance_confirm.is_some()
-            || self.playoffs_confirm.is_some()
     }
 }
 
@@ -306,19 +266,6 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
             SubTab::Cup => draw_cup_tab(f, outer[1], theme, app, tui, &st),
         }
 
-        if let Some(modal) = st.pause_modal.clone() {
-            let footer = format!(
-                "[c] {}   [i] {}   [Esc] {}",
-                t(tui.lang, T::CommonContinue),
-                t(tui.lang, T::TradesInbox),
-                t(tui.lang, T::CommonDismiss)
-            );
-            draw_centered_modal(f, area, theme, &modal.title, &modal.body, &footer);
-        } else if let Some(c) = st.advance_confirm.as_ref() {
-            draw_widget_modal(f, area, theme, c);
-        } else if let Some(c) = st.playoffs_confirm.as_ref() {
-            draw_widget_modal(f, area, theme, c);
-        }
     });
 }
 
@@ -713,7 +660,6 @@ fn draw_playoffs_tab(
                 "Playoffs not started.",
                 "",
                 "Sim through the regular season first.",
-                "Press Enter from the Schedule tab to sim to season-end.",
             ],
         );
         return;
@@ -734,8 +680,6 @@ fn draw_playoffs_tab(
             t(tui.lang, T::CalendarPlayoffs),
             &[
                 "Bracket not yet generated.",
-                "",
-                "Press Enter to sim the full playoff bracket.",
             ],
         );
         return;
@@ -1070,94 +1014,14 @@ fn draw_cup_tab(
 }
 
 // ---------------------------------------------------------------------------
-// Modal helpers
-// ---------------------------------------------------------------------------
-
-fn draw_centered_modal(f: &mut Frame, area: Rect, theme: &Theme, title: &str, body: &str, footer: &str) {
-    let w = 60.min(area.width.saturating_sub(4));
-    let h = 9.min(area.height.saturating_sub(4));
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let rect = Rect { x, y, width: w, height: h };
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(body.to_string(), theme.text())).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from(Span::styled(footer.to_string(), theme.muted_style())).alignment(Alignment::Center),
-    ];
-    let title_owned = format!(" {} ", title);
-    let p = Paragraph::new(lines).block(theme.block(&title_owned));
-    f.render_widget(p, rect);
-}
-
-fn draw_widget_modal<W: FormWidget>(f: &mut Frame, area: Rect, theme: &Theme, w: &W) {
-    let mw = 50.min(area.width.saturating_sub(4));
-    let mh = 7.min(area.height.saturating_sub(4));
-    let x = area.x + (area.width.saturating_sub(mw)) / 2;
-    let y = area.y + (area.height.saturating_sub(mh)) / 2;
-    let rect = Rect { x, y, width: mw, height: mh };
-    w.render(f, rect, theme);
-}
-
-// ---------------------------------------------------------------------------
 // handle_key
 // ---------------------------------------------------------------------------
 
-pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
+pub fn handle_key(_app: &mut AppState, _tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
     let mut consumed = false;
-    let mut sim_request: Option<SimRequest> = None;
-    let mut switch_to_home = false;
 
     STATE.with(|cell| {
         let mut st = cell.borrow_mut();
-
-        // Modal precedence: pause modal absorbs everything except 'c', 'i', Esc.
-        if let Some(_modal) = st.pause_modal.clone() {
-            match key.code {
-                KeyCode::Char('c') | KeyCode::Char('C') => {
-                    st.pause_modal = None;
-                }
-                KeyCode::Char('i') | KeyCode::Char('I') => {
-                    st.pause_modal = None;
-                    switch_to_home = true;
-                }
-                KeyCode::Esc => {
-                    st.pause_modal = None;
-                }
-                _ => {}
-            }
-            consumed = true;
-            return;
-        }
-        if let Some(c) = st.advance_confirm.as_mut() {
-            match c.handle_key(key) {
-                WidgetEvent::Submitted => {
-                    st.advance_confirm = None;
-                    sim_request = Some(SimRequest::SeasonAdvance);
-                }
-                WidgetEvent::Cancelled => {
-                    st.advance_confirm = None;
-                }
-                _ => {}
-            }
-            consumed = true;
-            return;
-        }
-        if let Some(c) = st.playoffs_confirm.as_mut() {
-            match c.handle_key(key) {
-                WidgetEvent::Submitted => {
-                    st.playoffs_confirm = None;
-                    sim_request = Some(SimRequest::PlayoffsSim);
-                }
-                WidgetEvent::Cancelled => {
-                    st.playoffs_confirm = None;
-                }
-                _ => {}
-            }
-            consumed = true;
-            return;
-        }
 
         // Tab navigation (works on every sub-tab).
         match key.code {
@@ -1186,30 +1050,6 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         match st.sub_tab {
             SubTab::Schedule => {
                 match key.code {
-                    KeyCode::Char(' ') => {
-                        sim_request = Some(SimRequest::Day);
-                        consumed = true;
-                    }
-                    KeyCode::Char('w') | KeyCode::Char('W') => {
-                        sim_request = Some(SimRequest::Week);
-                        consumed = true;
-                    }
-                    KeyCode::Char('m') | KeyCode::Char('M') => {
-                        sim_request = Some(SimRequest::Month);
-                        consumed = true;
-                    }
-                    KeyCode::Char('a') | KeyCode::Char('A') => {
-                        st.advance_confirm =
-                            Some(Confirm::new(t(tui.lang, T::CalendarSeasonAdvance)));
-                        consumed = true;
-                    }
-                    KeyCode::Enter => {
-                        let cell_date = cell_to_date(st.view_month, st.cell_cursor);
-                        if let Some(target) = event_target_for_date(cell_date) {
-                            sim_request = Some(SimRequest::SimTo(target));
-                            consumed = true;
-                        }
-                    }
                     KeyCode::Left => {
                         if !key.modifiers.contains(KeyModifiers::SHIFT) {
                             st.cell_cursor = st.cell_cursor.saturating_sub(1);
@@ -1239,12 +1079,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                     _ => {}
                 }
             }
-            SubTab::Playoffs => {
-                if matches!(key.code, KeyCode::Enter) {
-                    st.playoffs_confirm = Some(Confirm::new(t(tui.lang, T::CalendarPlayoffs)));
-                    consumed = true;
-                }
-            }
+            SubTab::Playoffs => {}
             SubTab::Awards | SubTab::AllStar | SubTab::Cup => {
                 match key.code {
                     KeyCode::Left => {
@@ -1264,172 +1099,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         }
     });
 
-    if switch_to_home {
-        tui.current = crate::tui::Screen::Home;
-        return Ok(true);
-    }
-
-    if let Some(req) = sim_request {
-        run_sim_request(app, tui, req)?;
-    }
-
     Ok(consumed)
-}
-
-// ---------------------------------------------------------------------------
-// Sim request runner
-// ---------------------------------------------------------------------------
-
-#[derive(Copy, Clone, Debug)]
-enum SimRequest {
-    Day,
-    Week,
-    Month,
-    SimTo(SimTarget),
-    SeasonAdvance,
-    PlayoffsSim,
-}
-
-#[derive(Copy, Clone, Debug)]
-enum SimTarget {
-    AllStar,
-    CupFinal,
-    TradeDeadline,
-    SeasonEnd,
-}
-
-fn event_target_for_date(date: NaiveDate) -> Option<SimTarget> {
-    let day = date_to_day(date);
-    if day < 0 {
-        return None;
-    }
-    let day = day as u32;
-    if day == ALL_STAR_DAY {
-        Some(SimTarget::AllStar)
-    } else if day == CUP_FINAL_DAY {
-        Some(SimTarget::CupFinal)
-    } else if day == TRADE_DEADLINE_DAY {
-        Some(SimTarget::TradeDeadline)
-    } else if day >= PLAYOFFS_START_DAY {
-        Some(SimTarget::SeasonEnd)
-    } else {
-        None
-    }
-}
-
-fn run_sim_request(app: &mut AppState, tui: &mut TuiApp, req: SimRequest) -> Result<()> {
-    let Some(ctx) = tui.save_ctx.as_ref() else {
-        return Ok(());
-    };
-    let season = ctx.season;
-    let user_team = ctx.user_team;
-    let pre_day = ctx.season_state.day;
-
-    let pre_offers = app
-        .store()?
-        .read_open_chains_targeting(season, user_team)?
-        .len();
-    let pre_news_id = app
-        .store()?
-        .recent_news(1)?
-        .first()
-        .map(|n| (n.season, n.day))
-        .unwrap_or((season, 0));
-
-    let result = with_silenced_io(|| {
-        let cmd = match req {
-            SimRequest::Day => Command::SimDay { count: Some(1) },
-            SimRequest::Week => Command::SimWeek { no_pause: true },
-            SimRequest::Month => Command::SimMonth { no_pause: true },
-            SimRequest::SimTo(target) => Command::SimTo {
-                phase: match target {
-                    SimTarget::AllStar => "all-star".into(),
-                    SimTarget::CupFinal => "cup-final".into(),
-                    SimTarget::TradeDeadline => "trade-deadline".into(),
-                    SimTarget::SeasonEnd => "season-end".into(),
-                },
-            },
-            SimRequest::SeasonAdvance => {
-                Command::SeasonAdvance(JsonFlag { json: false })
-            }
-            SimRequest::PlayoffsSim => Command::Playoffs(PlayoffsArgs {
-                action: PlayoffsAction::Sim(JsonFlag { json: false }),
-            }),
-        };
-        crate::commands::dispatch(app, cmd)
-    });
-
-    match result {
-        Ok(()) => {
-            tui.refresh_season_state(app)?;
-            crate::tui::invalidate_all_screens(tui);
-
-            // Re-fetch the post-sim ctx (refresh_season_state above updated it).
-            let post_day = tui
-                .save_ctx
-                .as_ref()
-                .map(|c| c.season_state.day)
-                .unwrap_or(pre_day);
-            let post_season = tui
-                .save_ctx
-                .as_ref()
-                .map(|c| c.season)
-                .unwrap_or(season);
-            let post_user_team = tui
-                .save_ctx
-                .as_ref()
-                .map(|c| c.user_team)
-                .unwrap_or(user_team);
-            let post_offers = app
-                .store()?
-                .read_open_chains_targeting(post_season, post_user_team)?
-                .len();
-            let new_offers = post_offers.saturating_sub(pre_offers);
-            let post_news = app.store()?.recent_news(1)?;
-            let post_news_id = post_news
-                .first()
-                .map(|n| (n.season, n.day))
-                .unwrap_or(pre_news_id);
-            let _ = post_news_id;
-            let label = match req {
-                SimRequest::Day => t(tui.lang, T::CalendarSimDay),
-                SimRequest::Week => t(tui.lang, T::CalendarSimWeek),
-                SimRequest::Month => t(tui.lang, T::CalendarSimMonth),
-                SimRequest::SimTo(_) => t(tui.lang, T::CalendarSimToEvent),
-                SimRequest::SeasonAdvance => t(tui.lang, T::CalendarSeasonAdvance),
-                SimRequest::PlayoffsSim => t(tui.lang, T::CalendarPlayoffs),
-            };
-            let mut msg = format!(
-                "{}: +{}d ({} {})",
-                label,
-                post_day.saturating_sub(pre_day),
-                t(tui.lang, T::CalendarDayOf),
-                post_day
-            );
-            if new_offers > 0 {
-                msg.push_str(&format!(", {} new offer(s)", new_offers));
-                if matches!(req, SimRequest::Week | SimRequest::Month) {
-                    STATE.with(|cell| {
-                        let mut st = cell.borrow_mut();
-                        st.pause_modal = Some(PauseModal {
-                            title: t(tui.lang, T::TradesInbox).into(),
-                            body: format!(
-                                "{}: {}",
-                                t(tui.lang, T::TradesInbox),
-                                new_offers
-                            ),
-                        });
-                    });
-                }
-            }
-            tui.last_msg = Some(msg);
-        }
-        Err(e) => {
-            tui.last_msg = Some(format!("{}: {}", t(tui.lang, T::CommonError), e));
-        }
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1477,19 +1147,6 @@ fn cursor_for(date: NaiveDate, view_month: NaiveDate) -> Option<u8> {
     } else {
         None
     }
-}
-
-fn cell_to_date(view_month: NaiveDate, cell: u8) -> NaiveDate {
-    let lead = match view_month.weekday() {
-        Weekday::Mon => 0i64,
-        Weekday::Tue => 1,
-        Weekday::Wed => 2,
-        Weekday::Thu => 3,
-        Weekday::Fri => 4,
-        Weekday::Sat => 5,
-        Weekday::Sun => 6,
-    };
-    view_month + ChronoDuration::days(cell as i64 - lead)
 }
 
 fn weekday_name(lang: Lang, day: usize) -> &'static str {

@@ -240,7 +240,9 @@ User wants:
 
 ## T9 — Calendar screen view-only
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 290 unit tests passed; Calendar local sim/action-bar grep clean.
 
 **Goal**: Remove sim keys from Calendar; everything else stays.
 
