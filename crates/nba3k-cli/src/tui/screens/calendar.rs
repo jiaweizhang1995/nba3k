@@ -36,7 +36,7 @@ use crate::cli::{Command, JsonFlag, PlayoffsAction, PlayoffsArgs};
 use crate::state::AppState;
 use crate::tui::widgets::{centered_block, kv_table, Confirm, FormWidget, Theme, WidgetEvent};
 use crate::tui::{with_silenced_io, TuiApp};
-use nba3k_core::{Conference, PlayerId, SeasonId, SeasonPhase, TeamId};
+use nba3k_core::{t, Conference, Lang, PlayerId, SeasonId, SeasonPhase, TeamId, T};
 use nba3k_store::StandingRow;
 
 // ---------------------------------------------------------------------------
@@ -104,14 +104,14 @@ impl SubTab {
         SubTab::Cup,
     ];
 
-    fn label(self) -> &'static str {
+    fn label(self, lang: Lang) -> &'static str {
         match self {
-            SubTab::Schedule => "Schedule",
-            SubTab::Standings => "Standings",
-            SubTab::Playoffs => "Playoffs",
-            SubTab::Awards => "Awards",
-            SubTab::AllStar => "All-Star",
-            SubTab::Cup => "Cup",
+            SubTab::Schedule => t(lang, T::CalendarSchedule),
+            SubTab::Standings => t(lang, T::CalendarStandings),
+            SubTab::Playoffs => t(lang, T::CalendarPlayoffs),
+            SubTab::Awards => t(lang, T::CalendarAwards),
+            SubTab::AllStar => t(lang, T::CalendarAllStar),
+            SubTab::Cup => t(lang, T::CalendarCup),
         }
     }
 
@@ -271,8 +271,8 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
             f,
             area,
             theme,
-            " Calendar ",
-            &["No save loaded.", "", "Open a save first via Saves (Ctrl+S)."],
+            t(tui.lang, T::CalendarTitle),
+            &[t(tui.lang, T::CommonNoSaveLoaded), "", t(tui.lang, T::SavesLoad)],
         );
         return;
     }
@@ -289,7 +289,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
             .constraints([Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
-        draw_tab_strip(f, outer[0], theme, st.sub_tab);
+        draw_tab_strip(f, outer[0], theme, tui.lang, st.sub_tab);
 
         match st.sub_tab {
             SubTab::Schedule => draw_schedule_tab(f, outer[1], theme, app, tui, &st),
@@ -301,7 +301,13 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         }
 
         if let Some(modal) = st.pause_modal.clone() {
-            draw_centered_modal(f, area, theme, &modal.title, &modal.body, "[c] continue   [i] inbox   [Esc] dismiss");
+            let footer = format!(
+                "[c] {}   [i] {}   [Esc] {}",
+                t(tui.lang, T::CommonContinue),
+                t(tui.lang, T::TradesInbox),
+                t(tui.lang, T::CommonDismiss)
+            );
+            draw_centered_modal(f, area, theme, &modal.title, &modal.body, &footer);
         } else if let Some(c) = st.advance_confirm.as_ref() {
             draw_widget_modal(f, area, theme, c);
         } else if let Some(c) = st.playoffs_confirm.as_ref() {
@@ -310,16 +316,16 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
     });
 }
 
-fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, current: SubTab) {
+fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, current: SubTab) {
     let mut spans: Vec<Span> = Vec::new();
     for (i, tab) in SubTab::ALL.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled("  ", theme.text()));
         }
         let label = if *tab == current {
-            format!("[{}]", tab.label())
+            format!("[{}]", tab.label(lang))
         } else {
-            format!(" {} ", tab.label())
+            format!(" {} ", tab.label(lang))
         };
         let style = if *tab == current {
             theme.highlight()
@@ -331,7 +337,7 @@ fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, current: SubTab) {
     }
     let p = Paragraph::new(Line::from(spans))
         .alignment(Alignment::Center)
-        .block(theme.block(" Calendar "));
+        .block(theme.block(t(lang, T::CalendarTitle)));
     f.render_widget(p, area);
 }
 
@@ -348,7 +354,7 @@ fn draw_schedule_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, " Schedule ", &["(no save)"]);
+        centered_block(f, area, theme, t(tui.lang, T::CalendarSchedule), &[t(tui.lang, T::CommonNoSaveLoaded)]);
         return;
     };
 
@@ -360,9 +366,10 @@ fn draw_schedule_tab(
     // Header line: season + day-of-season + month label.
     let today = day_to_date(ctx.season_state.day);
     let header_text = format!(
-        " {}-{:02} — Day {} of {} — {} {} ",
+        " {}-{:02} - {} {} of {} - {} {} ",
         ctx.season.0 - 1,
         ctx.season.0 % 100,
+        t(tui.lang, T::CalendarDayOf),
         ctx.season_state.day,
         SEASON_LENGTH_DAYS,
         month_name(st.view_month.month()),
@@ -585,13 +592,13 @@ fn draw_standings_tab(
     tui: &TuiApp,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, " Standings ", &["(no save)"]);
+        centered_block(f, area, theme, t(tui.lang, T::CalendarStandings), &[t(tui.lang, T::CommonNoSaveLoaded)]);
         return;
     };
     let rows = match app.store().and_then(|s| Ok(s.read_standings(ctx.season)?)) {
         Ok(v) => v,
         Err(_) => {
-            centered_block(f, area, theme, " Standings ", &["(unable to load)"]);
+            centered_block(f, area, theme, t(tui.lang, T::CalendarStandings), &["(unable to load)"]);
             return;
         }
     };
@@ -600,7 +607,7 @@ fn draw_standings_tab(
             f,
             area,
             theme,
-            " Standings ",
+            t(tui.lang, T::CalendarStandings),
             &["No standings recorded yet — sim a few days first."],
         );
         return;
@@ -684,7 +691,7 @@ fn draw_playoffs_tab(
     tui: &TuiApp,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, " Playoffs ", &["(no save)"]);
+        centered_block(f, area, theme, t(tui.lang, T::CalendarPlayoffs), &[t(tui.lang, T::CommonNoSaveLoaded)]);
         return;
     };
     let phase = ctx.season_state.phase;
@@ -693,7 +700,7 @@ fn draw_playoffs_tab(
             f,
             area,
             theme,
-            " Playoffs ",
+            t(tui.lang, T::CalendarPlayoffs),
             &[
                 "Playoffs not started.",
                 "",
@@ -707,7 +714,7 @@ fn draw_playoffs_tab(
     let series = match app.store().and_then(|s| Ok(s.read_series(ctx.season)?)) {
         Ok(v) => v,
         Err(_) => {
-            centered_block(f, area, theme, " Playoffs ", &["(unable to load)"]);
+            centered_block(f, area, theme, t(tui.lang, T::CalendarPlayoffs), &["(unable to load)"]);
             return;
         }
     };
@@ -716,7 +723,7 @@ fn draw_playoffs_tab(
             f,
             area,
             theme,
-            " Playoffs ",
+            t(tui.lang, T::CalendarPlayoffs),
             &[
                 "Bracket not yet generated.",
                 "",
@@ -730,16 +737,21 @@ fn draw_playoffs_tab(
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        format!("Playoffs — Season {}", ctx.season.0),
+        format!(
+            "{} - {} {}",
+            t(tui.lang, T::CalendarPlayoffs),
+            t(tui.lang, T::NewGameSeason),
+            ctx.season.0
+        ),
         theme.accent_style(),
     )));
     lines.push(Line::from(""));
 
     let round_label = |round: u8| match round {
-        1 => "First Round",
-        2 => "Conference Semis",
-        3 => "Conference Finals",
-        4 => "NBA Finals",
+        1 => "R1",
+        2 => "R2",
+        3 => "R3",
+        4 => "R4",
         _ => "?",
     };
 
@@ -778,7 +790,7 @@ fn draw_playoffs_tab(
         )));
     }
 
-    let p = Paragraph::new(lines).block(theme.block(" Playoffs "));
+    let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::CalendarPlayoffs)));
     f.render_widget(p, area);
 }
 
@@ -795,7 +807,7 @@ fn draw_awards_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, " Awards ", &["(no save)"]);
+        centered_block(f, area, theme, t(tui.lang, T::CalendarAwards), &[t(tui.lang, T::CommonNoSaveLoaded)]);
         return;
     };
     let target_season = SeasonId(
@@ -806,7 +818,7 @@ fn draw_awards_tab(
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
-            centered_block(f, area, theme, " Awards ", &["(unable to load)"]);
+            centered_block(f, area, theme, t(tui.lang, T::CalendarAwards), &["(unable to load)"]);
             return;
         }
     };
@@ -816,11 +828,14 @@ fn draw_awards_tab(
         players.iter().map(|p| (p.id, p.name.clone())).collect();
 
     let mut header_lines: Vec<(&str, String)> = vec![
-        ("Season", format!("{}-{:02}", target_season.0 - 1, target_season.0 % 100)),
+        (
+            t(tui.lang, T::NewGameSeason),
+            format!("{}-{:02}", target_season.0 - 1, target_season.0 % 100),
+        ),
     ];
     if award_rows.is_empty() {
-        header_lines.push(("Status", "no awards recorded yet".to_string()));
-        let table = kv_table(&header_lines, theme, " Awards ");
+        header_lines.push((t(tui.lang, T::CommonReady), t(tui.lang, T::CalendarAwards).to_string()));
+        let table = kv_table(&header_lines, theme, t(tui.lang, T::CalendarAwards));
         f.render_widget(table, area);
         return;
     }
@@ -837,14 +852,17 @@ fn draw_awards_tab(
         ("MVP", lookup("MVP")),
         ("DPOY", lookup("DPOY")),
         ("ROY", lookup("ROY")),
-        ("Sixth Man", lookup("SIXTH_MAN")),
+        ("6M", lookup("SIXTH_MAN")),
         ("MIP", lookup("MIP")),
     ];
     let owned: Vec<(&str, String)> = award_list.into_iter().collect();
     let title = format!(
-        " Awards — Season {}-{:02} (← →: change season) ",
+        " {} - {} {}-{:02} (← →: {}) ",
+        t(tui.lang, T::CalendarAwards),
+        t(tui.lang, T::NewGameSeason),
         target_season.0 - 1,
-        target_season.0 % 100
+        target_season.0 % 100,
+        t(tui.lang, T::CommonMove)
     );
     let table = kv_table(&owned, theme, &title);
     f.render_widget(table, area);
@@ -863,7 +881,7 @@ fn draw_all_star_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, " All-Star ", &["(no save)"]);
+        centered_block(f, area, theme, t(tui.lang, T::CalendarAllStar), &[t(tui.lang, T::CommonNoSaveLoaded)]);
         return;
     };
     let target_season = SeasonId(
@@ -874,7 +892,7 @@ fn draw_all_star_tab(
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
-            centered_block(f, area, theme, " All-Star ", &["(unable to load)"]);
+            centered_block(f, area, theme, t(tui.lang, T::CalendarAllStar), &["(unable to load)"]);
             return;
         }
     };
@@ -884,7 +902,7 @@ fn draw_all_star_tab(
             f,
             area,
             theme,
-            " All-Star ",
+            t(tui.lang, T::CalendarAllStar),
             &[
                 "No All-Star roster yet.",
                 "",
@@ -923,12 +941,12 @@ fn draw_all_star_tab(
 
     let render_side = |starters: &[String], reserves: &[String]| -> Vec<Line<'static>> {
         let mut lines: Vec<Line> = Vec::new();
-        lines.push(Line::from(Span::styled("Starters", theme.accent_style())));
+        lines.push(Line::from(Span::styled(t(tui.lang, T::RotationStarters), theme.accent_style())));
         for n in starters {
             lines.push(Line::from(format!("  {}", n)));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Reserves", theme.accent_style())));
+        lines.push(Line::from(Span::styled(t(tui.lang, T::RotationBench), theme.accent_style())));
         for n in reserves {
             lines.push(Line::from(format!("  {}", n)));
         }
@@ -958,7 +976,7 @@ fn draw_cup_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, " Cup ", &["(no save)"]);
+        centered_block(f, area, theme, t(tui.lang, T::CalendarCup), &[t(tui.lang, T::CommonNoSaveLoaded)]);
         return;
     };
     let target_season = SeasonId(
@@ -969,7 +987,7 @@ fn draw_cup_tab(
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
-            centered_block(f, area, theme, " Cup ", &["(unable to load)"]);
+            centered_block(f, area, theme, t(tui.lang, T::CalendarCup), &["(unable to load)"]);
             return;
         }
     };
@@ -979,7 +997,7 @@ fn draw_cup_tab(
             f,
             area,
             theme,
-            " Cup ",
+            t(tui.lang, T::CalendarCup),
             &[
                 "No NBA Cup recorded for this season.",
                 "",
@@ -993,7 +1011,12 @@ fn draw_cup_tab(
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        format!("NBA Cup — Season {}", target_season.0),
+        format!(
+            "{} - {} {}",
+            t(tui.lang, T::CalendarCup),
+            t(tui.lang, T::NewGameSeason),
+            target_season.0
+        ),
         theme.accent_style(),
     )));
     lines.push(Line::from(""));
@@ -1001,11 +1024,11 @@ fn draw_cup_tab(
     // Group-by round. Display order: group, qf, sf, final.
     fn label_for(round: &str) -> &'static str {
         match round {
-            "group" => "Group Stage",
-            "qf" => "Quarterfinals",
-            "sf" => "Semifinals",
-            "final" => "Final",
-            _ => "Other",
+            "group" => "G",
+            "qf" => "QF",
+            "sf" => "SF",
+            "final" => "F",
+            _ => "?",
         }
     }
     for label in ["group", "qf", "sf", "final"] {
@@ -1034,7 +1057,7 @@ fn draw_cup_tab(
         lines.push(Line::from(""));
     }
 
-    let p = Paragraph::new(lines).block(theme.block(" Cup "));
+    let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::CalendarCup)));
     f.render_widget(p, area);
 }
 
@@ -1168,7 +1191,8 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                         consumed = true;
                     }
                     KeyCode::Char('a') | KeyCode::Char('A') => {
-                        st.advance_confirm = Some(Confirm::new("Advance to next season?"));
+                        st.advance_confirm =
+                            Some(Confirm::new(t(tui.lang, T::CalendarSeasonAdvance)));
                         consumed = true;
                     }
                     KeyCode::Enter => {
@@ -1209,7 +1233,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             }
             SubTab::Playoffs => {
                 if matches!(key.code, KeyCode::Enter) {
-                    st.playoffs_confirm = Some(Confirm::new("Sim full playoff bracket?"));
+                    st.playoffs_confirm = Some(Confirm::new(t(tui.lang, T::CalendarPlayoffs)));
                     consumed = true;
                 }
             }
@@ -1364,17 +1388,18 @@ fn run_sim_request(app: &mut AppState, tui: &mut TuiApp, req: SimRequest) -> Res
                 .unwrap_or(pre_news_id);
             let _ = post_news_id;
             let label = match req {
-                SimRequest::Day => "day",
-                SimRequest::Week => "week",
-                SimRequest::Month => "month",
-                SimRequest::SimTo(_) => "→ event",
-                SimRequest::SeasonAdvance => "→ season-advance",
-                SimRequest::PlayoffsSim => "→ playoffs",
+                SimRequest::Day => t(tui.lang, T::CalendarSimDay),
+                SimRequest::Week => t(tui.lang, T::CalendarSimWeek),
+                SimRequest::Month => t(tui.lang, T::CalendarSimMonth),
+                SimRequest::SimTo(_) => t(tui.lang, T::CalendarSimToEvent),
+                SimRequest::SeasonAdvance => t(tui.lang, T::CalendarSeasonAdvance),
+                SimRequest::PlayoffsSim => t(tui.lang, T::CalendarPlayoffs),
             };
             let mut msg = format!(
-                "sim {}: +{}d (now day {})",
+                "{}: +{}d ({} {})",
                 label,
                 post_day.saturating_sub(pre_day),
+                t(tui.lang, T::CalendarDayOf),
                 post_day
             );
             if new_offers > 0 {
@@ -1383,9 +1408,10 @@ fn run_sim_request(app: &mut AppState, tui: &mut TuiApp, req: SimRequest) -> Res
                     STATE.with(|cell| {
                         let mut st = cell.borrow_mut();
                         st.pause_modal = Some(PauseModal {
-                            title: "Sim paused: trade offer".into(),
+                            title: t(tui.lang, T::TradesInbox).into(),
                             body: format!(
-                                "{} new trade offer(s) received during sim.",
+                                "{}: {}",
+                                t(tui.lang, T::TradesInbox),
                                 new_offers
                             ),
                         });
@@ -1395,7 +1421,7 @@ fn run_sim_request(app: &mut AppState, tui: &mut TuiApp, req: SimRequest) -> Res
             tui.last_msg = Some(msg);
         }
         Err(e) => {
-            tui.last_msg = Some(format!("sim error: {}", e));
+            tui.last_msg = Some(format!("{}: {}", t(tui.lang, T::CommonError), e));
         }
     }
 
@@ -1488,4 +1514,3 @@ fn inner_rect(r: Rect) -> Rect {
         height: r.height.saturating_sub(2),
     }
 }
-

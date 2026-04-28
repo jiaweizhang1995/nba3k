@@ -28,7 +28,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Cell, Clear, Paragraph, Row, Table},
+    widgets::{Cell, Clear, List, ListItem, Paragraph, Row, Table},
     Frame,
 };
 use std::cell::RefCell;
@@ -42,7 +42,7 @@ use crate::tui::widgets::{
 };
 use crate::tui::{with_silenced_io, TuiApp};
 use nba3k_core::{
-    Cents, ContractYear, Player, PlayerId, PlayerRole, Position, SeasonId, TeamId,
+    t, Cents, ContractYear, Lang, Player, PlayerId, PlayerRole, Position, SeasonId, TeamId, T,
 };
 use nba3k_season::career::{career_totals, SeasonAvgRow};
 
@@ -190,14 +190,14 @@ pub fn invalidate() {
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     if !tui.has_save() {
-        let p = Paragraph::new("No save loaded — use the wizard to start a game.")
-            .block(theme.block(" Roster "));
+        let p = Paragraph::new(t(tui.lang, T::CommonNoSaveLoaded))
+            .block(theme.block(t(tui.lang, T::RosterTitle)));
         f.render_widget(p, area);
         return;
     }
     if let Err(e) = ensure_cache(app, tui) {
         let p = Paragraph::new(format!("Roster unavailable: {}", e))
-            .block(theme.block(" Roster "));
+            .block(theme.block(t(tui.lang, T::RosterTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -209,11 +209,11 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         .split(area);
 
     let tab = CACHE.with(|c| c.borrow().tab);
-    draw_tab_strip(f, parts[0], theme, tab);
+    draw_tab_strip(f, parts[0], theme, tui.lang, tab);
 
     match tab {
-        SubTab::Roster => draw_roster_tab(f, parts[1], theme),
-        SubTab::FreeAgents => draw_fa_tab(f, parts[1], theme),
+        SubTab::Roster => draw_roster_tab(f, parts[1], theme, tui.lang),
+        SubTab::FreeAgents => draw_fa_tab(f, parts[1], theme, tui.lang),
     }
 
     // Modal overlay (after tab body so it draws on top).
@@ -223,25 +223,25 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         // Wipe under the modal so the underlying roster table doesn't bleed
         // through (Paragraph::new("") doesn't actually clear cells).
         f.render_widget(Clear, rect);
-        draw_modal(f, rect, theme, app);
+        draw_modal(f, rect, theme, app, tui.lang);
     }
 }
 
-fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, tab: SubTab) {
+fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: SubTab) {
     let (a_style, b_style) = match tab {
         SubTab::Roster => (theme.highlight(), theme.muted_style()),
         SubTab::FreeAgents => (theme.muted_style(), theme.highlight()),
     };
     let line = Line::from(vec![
-        Span::styled(" 1. My Roster ", a_style),
+        Span::styled(format!(" 1. {} ", t(lang, T::RosterMyRoster)), a_style),
         Span::styled("   ", theme.text()),
-        Span::styled(" 2. Free Agents ", b_style),
+        Span::styled(format!(" 2. {} ", t(lang, T::RosterFreeAgents)), b_style),
     ]);
-    let p = Paragraph::new(line).block(theme.block(" Roster "));
+    let p = Paragraph::new(line).block(theme.block(t(lang, T::RosterTitle)));
     f.render_widget(p, area);
 }
 
-fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let rows = cache.rows.as_deref().unwrap_or(&[]);
@@ -254,14 +254,14 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme) {
 
         let header = Row::new(vec![
             Cell::from(Span::styled("#", theme.accent_style())),
-            Cell::from(Span::styled("NAME", theme.accent_style())),
-            Cell::from(Span::styled("POS", theme.accent_style())),
-            Cell::from(Span::styled("AGE", theme.accent_style())),
-            Cell::from(Span::styled("OVR", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterPlayer), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterPosition), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterAge), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterOverall), theme.accent_style())),
             Cell::from(Span::styled("PPG", theme.accent_style())),
             Cell::from(Span::styled("RPG", theme.accent_style())),
             Cell::from(Span::styled("APG", theme.accent_style())),
-            Cell::from(Span::styled("ROLE", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterRole), theme.accent_style())),
             Cell::from(Span::styled("CAP%", theme.accent_style())),
         ]);
 
@@ -290,9 +290,11 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme) {
             .collect();
 
         let title = format!(
-            " My Roster ({}) — sort: {} ",
+            " {} ({}) - {}: {} ",
+            t(lang, T::RosterMyRoster),
             rows.len(),
-            sort_label(cache.sort),
+            t(lang, T::CommonSort),
+            sort_label(lang, cache.sort),
         );
         let table = Table::new(
             body,
@@ -313,21 +315,22 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme) {
         .block(theme.block(&title));
         f.render_widget(table, parts[0]);
 
-        let bar = ActionBar::new(&[
-            ("t", "Train"),
-            ("e", "Extend"),
-            ("x", "Cut"),
-            ("R", "Role"),
-            ("Enter", "Detail"),
-            ("o/p/a/s", "Sort"),
-            ("Tab", "FA"),
-            ("Esc", "Back"),
-        ]);
+        let hints = [
+            ("t", t(lang, T::RosterTrain)),
+            ("e", t(lang, T::RosterExtend)),
+            ("x", t(lang, T::RosterCut)),
+            ("R", t(lang, T::RosterSetRole)),
+            ("Enter", t(lang, T::CommonDetail)),
+            ("o/p/a/s", t(lang, T::CommonSort)),
+            ("Tab", t(lang, T::RosterFreeAgents)),
+            ("Esc", t(lang, T::CommonBack)),
+        ];
+        let bar = ActionBar::new(&hints);
         bar.render(f, parts[1], theme);
     });
 }
 
-fn draw_fa_tab(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_fa_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let rows = cache.fa_rows.as_deref().unwrap_or(&[]);
@@ -340,11 +343,11 @@ fn draw_fa_tab(f: &mut Frame, area: Rect, theme: &Theme) {
 
         let header = Row::new(vec![
             Cell::from(Span::styled("#", theme.accent_style())),
-            Cell::from(Span::styled("NAME", theme.accent_style())),
-            Cell::from(Span::styled("POS", theme.accent_style())),
-            Cell::from(Span::styled("AGE", theme.accent_style())),
-            Cell::from(Span::styled("OVR", theme.accent_style())),
-            Cell::from(Span::styled("ASKING", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterPlayer), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterPosition), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterAge), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterOverall), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterSalary), theme.accent_style())),
         ]);
 
         let body: Vec<Row> = rows
@@ -367,7 +370,12 @@ fn draw_fa_tab(f: &mut Frame, area: Rect, theme: &Theme) {
             })
             .collect();
 
-        let title = format!(" Free Agents ({}) — sort: OVR ", rows.len());
+        let title = format!(
+            " {} ({}) - {}: OVR ",
+            t(lang, T::RosterFreeAgents),
+            rows.len(),
+            t(lang, T::CommonSort)
+        );
         let table = Table::new(
             body,
             [
@@ -383,11 +391,12 @@ fn draw_fa_tab(f: &mut Frame, area: Rect, theme: &Theme) {
         .block(theme.block(&title));
         f.render_widget(table, parts[0]);
 
-        let bar = ActionBar::new(&[
-            ("s", "Sign"),
-            ("Tab", "Roster"),
-            ("Esc", "Back"),
-        ]);
+        let hints = [
+            ("s", t(lang, T::CommonPick)),
+            ("Tab", t(lang, T::RosterTitle)),
+            ("Esc", t(lang, T::CommonBack)),
+        ];
+        let bar = ActionBar::new(&hints);
         bar.render(f, parts[1], theme);
     });
 }
@@ -400,7 +409,7 @@ fn modal_rect(area: Rect) -> Rect {
     Rect { x, y, width: w, height: h }
 }
 
-fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
+fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState, lang: Lang) {
     // Pull whatever the modal needs OUT of the cache borrow first, then render
     // — keeps `app` reachable for the Detail modal path which doesn't really
     // touch app today but keeps the signature uniform for future panels.
@@ -418,7 +427,7 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
         match &cache.modal {
             Modal::None => DrawSpec::None,
             Modal::Train { picker, target_name, .. } => DrawSpec::TrainOrRolePicker {
-                title: format!(" Train: {}", target_name),
+                title: format!(" {}: {}", t(lang, T::RosterTrain), target_name),
                 picker: picker.clone(),
             },
             Modal::ExtendSalary { input, target_name, .. } => DrawSpec::ExtendSalary {
@@ -432,7 +441,7 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
             },
             Modal::Cut { confirm, .. } => DrawSpec::Confirm(confirm.clone()),
             Modal::Role { picker, target_name, .. } => DrawSpec::TrainOrRolePicker {
-                title: format!(" Role: {}", target_name),
+                title: format!(" {}: {}", t(lang, T::RosterSetRole), target_name),
                 picker: picker.clone(),
             },
             Modal::Sign { confirm, .. } => DrawSpec::Confirm(confirm.clone()),
@@ -450,10 +459,10 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Min(0)])
                 .split(rect);
-            let head = Paragraph::new(Line::from(Span::styled(title, theme.accent_style())))
+            let head = Paragraph::new(Line::from(Span::styled(&title, theme.accent_style())))
                 .block(theme.block(""));
             f.render_widget(head, parts[0]);
-            picker.render(f, parts[1], theme);
+            render_static_picker(f, parts[1], theme, &title, &picker);
         }
         DrawSpec::ExtendSalary { input, target_name } => {
             let parts = Layout::default()
@@ -461,14 +470,19 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
                 .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" Extend: {} (1/2)", target_name),
+                format!(" {}: {} (1/2)", t(lang, T::ModalExtendContractTitle), target_name),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
             f.render_widget(head, parts[0]);
-            input.render(f, parts[1], theme);
+            render_number_value(f, parts[1], theme, t(lang, T::RosterSalary), input.raw());
             let hint = Paragraph::new(Line::from(Span::styled(
-                "Salary in $M (1-300). Enter to advance, Esc to cancel.",
+                format!(
+                    "{} 1-300 · Enter {} · Esc {}",
+                    t(lang, T::RosterSalary),
+                    t(lang, T::CommonConfirm),
+                    t(lang, T::CommonCancel)
+                ),
                 theme.muted_style(),
             )))
             .block(theme.block(""));
@@ -480,14 +494,19 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
                 .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" Extend: {} (2/2) — ${} M/yr", target_name, salary_m),
+                format!(" {}: {} (2/2) - ${} M/yr", t(lang, T::ModalExtendContractTitle), target_name, salary_m),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
             f.render_widget(head, parts[0]);
-            input.render(f, parts[1], theme);
+            render_number_value(f, parts[1], theme, t(lang, T::FinanceYears), input.raw());
             let hint = Paragraph::new(Line::from(Span::styled(
-                "Years (1-5). Enter to submit, Esc to cancel.",
+                format!(
+                    "{} 1-5 · Enter {} · Esc {}",
+                    t(lang, T::FinanceYears),
+                    t(lang, T::CommonSubmit),
+                    t(lang, T::CommonCancel)
+                ),
                 theme.muted_style(),
             )))
             .block(theme.block(""));
@@ -497,7 +516,7 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState) {
             c.render(f, rect, theme);
         }
         DrawSpec::Detail { player_id, detail } => {
-            draw_detail_modal(f, rect, theme, app, player_id, &detail);
+            draw_detail_modal(f, rect, theme, app, lang, player_id, &detail);
         }
     }
 }
@@ -507,6 +526,7 @@ fn draw_detail_modal(
     rect: Rect,
     theme: &Theme,
     _app: &mut AppState,
+    lang: Lang,
     _player_id: PlayerId,
     d: &DetailData,
 ) {
@@ -614,14 +634,58 @@ fn draw_detail_modal(
         f.render_widget(chem_table, bot[1]);
     }
 
-    let bar = ActionBar::new(&[
-        ("t", "Train"),
-        ("e", "Extend"),
-        ("x", "Cut"),
-        ("R", "Role"),
-        ("Esc", "Close"),
-    ]);
+    let hints = [
+        ("t", t(lang, T::RosterTrain)),
+        ("e", t(lang, T::RosterExtend)),
+        ("x", t(lang, T::RosterCut)),
+        ("R", t(lang, T::RosterSetRole)),
+        ("Esc", t(lang, T::CommonDismiss)),
+    ];
+    let bar = ActionBar::new(&hints);
     bar.render(f, parts[2], theme);
+}
+
+fn render_static_picker(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    title: &str,
+    picker: &Picker<&'static str>,
+) {
+    let filter = picker.filter().to_lowercase();
+    let selected = picker.selected_index();
+    let visible: Vec<(usize, &'static str)> = picker
+        .items()
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, label)| filter.is_empty() || label.to_lowercase().contains(&filter))
+        .collect();
+    let count = visible.len();
+    let items: Vec<ListItem> = visible
+        .into_iter()
+        .map(|(i, label)| {
+            let style = if Some(i) == selected {
+                theme.highlight()
+            } else {
+                theme.text()
+            };
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+    f.render_widget(
+        List::new(items).block(theme.block(&format!(" {} ({}) ", title, count))),
+        area,
+    );
+}
+
+fn render_number_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, value: &str) {
+    let line = Line::from(vec![
+        Span::styled(format!(" {} ", label), theme.accent_style()),
+        Span::styled(value.to_string(), theme.text()),
+        Span::styled("█", theme.text()),
+    ]);
+    f.render_widget(Paragraph::new(line).block(theme.block("")), area);
 }
 
 // ---------------------------------------------------------------------------
@@ -916,17 +980,17 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
         Some(team_id) => match team_chemistry_value(app, team_id) {
             Some(v) => vec![
                 ("team chem", format!("{:.2}", v)),
-                ("morale", format!("{:.2}", player.morale)),
-                ("role", short_role(player.role)),
+                (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
+                (t(tui.lang, T::RosterRole), short_role(player.role)),
             ],
             None => vec![
-                ("morale", format!("{:.2}", player.morale)),
-                ("role", short_role(player.role)),
+                (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
+                (t(tui.lang, T::RosterRole), short_role(player.role)),
             ],
         },
         None => vec![
-            ("morale", format!("{:.2}", player.morale)),
-            ("role", short_role(player.role)),
+            (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
+            (t(tui.lang, T::RosterRole), short_role(player.role)),
         ],
     };
 
@@ -1567,12 +1631,12 @@ fn short_role(r: PlayerRole) -> String {
     .to_string()
 }
 
-fn sort_label(s: SortKey) -> &'static str {
+fn sort_label(lang: Lang, s: SortKey) -> &'static str {
     match s {
-        SortKey::Ovr => "OVR",
-        SortKey::Position => "Pos",
-        SortKey::Age => "Age",
-        SortKey::Salary => "Salary",
+        SortKey::Ovr => t(lang, T::RosterOverall),
+        SortKey::Position => t(lang, T::RosterPosition),
+        SortKey::Age => t(lang, T::RosterAge),
+        SortKey::Salary => t(lang, T::RosterSalary),
     }
 }
 

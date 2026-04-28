@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use crate::state::AppState;
 use crate::tui::widgets::Theme;
 use crate::tui::{SaveCtx, TuiApp};
-use nba3k_core::PlayerRole;
+use nba3k_core::{t, Lang, PlayerRole, T};
 use nba3k_store::{MandateRow, NewsRow, ScheduledRow};
 
 // ---------------------------------------------------------------------------
@@ -68,14 +68,14 @@ pub fn invalidate() {
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        let p = Paragraph::new("No save loaded — use the wizard to start a game.")
-            .block(theme.block(" Home "));
+        let p = Paragraph::new(t(tui.lang, T::CommonNoSaveLoaded))
+            .block(theme.block(t(tui.lang, T::HomeTitle)));
         f.render_widget(p, area);
         return;
     };
     if let Err(e) = ensure_cache(app, ctx) {
         let p = Paragraph::new(format!("Home unavailable: {}", e))
-            .block(theme.block(" Home "));
+            .block(theme.block(t(tui.lang, T::HomeTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -99,20 +99,37 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
 
     CACHE.with(|c| {
         let cache = c.borrow();
-        draw_mandate(f, top[0], theme, cache.mandate.as_ref());
-        draw_upcoming(f, right[0], theme, cache.upcoming.as_ref().and_then(|x| x.as_ref()), ctx);
-        draw_inbox(f, right[1], theme, cache.inbox.as_deref().unwrap_or(&[]), cache.inbox_scroll);
-        draw_news(f, outer[1], theme, cache.news.as_deref().unwrap_or(&[]));
+        draw_mandate(f, top[0], theme, tui.lang, cache.mandate.as_ref());
+        draw_upcoming(
+            f,
+            right[0],
+            theme,
+            tui.lang,
+            cache.upcoming.as_ref().and_then(|x| x.as_ref()),
+            ctx,
+        );
+        draw_inbox(
+            f,
+            right[1],
+            theme,
+            tui.lang,
+            cache.inbox.as_deref().unwrap_or(&[]),
+            cache.inbox_scroll,
+        );
+        draw_news(f, outer[1], theme, tui.lang, cache.news.as_deref().unwrap_or(&[]));
     });
 }
 
-fn draw_mandate(f: &mut Frame, area: Rect, theme: &Theme, panel: Option<&MandatePanel>) {
-    let block = theme.block(" Owner Mandate ");
+fn draw_mandate(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    panel: Option<&MandatePanel>,
+) {
+    let block = theme.block(t(lang, T::HomeOwnerMandate));
     let lines: Vec<Line> = match panel {
-        None => vec![Line::from(Span::styled(
-            "(no mandate set)",
-            theme.muted_style(),
-        ))],
+        None => vec![Line::from(Span::styled(t(lang, T::HomeNoMandate), theme.muted_style()))],
         Some(m) => {
             let mut out: Vec<Line> = Vec::with_capacity(m.goals.len() + 2);
             out.push(Line::from(Span::styled(
@@ -121,10 +138,7 @@ fn draw_mandate(f: &mut Frame, area: Rect, theme: &Theme, panel: Option<&Mandate
             )));
             out.push(Line::from(""));
             if m.goals.is_empty() {
-                out.push(Line::from(Span::styled(
-                    "(no goals seeded yet)",
-                    theme.muted_style(),
-                )));
+                out.push(Line::from(Span::styled(t(lang, T::HomeNoGoals), theme.muted_style())));
             } else {
                 for g in &m.goals {
                     out.push(Line::from(vec![
@@ -146,10 +160,17 @@ fn draw_mandate(f: &mut Frame, area: Rect, theme: &Theme, panel: Option<&Mandate
     f.render_widget(p, area);
 }
 
-fn draw_upcoming(f: &mut Frame, area: Rect, theme: &Theme, row: Option<&UpcomingRow>, ctx: &SaveCtx) {
+fn draw_upcoming(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    row: Option<&UpcomingRow>,
+    ctx: &SaveCtx,
+) {
     let line = match row {
         None => Line::from(vec![Span::styled(
-            "No upcoming games on the schedule.",
+            t(lang, T::HomeNoUpcomingGames),
             theme.muted_style(),
         )]),
         Some(u) => {
@@ -164,15 +185,15 @@ fn draw_upcoming(f: &mut Frame, area: Rect, theme: &Theme, row: Option<&Upcoming
             ])
         }
     };
-    let p = Paragraph::new(line).block(theme.block(" Next Game "));
+    let p = Paragraph::new(line).block(theme.block(t(lang, T::HomeNextGame)));
     f.render_widget(p, area);
 }
 
-fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, rows: &[InboxRow], scroll: usize) {
-    let block = theme.block(" GM Inbox ");
+fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[InboxRow], scroll: usize) {
+    let block = theme.block(t(lang, T::HomeGmInbox));
     if rows.is_empty() {
         let p = Paragraph::new(Line::from(Span::styled(
-            "No alerts. Roster is happy.",
+            t(lang, T::HomeNoAlerts),
             theme.muted_style(),
         )))
         .block(block);
@@ -198,11 +219,11 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, rows: &[InboxRow], scrol
     f.render_widget(list, area);
 }
 
-fn draw_news(f: &mut Frame, area: Rect, theme: &Theme, rows: &[NewsRow]) {
-    let block = theme.block(" Recent News ");
+fn draw_news(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[NewsRow]) {
+    let block = theme.block(t(lang, T::HomeRecentNews));
     if rows.is_empty() {
         let p = Paragraph::new(Line::from(Span::styled(
-            "No news yet — sim a few days.",
+            t(lang, T::HomeNoNews),
             theme.muted_style(),
         )))
         .block(block);

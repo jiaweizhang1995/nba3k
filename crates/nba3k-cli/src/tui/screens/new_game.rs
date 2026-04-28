@@ -11,7 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::{List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use std::cell::RefCell;
@@ -23,7 +23,7 @@ use crate::tui::widgets::{
     centered_block, FormWidget, NumberInput, Picker, TextInput, Theme, WidgetEvent,
 };
 use crate::tui::{Screen, TuiApp};
-use nba3k_core::Team;
+use nba3k_core::{t, Lang, Team, T};
 
 const SEED_DEFAULT_PATH: &str = "data/seed_2025_26.sqlite";
 const MODES: &[&str] = &["standard", "god", "hardcore", "sandbox"];
@@ -148,7 +148,10 @@ fn load_teams() -> Vec<Team> {
 // Render
 // ---------------------------------------------------------------------------
 
-pub fn render(f: &mut Frame, area: Rect, theme: &Theme, _app: &mut AppState, _tui: &TuiApp) {
+pub fn render(f: &mut Frame, area: Rect, theme: &Theme, _app: &mut AppState, tui: &TuiApp) {
+    let title = t(tui.lang, T::NewGameTitle);
+    let submit = t(tui.lang, T::CommonSubmit);
+    let back = t(tui.lang, T::CommonBack);
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -160,20 +163,20 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, _app: &mut AppState, _tu
 
     STATE.with(|s| {
         let st = s.borrow();
-        draw_header(f, parts[0], theme, st.step);
-        draw_body(f, parts[1], theme, &st);
-        draw_status(f, parts[2], theme, st.error.as_deref());
+        draw_header(f, parts[0], theme, tui.lang, title, st.step);
+        draw_body(f, parts[1], theme, tui.lang, &st);
+        draw_status(f, parts[2], theme, tui.lang, submit, back, st.error.as_deref());
     });
 }
 
-fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, step: Step) {
+fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, title: &str, step: Step) {
     let labels = [
-        ("1", "Save", Step::SavePath),
-        ("2", "Team", Step::Team),
-        ("3", "Mode", Step::Mode),
-        ("4", "Season", Step::Season),
-        ("5", "Seed", Step::Seed),
-        ("6", "Confirm", Step::Confirm),
+        ("1", t(lang, T::NewGameSavePath), Step::SavePath),
+        ("2", t(lang, T::NewGameTeam), Step::Team),
+        ("3", t(lang, T::NewGameMode), Step::Mode),
+        ("4", t(lang, T::NewGameSeason), Step::Season),
+        ("5", t(lang, T::NewGameSeed), Step::Seed),
+        ("6", t(lang, T::NewGameConfirm), Step::Confirm),
     ];
     let mut spans: Vec<Span> = Vec::new();
     for (i, (n, label, s)) in labels.iter().enumerate() {
@@ -188,33 +191,24 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, step: Step) {
         };
         spans.push(Span::styled(format!(" {}.{} ", n, label), style));
     }
-    let p = Paragraph::new(Line::from(spans)).block(theme.block(" New Game "));
+    let p = Paragraph::new(Line::from(spans)).block(theme.block(title));
     f.render_widget(p, area);
 }
 
-fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, st: &WizardState) {
+fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardState) {
     match st.step {
         Step::SavePath => {
             let inner = vsplit(area, 4);
             let lines = vec![
-                Line::from(Span::styled(
-                    "Where should the new save live?",
-                    theme.text(),
-                )),
-                Line::from(Span::styled(
-                    "Default: ~/Desktop/nba3k_save/save.db. File must not already exist.",
-                    theme.muted_style(),
-                )),
-                Line::from(Span::styled(
-                    "Already have a save? Press Ctrl+S to pick one to load instead.",
-                    theme.accent_style(),
-                )),
+                Line::from(Span::styled(t(lang, T::NewGameSavePath), theme.accent_style())),
+                Line::from(Span::styled(default_save_path(), theme.muted_style())),
+                Line::from(Span::styled(t(lang, T::SavesLoad), theme.accent_style())),
             ];
             let p = Paragraph::new(lines)
                 .block(theme.block(""))
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner.0);
-            st.save_path.render(f, inner.1, theme);
+            render_text_value(f, inner.1, theme, t(lang, T::NewGameSavePath), st.save_path.value());
         }
         Step::Team => {
             if st.team_picker.items().is_empty() {
@@ -222,53 +216,39 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, st: &WizardState) {
                     f,
                     area,
                     theme,
-                    " Team ",
-                    &[
-                        "Seed file not found at data/seed_2025_26.sqlite.",
-                        "",
-                        "Run `nba3k-scrape` first to generate the seed,",
-                        "or pass --save to load an existing save.",
-                    ],
+                    t(lang, T::NewGameTeam),
+                    &[t(lang, T::CommonError), "", SEED_DEFAULT_PATH],
                 );
                 return;
             }
-            st.team_picker.render(f, area, theme);
+            render_team_picker(f, area, theme, lang, &st.team_picker);
         }
         Step::Mode => {
-            st.mode_picker.render(f, area, theme);
+            render_mode_picker(f, area, theme, lang, &st.mode_picker);
         }
         Step::Season => {
             let inner = vsplit(area, 3);
             let lines = vec![
-                Line::from(Span::styled("Starting season (year of finals).", theme.text())),
-                Line::from(Span::styled(
-                    "2026 = 2025-26 league year. Range: 2024-2030.",
-                    theme.muted_style(),
-                )),
+                Line::from(Span::styled(t(lang, T::NewGameSeason), theme.accent_style())),
+                Line::from(Span::styled("2024-2030", theme.muted_style())),
             ];
             let p = Paragraph::new(lines)
                 .block(theme.block(""))
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner.0);
-            st.season.render(f, inner.1, theme);
+            render_text_value(f, inner.1, theme, t(lang, T::NewGameSeason), st.season.raw());
         }
         Step::Seed => {
             let inner = vsplit(area, 3);
             let lines = vec![
-                Line::from(Span::styled(
-                    "Deterministic RNG seed (default 42).",
-                    theme.text(),
-                )),
-                Line::from(Span::styled(
-                    "Same seed + same inputs reproduces the same sim.",
-                    theme.muted_style(),
-                )),
+                Line::from(Span::styled(t(lang, T::NewGameSeed), theme.accent_style())),
+                Line::from(Span::styled("42", theme.muted_style())),
             ];
             let p = Paragraph::new(lines)
                 .block(theme.block(""))
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner.0);
-            st.seed.render(f, inner.1, theme);
+            render_text_value(f, inner.1, theme, t(lang, T::NewGameSeed), st.seed.raw());
         }
         Step::Confirm => {
             let team_label = st
@@ -292,16 +272,20 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, st: &WizardState) {
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| st.seed.raw().to_string());
             let lines = vec![
-                Line::from(Span::styled("Review:", theme.accent_style())),
+                Line::from(Span::styled(t(lang, T::NewGameConfirm), theme.accent_style())),
                 Line::from(""),
-                kv_line(theme, "save", st.save_path.value()),
-                kv_line(theme, "team", &team_label),
-                kv_line(theme, "mode", &mode_label),
-                kv_line(theme, "season", &season_label),
-                kv_line(theme, "seed", &seed_label),
+                kv_line(theme, t(lang, T::NewGameSavePath), st.save_path.value()),
+                kv_line(theme, t(lang, T::NewGameTeam), &team_label),
+                kv_line(theme, t(lang, T::NewGameMode), &mode_label),
+                kv_line(theme, t(lang, T::NewGameSeason), &season_label),
+                kv_line(theme, t(lang, T::NewGameSeed), &seed_label),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Press Enter to create. Esc to back up.",
+                    format!(
+                        "Enter {} · Esc {}",
+                        t(lang, T::CommonConfirm),
+                        t(lang, T::CommonBack)
+                    ),
                     theme.muted_style(),
                 )),
             ];
@@ -309,6 +293,89 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, st: &WizardState) {
             f.render_widget(p, area);
         }
     }
+}
+
+fn render_text_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, value: &str) {
+    let line = Line::from(vec![
+        Span::styled(format!(" {} ", label), theme.accent_style()),
+        Span::styled(value.to_string(), theme.text()),
+        Span::styled("█", theme.text()),
+    ]);
+    f.render_widget(Paragraph::new(line).block(theme.block("")), area);
+}
+
+fn render_team_picker(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    picker: &Picker<Team>,
+) {
+    render_picker_lines(
+        f,
+        area,
+        theme,
+        t(lang, T::NewGameTeam),
+        picker.items().iter().map(display_team).collect(),
+        picker.selected_index(),
+        picker.filter(),
+        lang,
+    );
+}
+
+fn render_mode_picker(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    picker: &Picker<&'static str>,
+) {
+    render_picker_lines(
+        f,
+        area,
+        theme,
+        t(lang, T::NewGameMode),
+        picker.items().iter().map(|s| (*s).to_string()).collect(),
+        picker.selected_index(),
+        picker.filter(),
+        lang,
+    );
+}
+
+fn render_picker_lines(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    title: &str,
+    labels: Vec<String>,
+    selected_index: Option<usize>,
+    filter: &str,
+    lang: Lang,
+) {
+    let filter_lc = filter.to_lowercase();
+    let visible: Vec<(usize, String)> = labels
+        .into_iter()
+        .enumerate()
+        .filter(|(_, label)| filter_lc.is_empty() || label.to_lowercase().contains(&filter_lc))
+        .collect();
+    let count = visible.len();
+    let items: Vec<ListItem> = visible
+        .into_iter()
+        .map(|(i, label)| {
+            let style = if Some(i) == selected_index {
+                theme.highlight()
+            } else {
+                theme.text()
+            };
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+    let block_title = if filter_lc.is_empty() {
+        format!(" {} ({}) ", title, count)
+    } else {
+        format!(" {} ({}) - {}: {} ", title, count, t(lang, T::CommonFilter), filter)
+    };
+    f.render_widget(List::new(items).block(theme.block(&block_title)), area);
 }
 
 fn kv_line<'a>(theme: &Theme, k: &'a str, v: &'a str) -> Line<'a> {
@@ -326,10 +393,23 @@ fn vsplit(area: Rect, top: u16) -> (Rect, Rect) {
     (parts[0], parts[1])
 }
 
-fn draw_status(f: &mut Frame, area: Rect, theme: &Theme, error: Option<&str>) {
+fn draw_status(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    submit: &str,
+    back: &str,
+    error: Option<&str>,
+) {
     let line = match error {
         None => Line::from(Span::styled(
-            "Enter to advance · Esc to back up · type to filter pickers",
+            format!(
+                "Enter {} · Esc {} · {}",
+                submit,
+                back,
+                t(lang, T::CommonFilter)
+            ),
             theme.muted_style(),
         )),
         Some(e) => Line::from(Span::styled(format!("error: {}", e), theme.accent_style())),

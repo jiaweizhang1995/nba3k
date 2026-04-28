@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, Confirm, FormWidget, Picker, Theme, WidgetEvent};
 use crate::tui::TuiApp;
-use nba3k_core::{Player, PlayerId, Position, Starters};
+use nba3k_core::{t, Lang, Player, PlayerId, Position, Starters, T};
 
 // ---------------------------------------------------------------------------
 // Cache + modal types
@@ -98,14 +98,14 @@ pub fn invalidate() {
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     if !tui.has_save() {
-        let p = Paragraph::new("No save loaded — use the wizard to start a game.")
-            .block(theme.block(" Rotation "));
+        let p = Paragraph::new(t(tui.lang, T::CommonNoSaveLoaded))
+            .block(theme.block(t(tui.lang, T::RotationTitle)));
         f.render_widget(p, area);
         return;
     }
     if let Err(e) = ensure_cache(app, tui) {
         let p = Paragraph::new(format!("Rotation unavailable: {}", e))
-            .block(theme.block(" Rotation "));
+            .block(theme.block(t(tui.lang, T::RotationTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -116,20 +116,21 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         .split(area);
 
     draw_slot_list(f, parts[0], theme, tui);
-    let bar = ActionBar::new(&[
-        ("↑↓", "Navigate"),
-        ("Enter", "Pick"),
-        ("c", "Clear Slot"),
-        ("C", "Clear All"),
-        ("Esc", "Back"),
-    ]);
+    let hints = [
+        ("↑↓", t(tui.lang, T::CommonNavigate)),
+        ("Enter", t(tui.lang, T::CommonPick)),
+        ("c", t(tui.lang, T::RotationClearSlot)),
+        ("C", t(tui.lang, T::RotationClearAll)),
+        ("Esc", t(tui.lang, T::CommonBack)),
+    ];
+    let bar = ActionBar::new(&hints);
     bar.render(f, parts[1], theme);
 
     let need_modal = CACHE.with(|c| !matches!(c.borrow().modal, Modal::None));
     if need_modal {
         let rect = modal_rect(area);
         f.render_widget(Clear, rect);
-        draw_modal(f, rect, theme);
+        draw_modal(f, rect, theme, tui.lang);
     }
 }
 
@@ -140,7 +141,7 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         let index = cache.roster_index.as_ref();
         let cursor = cache.slot_cursor.min(4);
 
-        let title = format!(" Starting Lineup — {} ", tui.user_abbrev);
+        let title = format!(" {} - {} ", t(tui.lang, T::RotationStarters), tui.user_abbrev);
         let mut lines: Vec<Line> = Vec::with_capacity(8);
         lines.push(Line::from(""));
 
@@ -216,7 +217,7 @@ fn modal_rect(area: Rect) -> Rect {
     Rect { x, y, width: w, height: h }
 }
 
-fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme) {
+fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
     enum DrawSpec {
         None,
         Pick { picker: Picker<PlayerOption> },
@@ -235,6 +236,7 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme) {
     match spec {
         DrawSpec::None => {}
         DrawSpec::Pick { picker } => {
+            let _ = t(lang, T::CommonPick);
             picker.render(f, rect, theme);
         }
         DrawSpec::ClearAll { confirm } => {

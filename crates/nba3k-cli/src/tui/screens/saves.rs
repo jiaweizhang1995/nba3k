@@ -19,6 +19,7 @@ use crate::cli::{Command, SavesAction, SavesArgs};
 use crate::state::AppState;
 use crate::tui::widgets::{Confirm, FormWidget, TextInput, Theme, WidgetEvent};
 use crate::tui::{Screen, TuiApp};
+use nba3k_core::{t, Lang, T};
 
 // ---------------------------------------------------------------------------
 // Per-screen cache + modal state
@@ -66,10 +67,11 @@ pub fn invalidate() {
 // Render
 // ---------------------------------------------------------------------------
 
-pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, _tui: &TuiApp) {
+pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
+    let _ = t(tui.lang, T::SavesNoSaves);
     if let Err(e) = ensure_scan() {
         let p = Paragraph::new(format!("Saves overlay error: {}", e))
-            .block(theme.block(" Saves "));
+            .block(theme.block(t(tui.lang, T::SavesTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -84,11 +86,11 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, _tui
         ])
         .split(area);
 
-    draw_header(f, parts[0], theme, app);
+    draw_header(f, parts[0], theme, app, tui.lang);
     let modal_rect = STATE.with(|s| {
         let st = s.borrow();
-        draw_table(f, parts[1], theme, st.rows.as_deref().unwrap_or(&[]), st.cursor);
-        draw_hints(f, parts[2], theme);
+        draw_table(f, parts[1], theme, tui.lang, st.rows.as_deref().unwrap_or(&[]), st.cursor);
+        draw_hints(f, parts[2], theme, tui.lang);
         if matches!(st.modal, Modal::None) {
             None
         } else {
@@ -109,7 +111,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, _tui
     }
 }
 
-fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState) {
+fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, lang: Lang) {
     let current = app
         .save_path
         .as_ref()
@@ -119,16 +121,16 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState) {
         Span::styled("Current: ", theme.muted_style()),
         Span::styled(current, theme.text()),
     ])];
-    let p = Paragraph::new(lines).block(theme.block(" Save Files "));
+    let p = Paragraph::new(lines).block(theme.block(t(lang, T::SavesTitle)));
     f.render_widget(p, area);
 }
 
-fn draw_table(f: &mut Frame, area: Rect, theme: &Theme, rows: &[SaveRow], cursor: usize) {
+fn draw_table(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[SaveRow], cursor: usize) {
     let header = Row::new(vec![
         Cell::from(Span::styled("PATH", theme.accent_style())),
         Cell::from(Span::styled("TEAM", theme.accent_style())),
-        Cell::from(Span::styled("SEASON", theme.accent_style())),
-        Cell::from(Span::styled("DAY", theme.accent_style())),
+        Cell::from(Span::styled(t(lang, T::NewGameSeason), theme.accent_style())),
+        Cell::from(Span::styled(t(lang, T::CalendarDayOf), theme.accent_style())),
         Cell::from(Span::styled("SIZE", theme.accent_style())),
         Cell::from(Span::styled("MODIFIED", theme.accent_style())),
     ]);
@@ -178,7 +180,7 @@ fn draw_table(f: &mut Frame, area: Rect, theme: &Theme, rows: &[SaveRow], cursor
         })
         .collect();
 
-    let title = format!(" Saves ({}) ", rows.len());
+    let title = format!(" {} ({}) ", t(lang, T::SavesTitle), rows.len());
     let table = Table::new(
         body,
         [
@@ -195,20 +197,20 @@ fn draw_table(f: &mut Frame, area: Rect, theme: &Theme, rows: &[SaveRow], cursor
     f.render_widget(table, area);
 }
 
-fn draw_hints(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_hints(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     let hint = Line::from(vec![
         Span::styled(" ↑↓ ", theme.accent_style()),
-        Span::styled(" Move   ", theme.text()),
+        Span::styled(format!(" {}   ", t(lang, T::CommonMove)), theme.text()),
         Span::styled(" n ", theme.accent_style()),
-        Span::styled(" New   ", theme.text()),
+        Span::styled(format!(" {}   ", t(lang, T::SavesNew)), theme.text()),
         Span::styled(" l ", theme.accent_style()),
-        Span::styled(" Load   ", theme.text()),
+        Span::styled(format!(" {}   ", t(lang, T::SavesLoad)), theme.text()),
         Span::styled(" d ", theme.accent_style()),
-        Span::styled(" Delete   ", theme.text()),
+        Span::styled(format!(" {}   ", t(lang, T::SavesDelete)), theme.text()),
         Span::styled(" e ", theme.accent_style()),
-        Span::styled(" Export   ", theme.text()),
+        Span::styled(format!(" {}   ", t(lang, T::SavesExport)), theme.text()),
         Span::styled(" Esc ", theme.accent_style()),
-        Span::styled(" Back", theme.text()),
+        Span::styled(format!(" {}", t(lang, T::CommonBack)), theme.text()),
     ]);
     let p = Paragraph::new(hint).block(theme.block(""));
     f.render_widget(p, area);

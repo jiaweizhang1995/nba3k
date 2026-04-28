@@ -27,9 +27,9 @@ use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, Theme};
 use crate::tui::{with_silenced_io, TuiApp};
 use nba3k_core::{
-    DraftPick, DraftPickId, LeagueSnapshot, LeagueYear, NegotiationState, Player, PlayerId,
+    t, DraftPick, DraftPickId, Lang, LeagueSnapshot, LeagueYear, NegotiationState, Player, PlayerId,
     PlayerRole, Position, RejectReason, SeasonId, SeasonPhase, Team, TeamId, TeamRecordSummary,
-    TradeId, TradeOffer, Verdict,
+    TradeId, TradeOffer, Verdict, T,
 };
 use nba3k_models::stat_projection::infer_archetype;
 use nba3k_trade::evaluate as evaluate_mod;
@@ -184,13 +184,14 @@ pub fn invalidate() {
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     if !tui.has_save() {
-        let p = Paragraph::new("No save loaded - use the wizard to start a game.")
-            .block(theme.block(" Trades "));
+        let p = Paragraph::new(t(tui.lang, T::CommonNoSaveLoaded))
+            .block(theme.block(t(tui.lang, T::TradesTitle)));
         f.render_widget(p, area);
         return;
     }
     if let Err(e) = ensure_cache(app, tui) {
-        let p = Paragraph::new(format!("Trades unavailable: {}", e)).block(theme.block(" Trades "));
+        let p = Paragraph::new(format!("Trades unavailable: {}", e))
+            .block(theme.block(t(tui.lang, T::TradesTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -201,23 +202,23 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         .split(area);
 
     let tab = CACHE.with(|c| c.borrow().tab);
-    draw_tab_strip(f, parts[0], theme, tab);
+    draw_tab_strip(f, parts[0], theme, tui.lang, tab);
 
     match tab {
-        SubTab::Inbox => draw_inbox(f, parts[1], theme),
-        SubTab::Proposals => draw_proposals(f, parts[1], theme),
+        SubTab::Inbox => draw_inbox(f, parts[1], theme, tui.lang),
+        SubTab::Proposals => draw_proposals(f, parts[1], theme, tui.lang),
         SubTab::Builder => draw_builder(f, parts[1], theme, tui),
-        SubTab::Rumors => draw_rumors(f, parts[1], theme),
+        SubTab::Rumors => draw_rumors(f, parts[1], theme, tui.lang),
     }
 
     if CACHE.with(|c| !matches!(c.borrow().modal, Modal::None)) {
         let rect = modal_rect(area);
         f.render_widget(Clear, rect);
-        draw_modal(f, rect, theme);
+        draw_modal(f, rect, theme, tui.lang);
     }
 }
 
-fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, tab: SubTab) {
+fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: SubTab) {
     let style = |t| {
         if tab == t {
             theme.highlight()
@@ -226,18 +227,18 @@ fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, tab: SubTab) {
         }
     };
     let line = Line::from(vec![
-        Span::styled(" 1. Inbox ", style(SubTab::Inbox)),
+        Span::styled(format!(" 1. {} ", t(lang, T::TradesInbox)), style(SubTab::Inbox)),
         Span::styled("   ", theme.text()),
-        Span::styled(" 2. My Proposals ", style(SubTab::Proposals)),
+        Span::styled(format!(" 2. {} ", t(lang, T::TradesMyProposals)), style(SubTab::Proposals)),
         Span::styled("   ", theme.text()),
-        Span::styled(" 3. Builder ", style(SubTab::Builder)),
+        Span::styled(format!(" 3. {} ", t(lang, T::TradesBuilder)), style(SubTab::Builder)),
         Span::styled("   ", theme.text()),
-        Span::styled(" 4. Rumors ", style(SubTab::Rumors)),
+        Span::styled(format!(" 4. {} ", t(lang, T::TradesRumors)), style(SubTab::Rumors)),
     ]);
-    f.render_widget(Paragraph::new(line).block(theme.block(" Trades ")), area);
+    f.render_widget(Paragraph::new(line).block(theme.block(t(lang, T::TradesTitle))), area);
 }
 
-fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let rows = cache.inbox_rows.as_deref().unwrap_or(&[]);
@@ -246,7 +247,7 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme) {
 
         if rows.is_empty() {
             let p =
-                Paragraph::new("Incoming offers: none right now.").block(theme.block(" Inbox "));
+                Paragraph::new(t(lang, T::TradesIncomingOffersNone)).block(theme.block(t(lang, T::TradesInbox)));
             f.render_widget(p, parts[0]);
         } else {
             let header = Row::new(vec![
@@ -254,7 +255,7 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme) {
                 head("FROM", theme),
                 head("WANTS", theme),
                 head("SENDS", theme),
-                head("VERDICT", theme),
+                head(t(lang, T::ModalTradeVerdictTitle), theme),
             ]);
             let body: Vec<Row> = rows
                 .iter()
@@ -274,7 +275,7 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme) {
                     ])
                 })
                 .collect();
-            let title = format!(" Inbox ({}) ", rows.len());
+            let title = format!(" {} ({}) ", t(lang, T::TradesInbox), rows.len());
             let table = Table::new(
                 body,
                 [
@@ -291,18 +292,18 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme) {
         }
 
         ActionBar::new(&[
-            ("a", "Accept"),
-            ("r", "Reject"),
-            ("c", "Counter"),
-            ("Enter", "Detail"),
-            ("Tab", "Tabs"),
-            ("Esc", "Back"),
+            ("a", t(lang, T::TradesAccept)),
+            ("r", t(lang, T::TradesReject)),
+            ("c", t(lang, T::TradesCounter)),
+            ("Enter", t(lang, T::CommonDetail)),
+            ("Tab", t(lang, T::CommonTabs)),
+            ("Esc", t(lang, T::CommonBack)),
         ])
         .render(f, parts[1], theme);
     });
 }
 
-fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let rows = cache.chain_rows.as_deref().unwrap_or(&[]);
@@ -310,8 +311,8 @@ fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme) {
         let parts = body_with_bar(area);
 
         if rows.is_empty() {
-            let p = Paragraph::new("No user-involved trade chains yet.")
-                .block(theme.block(" My Proposals "));
+            let p = Paragraph::new(t(lang, T::TradesNoProposals))
+                .block(theme.block(t(lang, T::TradesMyProposals)));
             f.render_widget(p, parts[0]);
         } else {
             let header = Row::new(vec![
@@ -319,7 +320,7 @@ fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme) {
                 head("STATUS", theme),
                 head("ROUND", theme),
                 head("TEAMS", theme),
-                head("VERDICT", theme),
+                head(t(lang, T::ModalTradeVerdictTitle), theme),
             ]);
             let body: Vec<Row> = rows
                 .iter()
@@ -339,7 +340,7 @@ fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme) {
                     ])
                 })
                 .collect();
-            let title = format!(" My Proposals ({}) ", rows.len());
+            let title = format!(" {} ({}) ", t(lang, T::TradesMyProposals), rows.len());
             let table = Table::new(
                 body,
                 [
@@ -356,12 +357,12 @@ fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme) {
         }
 
         ActionBar::new(&[
-            ("a", "Accept"),
-            ("r", "Reject"),
-            ("c", "Counter"),
-            ("Enter", "Chain"),
-            ("Tab", "Tabs"),
-            ("Esc", "Back"),
+            ("a", t(lang, T::TradesAccept)),
+            ("r", t(lang, T::TradesReject)),
+            ("c", t(lang, T::TradesCounter)),
+            ("Enter", t(lang, T::CommonDetail)),
+            ("Tab", t(lang, T::CommonTabs)),
+            ("Esc", t(lang, T::CommonBack)),
         ])
         .render(f, parts[1], theme);
     });
@@ -381,13 +382,14 @@ fn draw_builder(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
             ])
             .split(parts[0]);
 
-        draw_team_picker(f, cols[0], theme, &cache);
+        draw_team_picker(f, cols[0], theme, tui.lang, &cache);
         let (incoming_title, incoming_rows, incoming_selected) = incoming_view(&cache);
         draw_player_picker(
             f,
             cols[1],
             theme,
-            " You Send ",
+            tui.lang,
+            t(tui.lang, T::TradesYouSend),
             cache.user_roster.as_deref().unwrap_or(&[]),
             cache.out_cursor,
             &cache.selected_out,
@@ -397,6 +399,7 @@ fn draw_builder(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
             f,
             cols[2],
             theme,
+            tui.lang,
             &incoming_title,
             incoming_rows,
             cache.in_cursor,
@@ -406,31 +409,31 @@ fn draw_builder(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         draw_builder_submit(f, cols[3], theme, &cache, tui);
 
         ActionBar::new(&[
-            ("<- ->", "Panel"),
-            ("Up/Down", "Move"),
-            ("Space", "Toggle"),
-            ("m", "2/3-team"),
-            ("i", "In team"),
-            ("Enter", "Select/Submit"),
-            ("p", "Propose"),
-            ("Tab", "Tabs"),
+            ("<- ->", t(tui.lang, T::CommonNavigate)),
+            ("Up/Down", t(tui.lang, T::CommonMove)),
+            ("Space", t(tui.lang, T::CommonPick)),
+            ("m", t(tui.lang, T::TradesToggleTeamMode)),
+            ("i", t(tui.lang, T::TradesSwapIncomingTeam)),
+            ("Enter", t(tui.lang, T::CommonSubmit)),
+            ("p", t(tui.lang, T::TradesPropose)),
+            ("Tab", t(tui.lang, T::CommonTabs)),
         ])
         .render(f, parts[1], theme);
     });
 }
 
-fn draw_team_picker(f: &mut Frame, area: Rect, theme: &Theme, cache: &TradesCache) {
+fn draw_team_picker(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, cache: &TradesCache) {
     let teams = cache.teams.as_deref().unwrap_or(&[]);
     let cursor = cache.team_cursor.min(teams.len().saturating_sub(1));
     let title = if cache.builder_panel == BuilderPanel::Team {
         match cache.builder_mode {
-            BuilderMode::TwoTeam => " Team > ",
-            BuilderMode::ThreeTeam => " Teams > ",
+            BuilderMode::TwoTeam => format!(" {} > ", t(lang, T::NewGameTeam)),
+            BuilderMode::ThreeTeam => format!(" {} > ", t(lang, T::NewGameTeam)),
         }
     } else {
         match cache.builder_mode {
-            BuilderMode::TwoTeam => " Team ",
-            BuilderMode::ThreeTeam => " Teams ",
+            BuilderMode::TwoTeam => format!(" {} ", t(lang, T::NewGameTeam)),
+            BuilderMode::ThreeTeam => format!(" {} ", t(lang, T::NewGameTeam)),
         }
     };
     let lines: Vec<Line> = teams
@@ -460,19 +463,19 @@ fn draw_team_picker(f: &mut Frame, area: Rect, theme: &Theme, cache: &TradesCach
             ))
         })
         .collect();
-    f.render_widget(Paragraph::new(lines).block(theme.block(title)), area);
+    f.render_widget(Paragraph::new(lines).block(theme.block(&title)), area);
 }
 
 fn incoming_view(cache: &TradesCache) -> (String, &[PlayerOption], &HashSet<PlayerId>) {
     if cache.builder_mode == BuilderMode::ThreeTeam && cache.incoming_slot == IncomingSlot::Second {
         (
-            " T2 Sends ".to_string(),
+            " T2 -> ".to_string(),
             cache.third_roster.as_deref().unwrap_or(&[]),
             &cache.selected_third,
         )
     } else {
         (
-            " T1 Sends ".to_string(),
+            " T1 -> ".to_string(),
             cache.target_roster.as_deref().unwrap_or(&[]),
             &cache.selected_in,
         )
@@ -483,6 +486,7 @@ fn draw_player_picker(
     f: &mut Frame,
     area: Rect,
     theme: &Theme,
+    lang: Lang,
     title: &str,
     rows: &[PlayerOption],
     cursor: usize,
@@ -492,10 +496,10 @@ fn draw_player_picker(
     let cursor = cursor.min(rows.len().saturating_sub(1));
     let header = Row::new(vec![
         head("", theme),
-        head("PLAYER", theme),
-        head("POS", theme),
-        head("OVR", theme),
-        head("$M", theme),
+        head(t(lang, T::RosterPlayer), theme),
+        head(t(lang, T::RosterPosition), theme),
+        head(t(lang, T::RosterOverall), theme),
+        head(t(lang, T::RosterSalary), theme),
     ]);
     let body: Vec<Row> = rows
         .iter()
@@ -565,8 +569,8 @@ fn draw_builder_submit(
         .map(|t| t.abbrev.clone())
         .unwrap_or_else(|| "???".into());
     let mode_label = match cache.builder_mode {
-        BuilderMode::TwoTeam => "2-team trade",
-        BuilderMode::ThreeTeam => "3-team trade",
+        BuilderMode::TwoTeam => format!("2 {}", t(tui.lang, T::TradesTitle)),
+        BuilderMode::ThreeTeam => format!("3 {}", t(tui.lang, T::TradesTitle)),
     };
     let ready = match cache.builder_mode {
         BuilderMode::TwoTeam => !cache.selected_out.is_empty() && !cache.selected_in.is_empty(),
@@ -577,7 +581,11 @@ fn draw_builder_submit(
                 && !cache.selected_third.is_empty()
         }
     };
-    let status = if ready { "Ready" } else { "Pick both sides" };
+    let status = if ready {
+        t(tui.lang, T::CommonReady)
+    } else {
+        t(tui.lang, T::TradesPickBothSides)
+    };
     let mut lines = vec![
         Line::from(Span::styled(mode_label, theme.accent_style())),
         Line::from(""),
@@ -614,18 +622,18 @@ fn draw_builder_submit(
         Line::from(""),
         Line::from(Span::styled(status.to_string(), panel_style)),
         Line::from(""),
-        Line::from(Span::styled("m toggles 2/3-team", theme.muted_style())),
-        Line::from(Span::styled("i swaps incoming team", theme.muted_style())),
+        Line::from(Span::styled(t(tui.lang, T::TradesToggleTeamMode), theme.muted_style())),
+        Line::from(Span::styled(t(tui.lang, T::TradesSwapIncomingTeam), theme.muted_style())),
     ]);
     f.render_widget(
         Paragraph::new(lines)
-            .block(theme.block(" Submit "))
+            .block(theme.block(t(tui.lang, T::TradesSubmit)))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
-fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let rows = cache.rumor_rows.as_deref().unwrap_or(&[]);
@@ -633,15 +641,15 @@ fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme) {
         let parts = body_with_bar(area);
 
         if rows.is_empty() {
-            let p = Paragraph::new("No trade rumors right now.").block(theme.block(" Rumors "));
+            let p = Paragraph::new(t(lang, T::TradesNoRumors)).block(theme.block(t(lang, T::TradesRumors)));
             f.render_widget(p, parts[0]);
         } else {
             let header = Row::new(vec![
                 head("#", theme),
-                head("PLAYER", theme),
+                head(t(lang, T::RosterPlayer), theme),
                 head("TM", theme),
-                head("OVR", theme),
-                head("ROLE", theme),
+                head(t(lang, T::RosterOverall), theme),
+                head(t(lang, T::RosterRole), theme),
                 head("INT", theme),
                 head("TOP SUITORS", theme),
             ]);
@@ -673,7 +681,7 @@ fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme) {
                     ])
                 })
                 .collect();
-            let title = format!(" Rumors ({}) ", rows.len());
+            let title = format!(" {} ({}) ", t(lang, T::TradesRumors), rows.len());
             let table = Table::new(
                 body,
                 [
@@ -691,12 +699,17 @@ fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme) {
             f.render_widget(table, parts[0]);
         }
 
-        ActionBar::new(&[("Up/Down", "Move"), ("Tab", "Tabs"), ("Esc", "Back")])
+        ActionBar::new(&[
+            ("Up/Down", t(lang, T::CommonMove)),
+            ("Tab", t(lang, T::CommonTabs)),
+            ("Esc", t(lang, T::CommonBack)),
+        ])
             .render(f, parts[1], theme);
     });
 }
 
-fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme) {
+fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
+    let _ = t(lang, T::ModalTradeVerdictTitle);
     let (title, lines) = CACHE.with(|c| {
         let cache = c.borrow();
         match &cache.modal {
@@ -846,7 +859,7 @@ fn build_inbox_rows(
         let wants = render_players(store, players_out(latest, tui.user_team))?;
         let sends = render_players(store, players_out(latest, from))?;
         let evaluation = evaluate_mod::evaluate(latest, tui.user_team, &snap, &mut rng);
-        let verdict = verdict_label(&evaluation.verdict).to_string();
+        let verdict = verdict_label(tui.lang, &evaluation.verdict).to_string();
         let mut detail_lines = offer_detail_lines(store, latest)?;
         detail_lines.push(String::new());
         detail_lines.push(format!(
@@ -860,7 +873,7 @@ fn build_inbox_rows(
         if let Verdict::Reject(reason) = &evaluation.verdict {
             detail_lines.push(format!(
                 "Reject reason: {}",
-                reject_reason_to_string(reason)
+                reject_reason_to_string(tui.lang, reason)
             ));
         }
         if let Verdict::Counter(counter) = &evaluation.verdict {
@@ -927,13 +940,17 @@ fn build_chain_rows(
                 let ev = evaluate_mod::evaluate(o, tui.user_team, &snap, &mut rng);
                 format!(
                     "{} ({:.0}%)",
-                    verdict_label(&ev.verdict),
+                    verdict_label(tui.lang, &ev.verdict),
                     ev.confidence * 100.0
                 )
             }
             (NegotiationState::Accepted(_), _) => "accept".into(),
             (NegotiationState::Rejected { reason, .. }, _) => {
-                format!("reject - {}", reject_reason_to_string(reason))
+                format!(
+                    "{} - {}",
+                    t(tui.lang, T::TradesReject),
+                    reject_reason_to_string(tui.lang, reason)
+                )
             }
             (NegotiationState::Stalled, _) => "stalled".into(),
             _ => "unknown".into(),
@@ -942,7 +959,7 @@ fn build_chain_rows(
         if let NegotiationState::Rejected { reason, .. } = &st {
             detail_lines.push(format!(
                 "Reject reason: {}",
-                reject_reason_to_string(reason)
+                reject_reason_to_string(tui.lang, reason)
             ));
         }
         detail_lines.push("Counter chain:".to_string());
@@ -1828,21 +1845,21 @@ fn team_abbrev(store: &nba3k_store::Store, team: TeamId) -> Result<String> {
         .unwrap_or_else(|| format!("T{}", team.0)))
 }
 
-fn verdict_label(v: &Verdict) -> &'static str {
+fn verdict_label(lang: Lang, v: &Verdict) -> &'static str {
     match v {
-        Verdict::Accept => "accept",
-        Verdict::Reject(_) => "reject",
-        Verdict::Counter(_) => "counter",
+        Verdict::Accept => t(lang, T::TradesAccept),
+        Verdict::Reject(_) => t(lang, T::TradesReject),
+        Verdict::Counter(_) => t(lang, T::TradesCounter),
     }
 }
 
-fn reject_reason_to_string(r: &RejectReason) -> String {
+fn reject_reason_to_string(lang: Lang, r: &RejectReason) -> String {
     match r {
-        RejectReason::InsufficientValue => "insufficient value".to_string(),
+        RejectReason::InsufficientValue => t(lang, T::TradesInsufficientValue).to_string(),
         RejectReason::CbaViolation(s) => format!("CBA: {}", s),
         RejectReason::NoTradeClause(pid) => format!("no-trade clause (player #{})", pid.0),
-        RejectReason::BadFaith => "bad-faith offer".to_string(),
-        RejectReason::OutOfRoundCap => "negotiation rounds exhausted".to_string(),
+        RejectReason::BadFaith => t(lang, T::TradesReject).to_string(),
+        RejectReason::OutOfRoundCap => t(lang, T::TradesReject).to_string(),
         RejectReason::Other(s) => s.clone(),
     }
 }

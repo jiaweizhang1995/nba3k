@@ -20,7 +20,7 @@ use crate::cli::Command;
 use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, FormWidget, NumberInput, Theme, WidgetEvent};
 use crate::tui::{with_silenced_io, TuiApp};
-use nba3k_core::{Cents, LeagueYear, Player, PlayerId, Position, SeasonId};
+use nba3k_core::{t, Cents, Lang, LeagueYear, Player, PlayerId, Position, SeasonId, T};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum SortKey {
@@ -99,15 +99,15 @@ pub fn invalidate() {
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     if !tui.has_save() {
-        let p = Paragraph::new("No save loaded - use the wizard to start a game.")
-            .block(theme.block(" Finance "));
+        let p = Paragraph::new(t(tui.lang, T::CommonNoSaveLoaded))
+            .block(theme.block(t(tui.lang, T::FinanceTitle)));
         f.render_widget(p, area);
         return;
     }
 
     if let Err(e) = ensure_cache(app, tui) {
         let p =
-            Paragraph::new(format!("Finance unavailable: {}", e)).block(theme.block(" Finance "));
+            Paragraph::new(format!("Finance unavailable: {}", e)).block(theme.block(t(tui.lang, T::FinanceTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -121,23 +121,23 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         ])
         .split(area);
 
-    draw_summary(f, parts[0], theme);
-    draw_contracts(f, parts[1], theme);
+    draw_summary(f, parts[0], theme, tui.lang);
+    draw_contracts(f, parts[1], theme, tui.lang);
     draw_footer(f, parts[2], theme, tui);
 
     let need_modal = CACHE.with(|c| !matches!(c.borrow().modal, Modal::None));
     if need_modal {
         let rect = modal_rect(area);
         f.render_widget(Clear, rect);
-        draw_modal(f, rect, theme);
+        draw_modal(f, rect, theme, tui.lang);
     }
 }
 
-fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let Some(s) = cache.snapshot.as_ref() else {
-            let p = Paragraph::new("No finance data loaded.").block(theme.block(" Cap Summary "));
+            let p = Paragraph::new("No finance data loaded.").block(theme.block(t(lang, T::FinanceTitle)));
             f.render_widget(p, area);
             return;
         };
@@ -169,7 +169,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Salary Cap     ", theme.accent_style()),
+                Span::styled(format!("{:<15}", t(lang, T::FinanceCap)), theme.accent_style()),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -180,7 +180,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Luxury Tax     ", theme.accent_style()),
+                Span::styled(format!("{:<15}", t(lang, T::FinanceTax)), theme.accent_style()),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -191,7 +191,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("First Apron    ", theme.accent_style()),
+                Span::styled(format!("{:<15}", t(lang, T::FinanceApron)), theme.accent_style()),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -202,7 +202,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Second Apron   ", theme.accent_style()),
+                Span::styled(format!("{:<15}", t(lang, T::FinanceApron)), theme.accent_style()),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -213,7 +213,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Minimum Payroll", theme.accent_style()),
+                Span::styled(t(lang, T::FinancePayroll), theme.accent_style()),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -225,7 +225,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
             ]),
         ];
         let p = Paragraph::new(lines)
-            .block(theme.block(" Cap Summary "))
+            .block(theme.block(t(lang, T::FinanceTitle)))
             .wrap(Wrap { trim: false });
         f.render_widget(p, chunks[0]);
 
@@ -235,13 +235,14 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
             (s.payroll.0 as f64 / s.league_year.apron_2.0 as f64).clamp(0.0, 1.0)
         };
         let label = format!(
-            "{} / {} second apron ({:.0}%)",
+            "{} / {} {} ({:.0}%)",
             s.payroll,
             s.league_year.apron_2,
+            t(lang, T::FinanceApron),
             ratio * 100.0
         );
         let gauge = Gauge::default()
-            .block(theme.block(" Payroll Bar "))
+            .block(theme.block(t(lang, T::FinancePayroll)))
             .gauge_style(theme.accent_style())
             .label(label)
             .ratio(ratio);
@@ -249,32 +250,33 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme) {
     });
 }
 
-fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let Some(snapshot) = cache.snapshot.as_ref() else {
-            let p = Paragraph::new("No contracts to display.").block(theme.block(" Contracts "));
+            let p = Paragraph::new(t(lang, T::FinanceContracts))
+                .block(theme.block(t(lang, T::FinanceContracts)));
             f.render_widget(p, area);
             return;
         };
 
         if snapshot.rows.is_empty() {
-            let p = Paragraph::new("Roster is empty. Add players before reviewing contracts.")
-                .block(theme.block(" Contracts "));
+            let p = Paragraph::new(t(lang, T::RosterNoPlayers))
+                .block(theme.block(t(lang, T::FinanceContracts)));
             f.render_widget(p, area);
             return;
         }
 
         let cursor = cache.cursor.min(snapshot.rows.len().saturating_sub(1));
         let header = Row::new(vec![
-            Cell::from(Span::styled("PLAYER", theme.accent_style())),
-            Cell::from(Span::styled("POS", theme.accent_style())),
-            Cell::from(Span::styled("AGE", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterPlayer), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterPosition), theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::RosterAge), theme.accent_style())),
             Cell::from(Span::styled("Y1", theme.accent_style())),
             Cell::from(Span::styled("Y2", theme.accent_style())),
             Cell::from(Span::styled("Y3", theme.accent_style())),
             Cell::from(Span::styled("Y4", theme.accent_style())),
-            Cell::from(Span::styled("TOTAL", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::FinanceTotal), theme.accent_style())),
             Cell::from(Span::styled("NOTES", theme.accent_style())),
         ]);
 
@@ -302,7 +304,12 @@ fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme) {
             })
             .collect();
 
-        let title = format!(" Contracts - sort: {} ", sort_label(cache.sort));
+        let title = format!(
+            " {} - {}: {} ",
+            t(lang, T::FinanceContracts),
+            t(lang, T::CommonSort),
+            sort_label(lang, cache.sort)
+        );
         let table = Table::new(
             body,
             [
@@ -326,11 +333,11 @@ fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme) {
 fn draw_footer(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
     let status = tui.last_msg.as_deref();
     let hints = [
-        ("Up/Dn", "Move"),
-        ("PgUp/PgDn", "Jump"),
-        ("e", "Extend"),
-        ("t/y/n", "Sort"),
-        ("Esc", "Back"),
+        ("Up/Dn", t(tui.lang, T::CommonMove)),
+        ("PgUp/PgDn", t(tui.lang, T::CommonMove)),
+        ("e", t(tui.lang, T::FinanceExtensions)),
+        ("t/y/n", t(tui.lang, T::CommonSort)),
+        ("Esc", t(tui.lang, T::CommonBack)),
     ];
     match status {
         Some(s) => ActionBar::new(&hints).with_status(s).render(f, area, theme),
@@ -351,7 +358,16 @@ fn modal_rect(area: Rect) -> Rect {
     }
 }
 
-fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme) {
+fn render_number_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, value: &str) {
+    let line = Line::from(vec![
+        Span::styled(format!(" {} ", label), theme.accent_style()),
+        Span::styled(value.to_string(), theme.text()),
+        Span::styled("█", theme.text()),
+    ]);
+    f.render_widget(Paragraph::new(line).block(theme.block("")), area);
+}
+
+fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
     enum DrawSpec {
         None,
         Salary {
@@ -400,14 +416,19 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme) {
                 ])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" Extend: {} (1/2)", target_name),
+                format!(" {}: {} (1/2)", t(lang, T::ModalExtendContractTitle), target_name),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
             f.render_widget(head, parts[0]);
-            input.render(f, parts[1], theme);
+            render_number_value(f, parts[1], theme, t(lang, T::RosterSalary), input.raw());
             let hint = Paragraph::new(Line::from(Span::styled(
-                "Salary in whole $M (1-300). Enter to advance, Esc to cancel.",
+                format!(
+                    "{} 1-300 · Enter {} · Esc {}",
+                    t(lang, T::RosterSalary),
+                    t(lang, T::CommonConfirm),
+                    t(lang, T::CommonCancel)
+                ),
                 theme.muted_style(),
             )))
             .block(theme.block(""));
@@ -427,14 +448,19 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme) {
                 ])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" Extend: {} (2/2) - ${}M/yr", target_name, salary_m),
+                format!(" {}: {} (2/2) - ${}M/yr", t(lang, T::ModalExtendContractTitle), target_name, salary_m),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
             f.render_widget(head, parts[0]);
-            input.render(f, parts[1], theme);
+            render_number_value(f, parts[1], theme, t(lang, T::FinanceYears), input.raw());
             let hint = Paragraph::new(Line::from(Span::styled(
-                "Years (1-5). Enter to submit, Esc to cancel.",
+                format!(
+                    "{} 1-5 · Enter {} · Esc {}",
+                    t(lang, T::FinanceYears),
+                    t(lang, T::CommonSubmit),
+                    t(lang, T::CommonCancel)
+                ),
                 theme.muted_style(),
             )))
             .block(theme.block(""));
@@ -750,7 +776,7 @@ fn handle_modal_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Resu
                     crate::tui::screens::home::invalidate();
                 }
                 Err(e) => {
-                    tui.last_msg = Some(format!("error: {}", e));
+                    tui.last_msg = Some(format!("{}: {}", t(tui.lang, T::CommonError), e));
                 }
             }
             Ok(true)
@@ -786,11 +812,11 @@ fn sort_key_from_char(c: char) -> Option<SortKey> {
     }
 }
 
-fn sort_label(sort: SortKey) -> &'static str {
+fn sort_label(lang: Lang, sort: SortKey) -> &'static str {
     match sort {
-        SortKey::Total => "Total dollars",
-        SortKey::Years => "Years remaining",
-        SortKey::Name => "Name",
+        SortKey::Total => t(lang, T::FinanceTotal),
+        SortKey::Years => t(lang, T::FinanceYears),
+        SortKey::Name => t(lang, T::RosterPlayer),
     }
 }
 

@@ -25,7 +25,7 @@ use crate::cli::{Command, DraftAction, DraftArgs, JsonFlag};
 use crate::state::AppState;
 use crate::tui::widgets::{centered_block, ActionBar, Confirm, FormWidget, Theme, WidgetEvent};
 use crate::tui::{with_silenced_io, TuiApp};
-use nba3k_core::{SeasonId, SeasonPhase, TeamId};
+use nba3k_core::{t, Lang, SeasonId, SeasonPhase, TeamId, T};
 use nba3k_season::standings::Standings;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -119,11 +119,11 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
             f,
             area,
             theme,
-            " Draft ",
+            t(tui.lang, T::DraftTitle),
             &[
-                "Draft",
+                t(tui.lang, T::DraftTitle),
                 "",
-                "No save loaded.",
+                t(tui.lang, T::CommonNoSaveLoaded),
                 "",
                 "Use New Game or Ctrl+S to load a save.",
             ],
@@ -132,7 +132,8 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
     }
 
     if let Err(e) = ensure_cache(app, tui) {
-        let p = Paragraph::new(format!("Draft unavailable: {}", e)).block(theme.block(" Draft "));
+        let p = Paragraph::new(format!("Draft unavailable: {}", e))
+            .block(theme.block(t(tui.lang, T::DraftTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -148,10 +149,10 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         .split(area);
 
     let tab = CACHE.with(|c| c.borrow().tab);
-    draw_tab_strip(f, parts[0], theme, tab);
+    draw_tab_strip(f, parts[0], theme, tui.lang, tab);
     draw_summary(f, parts[1], theme, tui);
     match tab {
-        SubTab::Board => draw_board(f, parts[2], theme),
+        SubTab::Board => draw_board(f, parts[2], theme, tui.lang),
         SubTab::Order => draw_order(f, parts[2], theme, tui),
     }
     draw_action_bar(f, parts[3], theme, tui, tab);
@@ -160,11 +161,11 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
     if has_modal {
         let rect = modal_rect(area);
         f.render_widget(Clear, rect);
-        draw_modal(f, rect, theme);
+        draw_modal(f, rect, theme, tui.lang);
     }
 }
 
-fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, tab: SubTab) {
+fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: SubTab) {
     let board_style = if tab == SubTab::Board {
         theme.highlight()
     } else {
@@ -176,11 +177,11 @@ fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, tab: SubTab) {
         theme.muted_style()
     };
     let line = Line::from(vec![
-        Span::styled(" 1. Board ", board_style),
+        Span::styled(format!(" 1. {} ", t(lang, T::DraftBoard)), board_style),
         Span::styled("   ", theme.text()),
-        Span::styled(" 2. Order ", order_style),
+        Span::styled(format!(" 2. {} ", t(lang, T::DraftOrder)), order_style),
     ]);
-    let p = Paragraph::new(line).block(theme.block(" Draft "));
+    let p = Paragraph::new(line).block(theme.block(t(lang, T::DraftTitle)));
     f.render_widget(p, area);
 }
 
@@ -192,10 +193,10 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         .map(|p| format!("#{} {}", p, tui.user_abbrev))
         .unwrap_or_else(|| "no pick in round".to_string());
     let lead = if active {
-        Span::styled("Draft active", theme.accent_style())
+        Span::styled(t(tui.lang, T::CommonReady), theme.accent_style())
     } else {
         Span::styled(
-            "Draft not active. Sim to end of season.",
+            t(tui.lang, T::DraftNotActive),
             theme.accent_style(),
         )
     };
@@ -217,7 +218,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
     f.render_widget(p, area);
 }
 
-fn draw_board(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_board(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let data = cache.data.as_ref().cloned().unwrap_or_default();
@@ -227,11 +228,11 @@ fn draw_board(f: &mut Frame, area: Rect, theme: &Theme) {
 
         let header = Row::new(vec![
             Cell::from(Span::styled("RANK", theme.accent_style())),
-            Cell::from(Span::styled("NAME", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::DraftProspect), theme.accent_style())),
             Cell::from(Span::styled("POS", theme.accent_style())),
             Cell::from(Span::styled("AGE", theme.accent_style())),
             Cell::from(Span::styled("OVR/POT", theme.accent_style())),
-            Cell::from(Span::styled("PROJ", theme.accent_style())),
+            Cell::from(Span::styled(t(lang, T::DraftProjectedPick), theme.accent_style())),
         ]);
 
         let rows: Vec<Row> = data
@@ -274,7 +275,7 @@ fn draw_board(f: &mut Frame, area: Rect, theme: &Theme) {
         )
         .header(header)
         .column_spacing(1)
-        .block(theme.block(" Board "));
+        .block(theme.block(t(lang, T::DraftBoard)));
         f.render_widget(table, area);
     });
 }
@@ -286,8 +287,8 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         let cursor = cache.order_cursor.min(data.order.len().saturating_sub(1));
         let title = data
             .user_next_pick
-            .map(|p| format!(" Order - your pick #{} ", p))
-            .unwrap_or_else(|| " Order ".to_string());
+            .map(|p| format!(" {} - {} #{} ", t(tui.lang, T::DraftOrder), tui.user_abbrev, p))
+            .unwrap_or_else(|| format!(" {} ", t(tui.lang, T::DraftOrder)));
 
         let header = Row::new(vec![
             Cell::from(Span::styled("PICK", theme.accent_style())),
@@ -311,7 +312,7 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                     Cell::from(format!("{:>2}", r.pick)),
                     Cell::from(r.abbrev.clone()),
                     Cell::from(r.full_name.clone()),
-                    Cell::from(if is_user { "You" } else { "CPU" }),
+                    Cell::from(if is_user { "*" } else { "" }),
                 ])
                 .style(style)
             })
@@ -336,18 +337,18 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
 fn draw_action_bar(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, tab: SubTab) {
     let hints: &[(&str, &str)] = match tab {
         SubTab::Board => &[
-            ("Tab", "Switch"),
-            ("Up/Dn", "Navigate"),
-            ("s", "Scout"),
-            ("Enter", "Pick"),
-            ("A", "Auto"),
-            ("Esc", "Back"),
+            ("Tab", t(tui.lang, T::CommonTabs)),
+            ("Up/Dn", t(tui.lang, T::CommonNavigate)),
+            ("s", t(tui.lang, T::DraftScout)),
+            ("Enter", t(tui.lang, T::CommonPick)),
+            ("A", t(tui.lang, T::DraftAutoPick)),
+            ("Esc", t(tui.lang, T::CommonBack)),
         ],
         SubTab::Order => &[
-            ("Tab", "Switch"),
-            ("Up/Dn", "Navigate"),
-            ("A", "Auto"),
-            ("Esc", "Back"),
+            ("Tab", t(tui.lang, T::CommonTabs)),
+            ("Up/Dn", t(tui.lang, T::CommonNavigate)),
+            ("A", t(tui.lang, T::DraftAutoPick)),
+            ("Esc", t(tui.lang, T::CommonBack)),
         ],
     };
     let bar = match tui.last_msg.as_deref() {
@@ -357,7 +358,8 @@ fn draw_action_bar(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, tab: 
     bar.render(f, area, theme);
 }
 
-fn draw_modal(f: &mut Frame, area: Rect, theme: &Theme) {
+fn draw_modal(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
+    let _ = t(lang, T::ModalDraftPickTitle);
     CACHE.with(|c| {
         let cache = c.borrow();
         match &cache.modal {
