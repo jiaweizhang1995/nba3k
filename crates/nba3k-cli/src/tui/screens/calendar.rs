@@ -216,6 +216,12 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp, st: &mut CalendarState) -> Res
     Ok(())
 }
 
+pub fn invalidate() {
+    STATE.with(|cell| {
+        cell.borrow_mut().cached_for = None;
+    });
+}
+
 /// Load every scheduled + played game for the user team in the current
 /// season. Combines `pending_games_through(<far date>)` (unplayed) with
 /// `read_games(season)` filtered to user-team rows (played).
@@ -1356,11 +1362,7 @@ fn run_sim_request(app: &mut AppState, tui: &mut TuiApp, req: SimRequest) -> Res
     match result {
         Ok(()) => {
             tui.refresh_season_state(app)?;
-            tui.invalidate_caches();
-            STATE.with(|cell| {
-                let mut st = cell.borrow_mut();
-                st.cached_for = None;
-            });
+            crate::tui::invalidate_all_screens(tui);
 
             // Re-fetch the post-sim ctx (refresh_season_state above updated it).
             let post_day = tui

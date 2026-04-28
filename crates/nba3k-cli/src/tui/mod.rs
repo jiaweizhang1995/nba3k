@@ -28,6 +28,7 @@ use ratatui::{
 use std::io;
 use std::path::PathBuf;
 
+use crate::cli::{Command, JsonFlag};
 use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, Confirm, FormWidget, Theme, WidgetEvent};
 use nba3k_core::{t, Cents, Lang, SeasonId, SeasonState, TeamId, T};
@@ -493,6 +494,9 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
 }
 
 fn preview_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
+    if handle_global_sim_key(app, tui, k)? {
+        return Ok(false);
+    }
     match k.code {
         KeyCode::Up
         | KeyCode::Down
@@ -535,12 +539,18 @@ where
     F: FnOnce(&mut AppState, &mut TuiApp, KeyEvent) -> Result<bool>,
 {
     let consumed = handler(app, tui, k)?;
-    if !consumed && matches!(k.code, KeyCode::Char('?')) {
+    if consumed {
+        return Ok(false);
+    }
+    if handle_global_sim_key(app, tui, k)? {
+        return Ok(false);
+    }
+    if matches!(k.code, KeyCode::Char('?')) {
         tui.help_open = true;
-    } else if !consumed && matches!(k.code, KeyCode::Esc) {
+    } else if matches!(k.code, KeyCode::Esc) {
         tui.help_open = false;
-            if tui.has_save() {
-                if let Some(item) = MenuItem::from_screen(tui.current) {
+        if tui.has_save() {
+            if let Some(item) = MenuItem::from_screen(tui.current) {
                 tui.menu_selected = MenuItem::ALL
                     .iter()
                     .position(|candidate| *candidate == item)
@@ -589,6 +599,10 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
         return Ok(false);
     }
 
+    if handle_global_sim_key(_app, tui, k)? {
+        return Ok(false);
+    }
+
     match k.code {
         KeyCode::Char('?') => {
             tui.help_open = true;
@@ -631,6 +645,78 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
         _ => {}
     }
     Ok(false)
+}
+
+fn handle_global_sim_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
+    if !tui.has_save() || !k.modifiers.contains(KeyModifiers::CONTROL) {
+        return Ok(false);
+    }
+    let KeyCode::Char(c) = k.code else {
+        return Ok(false);
+    };
+    let (cmd, label) = match c.to_ascii_lowercase() {
+        'd' => (
+            Command::SimDay { count: Some(1) },
+            t(tui.lang, T::SimDay).to_string(),
+        ),
+        'w' => (
+            Command::SimWeek { no_pause: true },
+            t(tui.lang, T::SimWeek).to_string(),
+        ),
+        'n' => (
+            Command::SimMonth { no_pause: true },
+            t(tui.lang, T::SimMonth).to_string(),
+        ),
+        't' => (
+            Command::SimTo {
+                phase: "trade-deadline".to_string(),
+            },
+            t(tui.lang, T::SimTradeDeadline).to_string(),
+        ),
+        'a' => (
+            Command::SeasonAdvance(JsonFlag { json: false }),
+            t(tui.lang, T::SimSeasonAdvance).to_string(),
+        ),
+        _ => return Ok(false),
+    };
+    run_global_sim(app, tui, cmd, &label)?;
+    Ok(true)
+}
+
+fn run_global_sim(app: &mut AppState, tui: &mut TuiApp, cmd: Command, label: &str) -> Result<()> {
+    let pre_day = tui.season_state.day;
+    let result = with_silenced_io(|| crate::commands::dispatch(app, cmd));
+    match result {
+        Ok(()) => {
+            tui.refresh_season_state(app)?;
+            invalidate_all_screens(tui);
+            let post_day = tui.season_state.day;
+            let delta = post_day.saturating_sub(pre_day);
+            tui.last_msg = Some(format!(
+                "{}: +{}d ({} {})",
+                label,
+                delta,
+                t(tui.lang, T::CalendarDayOf),
+                post_day
+            ));
+        }
+        Err(e) => {
+            tui.last_msg = Some(format!("{}: {}", t(tui.lang, T::CommonError), e));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn invalidate_all_screens(tui: &mut TuiApp) {
+    tui.invalidate_caches();
+    screens::home::invalidate();
+    screens::roster::invalidate();
+    screens::rotation::invalidate();
+    screens::trades::invalidate();
+    screens::draft::invalidate();
+    screens::finance::invalidate();
+    screens::calendar::invalidate();
+    screens::inbox::invalidate();
 }
 
 fn selected_menu_screen(tui: &TuiApp) -> Screen {
@@ -680,21 +766,40 @@ fn draw(f: &mut Frame, app: &mut AppState, tui: &TuiApp) {
         return;
     }
 
-    // Vertical: body (sidebar | content) over action bar.
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)])
-        .split(area);
+    let show_banner = sim_banner_visible(tui);
+    let outer = if show_banner {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(3),
+                Constraint::Length(3),
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(3)])
+            .split(area)
+    };
+    let (banner_area, body_area, action_area) = if show_banner {
+        (Some(outer[0]), outer[1], outer[2])
+    } else {
+        (None, outer[0], outer[1])
+    };
 
     // Horizontal: sidebar (30) | content (rest).
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(0)])
-        .split(outer[0]);
+        .split(body_area);
 
+    if let Some(banner_area) = banner_area {
+        draw_sim_banner(f, banner_area, tui);
+    }
     draw_sidebar(f, body[0], tui);
     draw_content(f, body[1], app, tui);
-    draw_action_bar(f, outer[1], tui);
+    draw_action_bar(f, action_area, tui);
 
     if tui.current == Screen::QuitConfirm {
         draw_quit_modal(f, area, tui);
@@ -702,6 +807,48 @@ fn draw(f: &mut Frame, app: &mut AppState, tui: &TuiApp) {
     if tui.help_open {
         draw_help_modal(f, area, tui);
     }
+}
+
+fn sim_banner_visible(tui: &TuiApp) -> bool {
+    tui.has_save()
+        && !matches!(
+            tui.current,
+            Screen::Launch
+                | Screen::NewGame
+                | Screen::Saves
+                | Screen::Settings
+                | Screen::QuitConfirm
+        )
+}
+
+fn draw_sim_banner(f: &mut Frame, area: Rect, tui: &TuiApp) {
+    let season_label = format!("{}-{:02}", tui.season.0 - 1, tui.season.0 % 100);
+    let status = format!(
+        "Season {}  ·  Day {}  ·  {:?}",
+        season_label, tui.season_state.day, tui.season_state.phase
+    );
+    let buttons = Line::from(vec![
+        Span::styled("[D] ", tui.theme.accent_style()),
+        Span::styled(t(tui.lang, T::SimDay), tui.theme.text()),
+        Span::raw("   "),
+        Span::styled("[W] ", tui.theme.accent_style()),
+        Span::styled(t(tui.lang, T::SimWeek), tui.theme.text()),
+        Span::raw("   "),
+        Span::styled("[N] ", tui.theme.accent_style()),
+        Span::styled(t(tui.lang, T::SimMonth), tui.theme.text()),
+        Span::raw("   "),
+        Span::styled("[T] ", tui.theme.accent_style()),
+        Span::styled(t(tui.lang, T::SimTradeDeadline), tui.theme.text()),
+        Span::raw("   "),
+        Span::styled("[A] ", tui.theme.accent_style()),
+        Span::styled(t(tui.lang, T::SimSeasonAdvance), tui.theme.text()),
+    ]);
+    let lines = vec![
+        Line::from(Span::styled(status, tui.theme.accent_style())),
+        buttons,
+        Line::from(Span::styled("Ctrl+D/W/N/T/A", tui.theme.muted_style())),
+    ];
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_sidebar(f: &mut Frame, area: Rect, tui: &TuiApp) {

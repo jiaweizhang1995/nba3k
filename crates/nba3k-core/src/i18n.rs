@@ -108,6 +108,12 @@ pub enum T {
     InboxNoDemands,
     InboxNoNews,
 
+    SimDay,
+    SimWeek,
+    SimMonth,
+    SimTradeDeadline,
+    SimSeasonAdvance,
+
     RosterTitle,
     RosterMyRoster,
     RosterFreeAgents,

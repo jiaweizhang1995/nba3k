@@ -43,7 +43,9 @@ User wants:
 
 ## T5 — Top sim banner (global sim controls)
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 290 unit tests passed; global Ctrl+D/W/N/T/A sim banner and invalidate_all_screens wired.
 
 **Goal**: A persistent top banner across the entire TUI shell that shows current date / season / phase + clickable-style sim buttons. Hotkeys work in every screen including Calendar / Roster / Trades.
 
@@ -171,7 +173,7 @@ User wants:
 
 **Status**: `[x]`
 
-→ codex: done — bacc30c — 290 unit tests passed; sidebar menu 9 items with Inbox at #7.
+→ codex: done — ba565e9 — 290 unit tests passed; sidebar menu 9 items with Inbox at #7.
 
 **Goal**: New 7th menu item showing GM messages / trade demands / news. Existing Home Inbox panel data moves here.
 
