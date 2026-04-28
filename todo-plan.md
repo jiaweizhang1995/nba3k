@@ -538,7 +538,9 @@ User goal: most TUI interactions should be possible with arrows + Enter + Tab + 
 
 ## T16 — Trades Inbox / My Proposals: Enter opens action picker
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 296 unit tests passed; Enter opens localized response picker and a/r/c fast paths remain.
 
 **Goal**: Three-action rows (Accept / Reject / Counter) currently bound to `a` / `r` / `c`. Replace with: Enter on selected offer pops a small action picker modal (3 rows: 接受 / 拒绝 / 还价), arrow + Enter fires the chosen action. `a/r/c` letters stay as a fast-path.
 

@@ -170,6 +170,7 @@ pub enum T {
     TradesAccept,
     TradesReject,
     TradesCounter,
+    TradesActionPickerTitle,
     TradesPropose,
     TradesYouSend,
     TradesSubmit,

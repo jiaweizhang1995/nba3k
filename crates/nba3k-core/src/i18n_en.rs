@@ -130,6 +130,7 @@ pub(crate) fn lookup(key: T) -> &'static str {
         T::TradesAccept => "Accept",
         T::TradesReject => "Reject",
         T::TradesCounter => "Counter",
+        T::TradesActionPickerTitle => "Respond to offer",
         T::TradesPropose => "Propose",
         T::TradesYouSend => "You Send",
         T::TradesSubmit => "Submit",

@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use crate::cli::{Command, FaAction, FaArgs, TradeAction, TradeArgs};
 use crate::commands::{self, dispatch};
 use crate::state::AppState;
-use crate::tui::widgets::{ActionBar, Theme};
+use crate::tui::widgets::{ActionBar, FormWidget, Picker, Theme, WidgetEvent};
 use crate::tui::{with_silenced_io, TuiApp};
 use nba3k_core::{
     t, DraftPick, DraftPickId, Lang, LeagueSnapshot, LeagueYear, NegotiationState, Player, PlayerId,
@@ -68,6 +68,31 @@ enum IncomingSlot {
     #[default]
     First,
     Second,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TradeResponse {
+    Accept,
+    Reject,
+    Counter,
+}
+
+impl TradeResponse {
+    fn as_command_str(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Reject => "reject",
+            Self::Counter => "counter",
+        }
+    }
+
+    fn label(self, lang: Lang) -> &'static str {
+        match self {
+            Self::Accept => t(lang, T::TradesAccept),
+            Self::Reject => t(lang, T::TradesReject),
+            Self::Counter => t(lang, T::TradesCounter),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +200,14 @@ enum Modal {
     },
     ChainDetail {
         id: TradeId,
+    },
+    OfferAction {
+        id: TradeId,
+        picker: Picker<TradeResponse>,
+    },
+    ChainAction {
+        id: TradeId,
+        picker: Picker<TradeResponse>,
     },
     Message {
         title: String,
@@ -316,10 +349,8 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         }
 
         ActionBar::new(&[
-            ("a", t(lang, T::TradesAccept)),
-            ("r", t(lang, T::TradesReject)),
-            ("c", t(lang, T::TradesCounter)),
-            ("Enter", t(lang, T::CommonDetail)),
+            ("Enter", t(lang, T::TradesActionPickerTitle)),
+            ("a/r/c", quick_label(lang)),
             ("Tab", t(lang, T::CommonTabs)),
             ("Esc", t(lang, T::CommonBack)),
         ])
@@ -381,10 +412,8 @@ fn draw_proposals(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         }
 
         ActionBar::new(&[
-            ("a", t(lang, T::TradesAccept)),
-            ("r", t(lang, T::TradesReject)),
-            ("c", t(lang, T::TradesCounter)),
-            ("Enter", t(lang, T::CommonDetail)),
+            ("Enter", t(lang, T::TradesActionPickerTitle)),
+            ("a/r/c", quick_label(lang)),
             ("Tab", t(lang, T::CommonTabs)),
             ("Esc", t(lang, T::CommonBack)),
         ])
@@ -800,6 +829,20 @@ fn draw_free_agents(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
 
 fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
     let _ = t(lang, T::ModalTradeVerdictTitle);
+    let rendered_picker = CACHE.with(|c| {
+        let cache = c.borrow();
+        match &cache.modal {
+            Modal::OfferAction { picker, .. } | Modal::ChainAction { picker, .. } => {
+                picker.render(f, rect, theme);
+                true
+            }
+            _ => false,
+        }
+    });
+    if rendered_picker {
+        return;
+    }
+
     let (title, lines) = CACHE.with(|c| {
         let cache = c.borrow();
         match &cache.modal {
@@ -827,6 +870,7 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
                 (format!(" Trade Chain #{} ", id.0), lines)
             }
             Modal::Message { title, lines } => (format!(" {} ", title), lines.clone()),
+            Modal::OfferAction { .. } | Modal::ChainAction { .. } => unreachable!(),
         }
     });
     let text: Vec<Line> = lines
@@ -1253,21 +1297,48 @@ fn build_roster_options(
         .collect())
 }
 
+enum ModalKeyAction {
+    None,
+    Consumed,
+    Respond { id: TradeId, action: TradeResponse },
+}
+
 pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    let modal_handled = CACHE.with(|c| {
+    let modal_action = CACHE.with(|c| {
         let mut cache = c.borrow_mut();
-        match &cache.modal {
-            Modal::None => false,
+        match &mut cache.modal {
+            Modal::None => ModalKeyAction::None,
+            Modal::OfferAction { id, picker } | Modal::ChainAction { id, picker } => {
+                match picker.handle_key(key) {
+                    WidgetEvent::Submitted => {
+                        let id = *id;
+                        let action = picker.selected().copied();
+                        cache.modal = Modal::None;
+                        action
+                            .map(|action| ModalKeyAction::Respond { id, action })
+                            .unwrap_or(ModalKeyAction::Consumed)
+                    }
+                    WidgetEvent::Cancelled => {
+                        cache.modal = Modal::None;
+                        ModalKeyAction::Consumed
+                    }
+                    _ => ModalKeyAction::Consumed,
+                }
+            }
             _ => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
                     cache.modal = Modal::None;
                 }
-                true
+                ModalKeyAction::Consumed
             }
         }
     });
-    if modal_handled {
-        return Ok(true);
+    match modal_action {
+        ModalKeyAction::None => {}
+        ModalKeyAction::Consumed => return Ok(true),
+        ModalKeyAction::Respond { id, action } => {
+            return respond_to_chain(app, tui, id, action.as_command_str());
+        }
     }
 
     match key.code {
@@ -1314,12 +1385,7 @@ fn handle_inbox_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Resu
         KeyCode::Down => move_inbox(1),
         KeyCode::PageUp => move_inbox(-10),
         KeyCode::PageDown => move_inbox(10),
-        KeyCode::Enter => {
-            if let Some(id) = current_offer_id() {
-                CACHE.with(|c| c.borrow_mut().modal = Modal::OfferDetail { id });
-            }
-            Ok(true)
-        }
+        KeyCode::Enter => open_current_inbox_action_picker(tui),
         KeyCode::Char('a') => respond_current_inbox(app, tui, "accept"),
         KeyCode::Char('r') => respond_current_inbox(app, tui, "reject"),
         KeyCode::Char('c') => respond_current_inbox(app, tui, "counter"),
@@ -1333,17 +1399,52 @@ fn handle_proposals_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> 
         KeyCode::Down => move_chain(1),
         KeyCode::PageUp => move_chain(-10),
         KeyCode::PageDown => move_chain(10),
-        KeyCode::Enter => {
-            if let Some(id) = current_chain_id() {
-                CACHE.with(|c| c.borrow_mut().modal = Modal::ChainDetail { id });
-            }
-            Ok(true)
-        }
+        KeyCode::Enter => open_current_chain_action_picker(tui),
         KeyCode::Char('a') => respond_current_chain(app, tui, "accept"),
         KeyCode::Char('r') => respond_current_chain(app, tui, "reject"),
         KeyCode::Char('c') => respond_current_chain(app, tui, "counter"),
         _ => Ok(false),
     }
+}
+
+fn open_current_inbox_action_picker(tui: &mut TuiApp) -> Result<bool> {
+    let Some(id) = current_offer_id() else {
+        tui.last_msg = Some("no open inbox offer selected".into());
+        return Ok(true);
+    };
+    CACHE.with(|c| {
+        c.borrow_mut().modal = Modal::OfferAction {
+            id,
+            picker: trade_response_picker(tui.lang),
+        };
+    });
+    Ok(true)
+}
+
+fn open_current_chain_action_picker(tui: &mut TuiApp) -> Result<bool> {
+    let selected = CACHE.with(|c| {
+        let cache = c.borrow();
+        cache
+            .chain_rows
+            .as_ref()
+            .and_then(|rows| rows.get(cache.chain_cursor))
+            .map(|r| (r.id, r.open))
+    });
+    let Some((id, open)) = selected else {
+        tui.last_msg = Some("no trade chain selected".into());
+        return Ok(true);
+    };
+    if !open {
+        tui.last_msg = Some("selected chain is not open".into());
+        return Ok(true);
+    }
+    CACHE.with(|c| {
+        c.borrow_mut().modal = Modal::ChainAction {
+            id,
+            picker: trade_response_picker(tui.lang),
+        };
+    });
+    Ok(true)
 }
 
 fn handle_builder_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
@@ -2055,6 +2156,18 @@ fn team_abbrev(store: &nba3k_store::Store, team: TeamId) -> Result<String> {
         .unwrap_or_else(|| format!("T{}", team.0)))
 }
 
+fn trade_response_picker(lang: Lang) -> Picker<TradeResponse> {
+    Picker::new(
+        t(lang, T::TradesActionPickerTitle),
+        vec![
+            TradeResponse::Accept,
+            TradeResponse::Reject,
+            TradeResponse::Counter,
+        ],
+        |response| response.label(lang).to_string(),
+    )
+}
+
 fn verdict_label(lang: Lang, v: &Verdict) -> &'static str {
     match v {
         Verdict::Accept => t(lang, T::TradesAccept),
@@ -2071,6 +2184,13 @@ fn reject_reason_to_string(lang: Lang, r: &RejectReason) -> String {
         RejectReason::BadFaith => t(lang, T::TradesReject).to_string(),
         RejectReason::OutOfRoundCap => t(lang, T::TradesReject).to_string(),
         RejectReason::Other(s) => s.clone(),
+    }
+}
+
+fn quick_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::En => "Quick",
+        Lang::Zh => "快捷",
     }
 }
 
