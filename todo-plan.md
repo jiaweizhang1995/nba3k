@@ -325,7 +325,9 @@ User-reported items 2026-04-28 after running release build. Same protocol as abo
 
 ## T11 — Focus border indicator (sidebar vs content active region)
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 293 unit tests passed; shell focus zone drives yellow sidebar/content outer borders.
 
 **Goal**: User can't tell whether they're focused on the sidebar menu or the content pane. Add a yellow accent border around the **active** zone (whichever side currently consumes input). Mirror the existing yellow-border pattern used by the Calendar selected-day cell (image #12).
 

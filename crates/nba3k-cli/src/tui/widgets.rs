@@ -100,6 +100,23 @@ impl Theme {
         }
         b
     }
+
+    /// Build an outer region block that shows whether the region owns focus.
+    pub fn focus_block<'a>(&self, title: &'a str, active: bool) -> Block<'a> {
+        let style = if active {
+            self.accent_style()
+        } else {
+            self.muted_style()
+        };
+        let mut b = Block::default().borders(Borders::ALL).border_style(style);
+        if !title.is_empty() {
+            b = b.title(title);
+        }
+        if self.block_padding > 0 {
+            b = b.padding(Padding::uniform(self.block_padding));
+        }
+        b
+    }
 }
 
 // ---------------------------------------------------------------------------

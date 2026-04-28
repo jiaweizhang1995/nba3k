@@ -125,6 +125,12 @@ pub enum Screen {
     QuitConfirm,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FocusZone {
+    Sidebar,
+    Content,
+}
+
 // ---------------------------------------------------------------------------
 // TuiApp — top-level state
 // ---------------------------------------------------------------------------
@@ -185,6 +191,8 @@ pub struct TuiApp {
     pub menu_selected: usize,
     /// True when sidebar navigation is previewing a screen without focusing it.
     pub preview_mode: bool,
+    /// Active shell region. Synced from `current` + `preview_mode` before draw.
+    pub focus: FocusZone,
     /// Theme palette (DEFAULT or TV).
     pub theme: Theme,
     /// TUI chrome language. Player names and team abbreviations remain data.
@@ -227,6 +235,7 @@ impl TuiApp {
             current: Screen::Launch,
             menu_selected: 0,
             preview_mode: false,
+            focus: FocusZone::Content,
             theme,
             lang,
             quit_return: Screen::Launch,
@@ -249,6 +258,18 @@ impl TuiApp {
     /// this to gate "needs save" rendering.
     pub fn has_save(&self) -> bool {
         self.save_ctx.is_some()
+    }
+
+    fn sync_focus(&mut self) {
+        self.focus = self.derived_focus();
+    }
+
+    fn derived_focus(&self) -> FocusZone {
+        if self.current == Screen::Menu || (self.preview_mode && self.has_save()) {
+            FocusZone::Sidebar
+        } else {
+            FocusZone::Content
+        }
     }
 
     /// Replace `save_ctx` and re-mirror its fields onto self. Internal helper
@@ -430,6 +451,7 @@ fn event_loop<B: ratatui::backend::Backend>(
 ) -> Result<()> {
     loop {
         ensure_shell_cache(app, tui)?;
+        tui.sync_focus();
         terminal.draw(|f| draw(f, app, tui))?;
 
         let Event::Key(k) = event::read()? else {
@@ -863,11 +885,15 @@ fn draw_sim_banner(f: &mut Frame, area: Rect, tui: &TuiApp) {
 }
 
 fn draw_sidebar(f: &mut Frame, area: Rect, tui: &TuiApp) {
+    let block = tui.theme.focus_block("", tui.focus == FocusZone::Sidebar);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
     // Two stacked blocks: season banner (3) + menu (rest).
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
+        .split(inner);
 
     if tui.current == Screen::Launch {
         draw_sidebar_launch(f, parts[0], parts[1], tui);
@@ -964,26 +990,52 @@ fn draw_sidebar_empty(f: &mut Frame, banner_area: Rect, menu_area: Rect, tui: &T
 }
 
 fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
+    let title = content_title(tui);
+    let block = tui
+        .theme
+        .focus_block(&title, tui.focus == FocusZone::Content);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
     match tui.current {
-        Screen::Launch => screens::launch::render(f, area, &tui.theme, app, tui),
-        Screen::Menu => draw_menu_preview(f, area, tui),
-        Screen::Home => screens::home::render(f, area, &tui.theme, app, tui),
-        Screen::Calendar => screens::calendar::render(f, area, &tui.theme, app, tui),
-        Screen::Saves => screens::saves::render(f, area, &tui.theme, app, tui),
+        Screen::Launch => screens::launch::render(f, inner, &tui.theme, app, tui),
+        Screen::Menu => draw_menu_preview(f, inner, tui),
+        Screen::Home => screens::home::render(f, inner, &tui.theme, app, tui),
+        Screen::Calendar => screens::calendar::render(f, inner, &tui.theme, app, tui),
+        Screen::Saves => screens::saves::render(f, inner, &tui.theme, app, tui),
         Screen::Settings => {
-            screens::settings::render(f, area, &tui.theme, tui.lang, settings_choice(tui.lang))
+            screens::settings::render(f, inner, &tui.theme, tui.lang, settings_choice(tui.lang))
         }
-        Screen::NewGame => screens::new_game::render(f, area, &tui.theme, app, tui),
-        Screen::Roster => screens::roster::render(f, area, &tui.theme, app, tui),
-        Screen::Rotation => screens::rotation::render(f, area, &tui.theme, app, tui),
-        Screen::Trades => screens::trades::render(f, area, &tui.theme, app, tui),
-        Screen::Draft => screens::draft::render(f, area, &tui.theme, app, tui),
-        Screen::Finance => screens::finance::render(f, area, &tui.theme, app, tui),
-        Screen::Inbox => screens::inbox::render(f, area, &tui.theme, app, tui),
+        Screen::NewGame => screens::new_game::render(f, inner, &tui.theme, app, tui),
+        Screen::Roster => screens::roster::render(f, inner, &tui.theme, app, tui),
+        Screen::Rotation => screens::rotation::render(f, inner, &tui.theme, app, tui),
+        Screen::Trades => screens::trades::render(f, inner, &tui.theme, app, tui),
+        Screen::Draft => screens::draft::render(f, inner, &tui.theme, app, tui),
+        Screen::Finance => screens::finance::render(f, inner, &tui.theme, app, tui),
+        Screen::Inbox => screens::inbox::render(f, inner, &tui.theme, app, tui),
         Screen::QuitConfirm => {
             // Body still shows the menu preview; the modal is drawn by `draw`.
-            draw_menu_preview(f, area, tui);
+            draw_menu_preview(f, inner, tui);
         }
+    }
+}
+
+fn content_title(tui: &TuiApp) -> String {
+    match tui.current {
+        Screen::Launch => t(tui.lang, T::AppName).to_string(),
+        Screen::Menu => MenuItem::ALL[tui.menu_selected].label(tui.lang).to_string(),
+        Screen::Home => t(tui.lang, T::HomeTitle).to_string(),
+        Screen::Roster => t(tui.lang, T::RosterTitle).to_string(),
+        Screen::Rotation => t(tui.lang, T::RotationTitle).to_string(),
+        Screen::Trades => t(tui.lang, T::TradesTitle).to_string(),
+        Screen::Draft => t(tui.lang, T::DraftTitle).to_string(),
+        Screen::Finance => t(tui.lang, T::FinanceTitle).to_string(),
+        Screen::Inbox => t(tui.lang, T::InboxTitle).to_string(),
+        Screen::Calendar => t(tui.lang, T::CalendarTitle).to_string(),
+        Screen::Saves => t(tui.lang, T::SavesTitle).to_string(),
+        Screen::Settings => t(tui.lang, T::SettingsTitle).to_string(),
+        Screen::NewGame => t(tui.lang, T::NewGameTitle).to_string(),
+        Screen::QuitConfirm => t(tui.lang, T::ModalQuitTitle).to_string(),
     }
 }
 
@@ -1339,6 +1391,47 @@ mod tests {
         assert_eq!(tui.current, Screen::Finance);
         assert_eq!(tui.menu_selected, 5);
         assert!(tui.preview_mode);
+    }
+
+    #[test]
+    fn focus_zone_matches_sidebar_preview_and_content_rules() {
+        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En);
+
+        tui.current = Screen::Menu;
+        tui.preview_mode = false;
+        assert_eq!(tui.derived_focus(), FocusZone::Sidebar);
+
+        tui.current = Screen::Calendar;
+        tui.preview_mode = true;
+        assert_eq!(tui.derived_focus(), FocusZone::Sidebar);
+
+        tui.preview_mode = false;
+        assert_eq!(tui.derived_focus(), FocusZone::Content);
+
+        for screen in [
+            Screen::Launch,
+            Screen::NewGame,
+            Screen::Saves,
+            Screen::Settings,
+            Screen::QuitConfirm,
+        ] {
+            tui.current = screen;
+            tui.preview_mode = false;
+            assert_eq!(tui.derived_focus(), FocusZone::Content);
+        }
+    }
+
+    #[test]
+    fn sync_focus_updates_public_focus_field() {
+        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En);
+        tui.current = Screen::Roster;
+        tui.preview_mode = true;
+        tui.sync_focus();
+        assert_eq!(tui.focus, FocusZone::Sidebar);
+
+        tui.preview_mode = false;
+        tui.sync_focus();
+        assert_eq!(tui.focus, FocusZone::Content);
     }
 
     fn test_save_ctx() -> SaveCtx {
