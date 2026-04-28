@@ -1,4 +1,4 @@
-//! M20 TUI shell. Renders the 7-item left-side menu mockup; per-screen
+//! M20 TUI shell. Renders the 8-item left-side menu mockup; per-screen
 //! content is delegated to `screens::*`. Pre-M20 5-tab dashboard is preserved
 //! at `tui --legacy` (see `screens::legacy`).
 //!
@@ -45,10 +45,11 @@ pub enum MenuItem {
     Draft,
     Finance,
     Calendar,
+    Settings,
 }
 
 impl MenuItem {
-    pub const ALL: [MenuItem; 7] = [
+    pub const ALL: [MenuItem; 8] = [
         MenuItem::Home,
         MenuItem::Roster,
         MenuItem::Rotation,
@@ -56,6 +57,7 @@ impl MenuItem {
         MenuItem::Draft,
         MenuItem::Finance,
         MenuItem::Calendar,
+        MenuItem::Settings,
     ];
 
     pub fn label(self, lang: Lang) -> &'static str {
@@ -67,6 +69,7 @@ impl MenuItem {
             MenuItem::Draft => t(lang, T::MenuDraft),
             MenuItem::Finance => t(lang, T::MenuFinance),
             MenuItem::Calendar => t(lang, T::MenuCalendar),
+            MenuItem::Settings => t(lang, T::LaunchSettings),
         }
     }
 
@@ -79,6 +82,7 @@ impl MenuItem {
             MenuItem::Draft => Screen::Draft,
             MenuItem::Finance => Screen::Finance,
             MenuItem::Calendar => Screen::Calendar,
+            MenuItem::Settings => Screen::Settings,
         }
     }
 
@@ -91,6 +95,7 @@ impl MenuItem {
             Screen::Draft => Some(MenuItem::Draft),
             Screen::Finance => Some(MenuItem::Finance),
             Screen::Calendar => Some(MenuItem::Calendar),
+            Screen::Settings => Some(MenuItem::Settings),
             _ => None,
         }
     }
@@ -171,8 +176,6 @@ pub struct TuiApp {
     pub theme: Theme,
     /// TUI chrome language. Player names and team abbreviations remain data.
     pub lang: Lang,
-    /// Screen to return to when Settings is closed.
-    settings_return: Screen,
     /// Screen to return to when QuitConfirm is cancelled.
     quit_return: Screen,
 
@@ -211,7 +214,6 @@ impl TuiApp {
             preview_mode: false,
             theme,
             lang,
-            settings_return: Screen::Launch,
             quit_return: Screen::Launch,
             save_ctx: None,
             user_team: TeamId(0),
@@ -279,16 +281,8 @@ impl TuiApp {
         self.help_open = false;
         app.open_path(new_path)?;
         self.refresh_save_ctx(app)?;
-        self.load_lang_from_store(app);
+        self.load_lang(app);
         Ok(())
-    }
-
-    fn open_settings(&mut self, return_to: Screen) {
-        self.help_open = false;
-        self.preview_mode = false;
-        self.settings_return = return_to;
-        self.current = Screen::Settings;
-        screens::settings::reset(settings_choice(self.lang));
     }
 
     fn open_quit_confirm(&mut self, return_to: Screen) {
@@ -299,21 +293,13 @@ impl TuiApp {
         self.quit_confirm = Confirm::new(t(self.lang, T::ModalQuitTitle));
     }
 
-    fn close_settings(&mut self) {
-        let return_to = self.settings_return;
-        self.current = return_to;
-        self.preview_mode = false;
+    pub fn apply_language(&mut self, lang: Lang) {
+        self.lang = lang;
+        self.quit_confirm = Confirm::new(t(lang, T::ModalQuitTitle));
     }
 
-    fn load_lang_from_store(&mut self, app: &mut AppState) {
-        if let Ok(store) = app.store() {
-            if let Ok(Some(value)) = store.read_setting("language") {
-                if let Some(lang) = Lang::from_setting(&value) {
-                    self.lang = lang;
-                    self.quit_confirm = Confirm::new(t(lang, T::ModalQuitTitle));
-                }
-            }
-        }
+    fn load_lang(&mut self, app: &mut AppState) {
+        self.apply_language(read_lang(app));
     }
 
     /// Re-read just the season_state row (no payroll/team flush). Used by sim
@@ -355,7 +341,7 @@ fn empty_season_state() -> SeasonState {
 // Public entry
 // ---------------------------------------------------------------------------
 
-/// New M20 TUI entry — 7-menu shell. The shell tolerates a no-save launch:
+/// New M20 TUI entry — 8-menu shell. The shell tolerates a no-save launch:
 /// when no `--save` is passed (or the save has no `season_state` yet), we
 /// enter `Screen::NewGame` and the wizard becomes the only reachable screen
 /// until it creates / loads a save. The `--legacy` flag is wired separately
@@ -367,17 +353,12 @@ pub fn run(app: &mut AppState, tv: bool) -> Result<()> {
     // season_state, fall through with `save_ctx = None` and let the wizard
     // take over instead of aborting.
     let (save_ctx, lang) = match app.store() {
-        Ok(store) => {
-            let lang = store
-                .read_setting("language")
-                .ok()
-                .flatten()
-                .and_then(|value| Lang::from_setting(&value))
-                .unwrap_or(Lang::En);
+        Ok(_) => {
+            let lang = read_lang(app);
             let save_ctx = SaveCtx::load(app).unwrap_or(None);
             (save_ctx, lang)
         }
-        Err(_) => (None, Lang::En),
+        Err(_) => (None, read_config_lang()),
     };
 
     let mut tui = TuiApp::new(theme, save_ctx, lang);
@@ -399,6 +380,25 @@ pub fn run(app: &mut AppState, tv: bool) -> Result<()> {
 /// `tui --legacy` entry — preserves the M19 5-tab dashboard.
 pub fn run_legacy(app: &mut AppState) -> Result<()> {
     screens::legacy::run(app)
+}
+
+fn read_lang(app: &mut AppState) -> Lang {
+    match app.store() {
+        Ok(store) => store
+            .read_setting("language")
+            .ok()
+            .flatten()
+            .or_else(crate::config::read_lang)
+            .and_then(|value| Lang::from_setting(&value))
+            .unwrap_or(Lang::En),
+        Err(_) => read_config_lang(),
+    }
+}
+
+fn read_config_lang() -> Lang {
+    crate::config::read_lang()
+        .and_then(|value| Lang::from_setting(&value))
+        .unwrap_or(Lang::En)
 }
 
 // ---------------------------------------------------------------------------
@@ -464,11 +464,6 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         return Ok(false);
     }
 
-    if matches!(k.code, KeyCode::Char(',')) && !matches!(tui.current, Screen::Settings) {
-        tui.open_settings(tui.current);
-        return Ok(false);
-    }
-
     if tui.preview_mode && tui.has_save() {
         return preview_key(app, tui, k);
     }
@@ -479,7 +474,7 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         Screen::Home => inner_screen_key(app, tui, k, screens::home::handle_key),
         Screen::Calendar => inner_screen_key(app, tui, k, screens::calendar::handle_key),
         Screen::Saves => inner_screen_key(app, tui, k, screens::saves::handle_key),
-        Screen::Settings => settings_key(app, tui, k),
+        Screen::Settings => inner_screen_key(app, tui, k, screens::settings::handle_key),
         Screen::NewGame => inner_screen_key(app, tui, k, screens::new_game::handle_key),
         Screen::Roster => inner_screen_key(app, tui, k, screens::roster::handle_key),
         Screen::Rotation => inner_screen_key(app, tui, k, screens::rotation::handle_key),
@@ -494,7 +489,7 @@ fn preview_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool
     match k.code {
         KeyCode::Up
         | KeyCode::Down
-        | KeyCode::Char('1'..='7')
+        | KeyCode::Char('1'..='8')
         | KeyCode::Char('?')
         | KeyCode::Char('q')
         | KeyCode::Esc => menu_key(app, tui, k),
@@ -502,6 +497,7 @@ fn preview_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool
             tui.help_open = false;
             tui.preview_mode = false;
             tui.current = selected_menu_screen(tui);
+            sync_settings_cursor(tui);
             Ok(false)
         }
         _ => Ok(false),
@@ -510,33 +506,11 @@ fn preview_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool
 
 fn launch_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
     match screens::launch::handle_key(app, tui, k)? {
-        screens::launch::LaunchAction::OpenSettings => {
-            tui.open_settings(Screen::Launch);
-        }
         screens::launch::LaunchAction::Consumed | screens::launch::LaunchAction::None => {}
     }
     if tui.current == Screen::QuitConfirm {
         tui.quit_return = Screen::Launch;
         tui.quit_confirm = Confirm::new(t(tui.lang, T::ModalQuitTitle));
-    }
-    Ok(false)
-}
-
-fn settings_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
-    match screens::settings::handle_key(k) {
-        screens::settings::SettingsAction::Commit(choice) => {
-            tui.lang = lang_from_settings_choice(choice);
-            if let Ok(store) = app.store() {
-                let _ = store.write_setting("language", tui.lang.as_setting());
-            }
-            tui.last_msg = Some(t(tui.lang, T::SettingsSaved).to_string());
-            tui.quit_confirm = Confirm::new(t(tui.lang, T::ModalQuitTitle));
-            tui.close_settings();
-        }
-        screens::settings::SettingsAction::Cancel => {
-            tui.close_settings();
-        }
-        screens::settings::SettingsAction::Consumed | screens::settings::SettingsAction::None => {}
     }
     Ok(false)
 }
@@ -558,18 +532,23 @@ where
         tui.help_open = true;
     } else if !consumed && matches!(k.code, KeyCode::Esc) {
         tui.help_open = false;
-        if tui.has_save() {
-            if let Some(item) = MenuItem::from_screen(tui.current) {
+            if tui.has_save() {
+                if let Some(item) = MenuItem::from_screen(tui.current) {
                 tui.menu_selected = MenuItem::ALL
                     .iter()
                     .position(|candidate| *candidate == item)
                     .unwrap_or(tui.menu_selected);
             }
             tui.current = selected_menu_screen(tui);
+            sync_settings_cursor(tui);
             tui.preview_mode = true;
         } else if matches!(tui.current, Screen::Saves) {
             // No save AND user opened saves overlay from launch/new-game:
             // bounce back to the explicit launch screen rather than quitting.
+            tui.current = Screen::Launch;
+            tui.preview_mode = false;
+        } else if matches!(tui.current, Screen::Settings) {
+            // No save AND user opened settings from launch: return to launch.
             tui.current = Screen::Launch;
             tui.preview_mode = false;
         } else {
@@ -617,19 +596,22 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
                 tui.menu_selected -= 1;
             }
             tui.current = selected_menu_screen(tui);
+            sync_settings_cursor(tui);
             tui.preview_mode = true;
         }
         KeyCode::Down => {
             tui.menu_selected = (tui.menu_selected + 1) % MenuItem::ALL.len();
             tui.current = selected_menu_screen(tui);
+            sync_settings_cursor(tui);
             tui.preview_mode = true;
         }
-        KeyCode::Char(c @ '1'..='7') => {
+        KeyCode::Char(c @ '1'..='8') => {
             let idx = (c as u8 - b'1') as usize;
             if idx < MenuItem::ALL.len() {
                 tui.help_open = false;
                 tui.menu_selected = idx;
                 tui.current = selected_menu_screen(tui);
+                sync_settings_cursor(tui);
                 tui.preview_mode = true;
             }
         }
@@ -637,6 +619,7 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
             tui.help_open = false;
             tui.preview_mode = false;
             tui.current = selected_menu_screen(tui);
+            sync_settings_cursor(tui);
         }
         _ => {}
     }
@@ -647,17 +630,16 @@ fn selected_menu_screen(tui: &TuiApp) -> Screen {
     MenuItem::ALL[tui.menu_selected].screen()
 }
 
-fn settings_choice(lang: Lang) -> screens::settings::LanguageChoice {
-    match lang {
-        Lang::En => screens::settings::LanguageChoice::En,
-        Lang::Zh => screens::settings::LanguageChoice::Zh,
+fn sync_settings_cursor(tui: &TuiApp) {
+    if tui.current == Screen::Settings {
+        screens::settings::reset(settings_choice(tui.lang));
     }
 }
 
-fn lang_from_settings_choice(choice: screens::settings::LanguageChoice) -> Lang {
-    match choice {
-        screens::settings::LanguageChoice::En => Lang::En,
-        screens::settings::LanguageChoice::Zh => Lang::Zh,
+pub(crate) fn settings_choice(lang: Lang) -> screens::settings::LanguageChoice {
+    match lang {
+        Lang::En => screens::settings::LanguageChoice::En,
+        Lang::Zh => screens::settings::LanguageChoice::Zh,
     }
 }
 
@@ -804,7 +786,7 @@ fn draw_sidebar_empty(f: &mut Frame, banner_area: Rect, menu_area: Rect, tui: &T
     .block(tui.theme.block(" nba3k "));
     f.render_widget(banner, banner_area);
 
-    // Hide the 7-item menu entirely — wizard is the only reachable screen.
+    // Hide the 8-item menu entirely — wizard is the only reachable screen.
     let lines = vec![
         Line::from(Span::styled("NEW GAME", tui.theme.accent_style())),
         Line::from(""),
@@ -851,6 +833,7 @@ fn draw_menu_preview(f: &mut Frame, area: Rect, tui: &TuiApp) {
         MenuItem::Draft => "Prospect board, scouting, draft order, and pick controls.",
         MenuItem::Finance => "Payroll, cap/tax/apron lines, contracts, and extensions.",
         MenuItem::Calendar => "Month grid + sim controls (day/week/month/sim-to-event).",
+        MenuItem::Settings => "Language and shell preferences.",
     };
     let title = format!(" {} ", item.label(tui.lang));
     let lines = vec![
@@ -888,7 +871,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let hints: &[(&str, &str)] = if tui.preview_mode {
         &[
             ("↑↓", "Navigate"),
-            ("1-7", "Jump"),
+            ("1-8", "Jump"),
             ("Enter/Tab", "Focus"),
             ("Ctrl+S", "Saves"),
             ("?", "Help"),
@@ -905,7 +888,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
                 ("q", "Quit"),
             ],
             Screen::QuitConfirm => &[("Y", "Yes"), ("N/Esc", "No")],
-            Screen::Settings => &[("↑↓", "Move"), ("Enter", "Apply"), ("Esc", "Back")],
+            Screen::Settings => &[("↑↓", "Move"), ("Enter", "Apply"), ("Esc", "Menu")],
             Screen::Calendar => &[
                 ("Space", "Sim Day"),
                 ("W", "Week"),
@@ -1042,12 +1025,11 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
         Screen::Launch => &[
             ("↑ / ↓", "Move through launch rows"),
             ("Enter", "Select launch row"),
-            (",", "Open settings"),
             ("q / Esc", "Quit"),
         ],
         Screen::Menu => &[
-            ("↑ / ↓", "Move through the 7 menu items"),
-            ("1 - 7", "Jump directly to a menu item"),
+            ("↑ / ↓", "Move through the 8 menu items"),
+            ("1 - 8", "Jump directly to a menu item"),
             ("Enter", "Open selected screen"),
             ("Ctrl+S", "Open save manager"),
             ("q / Esc", "Quit"),
@@ -1100,7 +1082,7 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
         Screen::Settings => &[
             ("↑ / ↓", "Move selected language"),
             ("Enter", "Apply language"),
-            ("Esc", "Back"),
+            ("Esc", "Back to menu"),
         ],
         Screen::NewGame => &[
             ("↑ / ↓", "Move selection"),

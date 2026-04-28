@@ -287,7 +287,7 @@ pub enum Command {
     },
     /// Developer / calibration tooling.
     Dev(DevArgs),
-    /// (M20) Launch the GM-mode TUI shell. Default path is the 7-menu shell;
+    /// (M20) Launch the GM-mode TUI shell. Default path is the 8-menu shell;
     /// `--legacy` falls back to the M19 5-tab read-only dashboard.
     Tui {
         /// Use the high-contrast TV palette + extra padding.

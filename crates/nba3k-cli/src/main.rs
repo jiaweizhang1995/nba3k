@@ -3,6 +3,7 @@ use std::io::{self, IsTerminal};
 
 mod cli;
 mod commands;
+mod config;
 mod repl;
 mod state;
 mod tui;

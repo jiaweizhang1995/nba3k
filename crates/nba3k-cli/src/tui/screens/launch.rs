@@ -59,7 +59,6 @@ impl Default for LaunchState {
 pub enum LaunchAction {
     None,
     Consumed,
-    OpenSettings,
 }
 
 thread_local! {
@@ -173,8 +172,7 @@ fn draw_footer(f: &mut Frame, area: Rect, theme: &Theme, st: &LaunchState, tui: 
     );
 }
 
-/// Handles launch-screen keys. Existing screens are switched directly; the
-/// future Settings screen is reported as `OpenSettings` for the shell to route.
+/// Handles launch-screen keys. Existing screens are switched directly.
 pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<LaunchAction> {
     refresh_scan(app);
 
@@ -243,7 +241,11 @@ fn activate_selected(app: &mut AppState, tui: &mut TuiApp) -> Result<LaunchActio
             tui.current = Screen::Saves;
             Ok(LaunchAction::Consumed)
         }
-        Some(LaunchRow::Settings) => Ok(LaunchAction::OpenSettings),
+        Some(LaunchRow::Settings) => {
+            tui.current = Screen::Settings;
+            crate::tui::screens::settings::reset(crate::tui::settings_choice(tui.lang));
+            Ok(LaunchAction::Consumed)
+        }
         Some(LaunchRow::Quit) => {
             tui.current = Screen::QuitConfirm;
             Ok(LaunchAction::Consumed)

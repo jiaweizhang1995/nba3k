@@ -1,6 +1,4 @@
-//! Settings picker screen. The shell is expected to map `LanguageChoice` to
-//! its persistent i18n type (`nba3k_core::Lang`) when that API is wired.
-
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -10,7 +8,9 @@ use ratatui::{
 };
 use std::cell::RefCell;
 
+use crate::state::AppState;
 use crate::tui::widgets::Theme;
+use crate::tui::TuiApp;
 use nba3k_core::{t, Lang, T};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -33,14 +33,6 @@ impl LanguageChoice {
             LanguageChoice::Zh => "中文",
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum SettingsAction {
-    None,
-    Consumed,
-    Cancel,
-    Commit(LanguageChoice),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -134,7 +126,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, current: Lan
     f.render_widget(Paragraph::new(hint).block(theme.block("")), parts[2]);
 }
 
-pub fn handle_key(key: KeyEvent) -> SettingsAction {
+pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Up => {
             STATE.with(|s| {
@@ -143,7 +135,7 @@ pub fn handle_key(key: KeyEvent) -> SettingsAction {
                     st.cursor -= 1;
                 }
             });
-            SettingsAction::Consumed
+            Ok(true)
         }
         KeyCode::Down => {
             STATE.with(|s| {
@@ -152,19 +144,38 @@ pub fn handle_key(key: KeyEvent) -> SettingsAction {
                     st.cursor += 1;
                 }
             });
-            SettingsAction::Consumed
+            Ok(true)
         }
         KeyCode::Enter => {
-            let lang = STATE.with(|s| LANGUAGES[s.borrow().cursor]);
-            SettingsAction::Commit(lang)
+            let choice = STATE.with(|s| LANGUAGES[s.borrow().cursor]);
+            commit_lang(app, tui, choice);
+            Ok(true)
         }
-        KeyCode::Esc => SettingsAction::Cancel,
-        _ => SettingsAction::None,
+        KeyCode::Esc => Ok(false),
+        _ => Ok(false),
     }
+}
+
+fn commit_lang(app: &mut AppState, tui: &mut TuiApp, choice: LanguageChoice) {
+    let lang = lang_from_choice(choice);
+    tui.apply_language(lang);
+    let value = tui.lang.as_setting();
+    if let Ok(store) = app.store() {
+        let _ = store.write_setting("language", value);
+    }
+    let _ = crate::config::write_lang(value);
+    tui.last_msg = Some(t(tui.lang, T::SettingsSaved).to_string());
 }
 
 fn index_of(lang: LanguageChoice) -> usize {
     LANGUAGES.iter().position(|v| *v == lang).unwrap_or(0)
+}
+
+fn lang_from_choice(choice: LanguageChoice) -> Lang {
+    match choice {
+        LanguageChoice::En => Lang::En,
+        LanguageChoice::Zh => Lang::Zh,
+    }
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {

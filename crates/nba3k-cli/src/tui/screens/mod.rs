@@ -1,4 +1,4 @@
-//! Per-screen renderers + key handlers for the 7-menu TUI shell.
+//! Per-screen renderers + key handlers for the 8-menu TUI shell.
 
 pub mod calendar;
 pub mod draft;
