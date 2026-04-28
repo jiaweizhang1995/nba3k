@@ -4,6 +4,7 @@ pub mod calendar;
 pub mod draft;
 pub mod finance;
 pub mod home;
+pub mod inbox;
 pub mod launch;
 pub mod legacy;
 pub mod new_game;

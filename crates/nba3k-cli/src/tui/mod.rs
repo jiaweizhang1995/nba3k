@@ -44,18 +44,20 @@ pub enum MenuItem {
     Trades,
     Draft,
     Finance,
+    Inbox,
     Calendar,
     Settings,
 }
 
 impl MenuItem {
-    pub const ALL: [MenuItem; 8] = [
+    pub const ALL: [MenuItem; 9] = [
         MenuItem::Home,
         MenuItem::Roster,
         MenuItem::Rotation,
         MenuItem::Trades,
         MenuItem::Draft,
         MenuItem::Finance,
+        MenuItem::Inbox,
         MenuItem::Calendar,
         MenuItem::Settings,
     ];
@@ -68,6 +70,7 @@ impl MenuItem {
             MenuItem::Trades => t(lang, T::MenuTrades),
             MenuItem::Draft => t(lang, T::MenuDraft),
             MenuItem::Finance => t(lang, T::MenuFinance),
+            MenuItem::Inbox => t(lang, T::MenuInbox),
             MenuItem::Calendar => t(lang, T::MenuCalendar),
             MenuItem::Settings => t(lang, T::LaunchSettings),
         }
@@ -81,6 +84,7 @@ impl MenuItem {
             MenuItem::Trades => Screen::Trades,
             MenuItem::Draft => Screen::Draft,
             MenuItem::Finance => Screen::Finance,
+            MenuItem::Inbox => Screen::Inbox,
             MenuItem::Calendar => Screen::Calendar,
             MenuItem::Settings => Screen::Settings,
         }
@@ -94,6 +98,7 @@ impl MenuItem {
             Screen::Trades => Some(MenuItem::Trades),
             Screen::Draft => Some(MenuItem::Draft),
             Screen::Finance => Some(MenuItem::Finance),
+            Screen::Inbox => Some(MenuItem::Inbox),
             Screen::Calendar => Some(MenuItem::Calendar),
             Screen::Settings => Some(MenuItem::Settings),
             _ => None,
@@ -111,6 +116,7 @@ pub enum Screen {
     Trades,
     Draft,
     Finance,
+    Inbox,
     Calendar,
     Saves,
     Settings,
@@ -481,6 +487,7 @@ fn handle_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool>
         Screen::Trades => inner_screen_key(app, tui, k, screens::trades::handle_key),
         Screen::Draft => inner_screen_key(app, tui, k, screens::draft::handle_key),
         Screen::Finance => inner_screen_key(app, tui, k, screens::finance::handle_key),
+        Screen::Inbox => inner_screen_key(app, tui, k, screens::inbox::handle_key),
         Screen::QuitConfirm => Ok(false), // unreachable
     }
 }
@@ -489,7 +496,7 @@ fn preview_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool
     match k.code {
         KeyCode::Up
         | KeyCode::Down
-        | KeyCode::Char('1'..='8')
+        | KeyCode::Char('1'..='9')
         | KeyCode::Char('?')
         | KeyCode::Char('q')
         | KeyCode::Esc => menu_key(app, tui, k),
@@ -605,7 +612,7 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
             sync_settings_cursor(tui);
             tui.preview_mode = true;
         }
-        KeyCode::Char(c @ '1'..='8') => {
+        KeyCode::Char(c @ '1'..='9') => {
             let idx = (c as u8 - b'1') as usize;
             if idx < MenuItem::ALL.len() {
                 tui.help_open = false;
@@ -814,6 +821,7 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
         Screen::Trades => screens::trades::render(f, area, &tui.theme, app, tui),
         Screen::Draft => screens::draft::render(f, area, &tui.theme, app, tui),
         Screen::Finance => screens::finance::render(f, area, &tui.theme, app, tui),
+        Screen::Inbox => screens::inbox::render(f, area, &tui.theme, app, tui),
         Screen::QuitConfirm => {
             // Body still shows the menu preview; the modal is drawn by `draw`.
             draw_menu_preview(f, area, tui);
@@ -832,7 +840,8 @@ fn draw_menu_preview(f: &mut Frame, area: Rect, tui: &TuiApp) {
         MenuItem::Trades => "Incoming offers, proposal chains, trade builder, and rumors.",
         MenuItem::Draft => "Prospect board, scouting, draft order, and pick controls.",
         MenuItem::Finance => "Payroll, cap/tax/apron lines, contracts, and extensions.",
-        MenuItem::Calendar => "Month grid + sim controls (day/week/month/sim-to-event).",
+        MenuItem::Inbox => "GM messages, trade demands, and league news.",
+        MenuItem::Calendar => "Month grid, standings, playoffs, awards, All-Star, and Cup.",
         MenuItem::Settings => "Language and shell preferences.",
     };
     let title = format!(" {} ", item.label(tui.lang));
@@ -1012,6 +1021,7 @@ fn screen_label(screen: Screen) -> &'static str {
         Screen::Trades => "Trades",
         Screen::Draft => "Draft",
         Screen::Finance => "Finance",
+        Screen::Inbox => "Inbox",
         Screen::Calendar => "Calendar",
         Screen::Saves => "Saves",
         Screen::Settings => "Settings",
@@ -1028,8 +1038,8 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("q / Esc", "Quit"),
         ],
         Screen::Menu => &[
-            ("↑ / ↓", "Move through the 8 menu items"),
-            ("1 - 8", "Jump directly to a menu item"),
+            ("↑ / ↓", "Move through the 9 menu items"),
+            ("1 - 9", "Jump directly to a menu item"),
             ("Enter", "Open selected screen"),
             ("Ctrl+S", "Open save manager"),
             ("q / Esc", "Quit"),
@@ -1066,6 +1076,12 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("↑ / ↓", "Move selected contract"),
             ("t / y / n", "Sort by total, years, or name"),
             ("e", "Offer extension"),
+        ],
+        Screen::Inbox => &[
+            ("Tab / 1-3", "Switch Messages, Trade Demands, News"),
+            ("↑ / ↓", "Move selected row"),
+            ("Enter", "Open message detail"),
+            ("Esc", "Back to menu"),
         ],
         Screen::Calendar => &[
             ("Space", "Sim one day"),

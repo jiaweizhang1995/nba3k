@@ -40,6 +40,7 @@ pub enum T {
     MenuTrades,
     MenuDraft,
     MenuFinance,
+    MenuInbox,
     MenuCalendar,
 
     LaunchContinue,
@@ -98,6 +99,14 @@ pub enum T {
     HomeNoUpcomingGames,
     HomeNoAlerts,
     HomeNoNews,
+
+    InboxTitle,
+    InboxMessages,
+    InboxTradeDemands,
+    InboxNews,
+    InboxNoMessages,
+    InboxNoDemands,
+    InboxNoNews,
 
     RosterTitle,
     RosterMyRoster,

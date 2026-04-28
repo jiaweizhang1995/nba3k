@@ -101,9 +101,7 @@ User wants:
 
 ## T6 — Home dashboard rewrite (per screenshot)
 
-**Status**: `[x]`
-
-→ codex: done — this commit — 290 unit tests passed; mandate grep 0 non-migration hits.
+**Status**: `[ ]`
 
 **Goal**: Replace current Home (mandate / next-game / inbox / recent news) with the multi-pane scoreboard layout from the screenshot.
 
@@ -171,7 +169,9 @@ User wants:
 
 ## T7 — Inbox menu (between Finance and Calendar)
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — bacc30c — 290 unit tests passed; sidebar menu 9 items with Inbox at #7.
 
 **Goal**: New 7th menu item showing GM messages / trade demands / news. Existing Home Inbox panel data moves here.
 
@@ -212,7 +212,9 @@ User wants:
 
 ## T8 — Delete mandate
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — 01f62cf — 290 unit tests passed; mandate grep 0 non-migration hits.
 
 **Goal**: Remove all mandate generation, reads, writes, and UI surface. Leave V013 migration in place (so old saves don't break) but no code path touches the table.
 
