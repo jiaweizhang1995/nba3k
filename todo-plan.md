@@ -443,3 +443,64 @@ Localization:
 - Commit format: `M25-T<N>: <one-line summary>`.
 - Same i18n discipline: tables in lockstep when keys are added.
 - Status notes in this file: codex flips `[ ]` → `[~]` → `[x]` and leaves a `→ codex: ...` line per task.
+
+---
+
+## T14 — Rotation player picker column alignment (unicode + position pad)
+
+**Status**: `[x]`
+
+→ codex: done — this commit — 296 unit tests passed; Rotation picker and slot rows use unicode display-width padding.
+
+**Goal**: In the rotation slot picker modal (image #15), the OVR column drifts off by 1 column between rows. Two root causes; fix both.
+
+**Root cause**:
+
+1. `crates/nba3k-cli/src/tui/screens/rotation.rs:469-471` formatter:
+   ```rust
+   let picker: Picker<PlayerOption> = Picker::new(title, bucket, |o| {
+       format!("{:<24}  {}  {} OVR", o.name, o.primary, o.overall)
+   });
+   ```
+   `{}` for `o.primary` (the position string) doesn't pad. `C` → 1 char, `PF` → 2 chars. The OVR that follows shifts by 1 column between `C` rows and `PF` rows.
+
+2. `{:<24}` uses Rust's byte-count width, not unicode display width. Names containing multi-byte chars (`Jusuf Nurkić`, `Moussa Diabaté`, `Tidjane Salaün`) get fewer trailing spaces than ASCII names of the same visual length, so the position column starts left-shifted on those rows.
+
+**Fix**:
+
+- Add `unicode-width = "0.1"` (or whatever the latest 0.1.x line is — check crates.io) to `crates/nba3k-cli/Cargo.toml` `[dependencies]`.
+- Write a small helper in `rotation.rs` (or `tui/widgets.rs` if you prefer to share):
+  ```rust
+  use unicode_width::UnicodeWidthStr;
+
+  fn pad_display(s: &str, target: usize) -> String {
+      let w = UnicodeWidthStr::width(s);
+      if w >= target {
+          s.to_string()
+      } else {
+          let mut out = String::from(s);
+          out.extend(std::iter::repeat(' ').take(target - w));
+          out
+      }
+  }
+  ```
+- Change formatter to:
+  ```rust
+  format!("{}  {}  {} OVR",
+      pad_display(&o.name, 22),
+      pad_display(&o.primary, 2),
+      o.overall)
+  ```
+  Position pad target = 2 (so `C` becomes `C `, matches `PF`). Name pad target = 22 (slightly tighter so 30-col modal still fits).
+- Same fix should apply to **any other rotation row** that uses byte-pad on player names. The earlier T10 fix at lines 157/160/172/175 used `{:<28}` byte-pad on name body. Convert those four sites to `pad_display(...)` for the same reason — names with diacritics shift the hint column.
+
+**Acceptance**:
+- Picker modal: OVR digits start at the exact same column for every row regardless of position (`C` vs `PF`) or name characters (ASCII vs diacritics).
+- Slot row in main rotation screen: hint column (`press Enter to change, c to clear`) starts at the same column whether the slot is empty, has Tatum, has Nurkić, or has any other name length.
+
+**Verification**:
+- `cargo build --workspace` clean.
+- `cargo test --workspace` ≥ baseline (currently 292).
+- Manual screenshot: rotation picker modal shows OVR perfectly aligned column.
+
+**Commit**: `M25-T14: align rotation picker OVR column (unicode-width)`.

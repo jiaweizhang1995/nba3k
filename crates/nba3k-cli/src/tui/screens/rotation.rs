@@ -27,11 +27,16 @@ use ratatui::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
+use unicode_width::UnicodeWidthStr;
 
 use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, Confirm, FormWidget, Picker, Theme, WidgetEvent};
 use crate::tui::TuiApp;
 use nba3k_core::{t, Lang, Player, PlayerId, Position, Starters, T};
+
+const PICKER_NAME_WIDTH: usize = 22;
+const PICKER_POS_WIDTH: usize = 2;
+const SLOT_BODY_WIDTH: usize = 28;
 
 // ---------------------------------------------------------------------------
 // Cache + modal types
@@ -154,10 +159,13 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                 theme.text()
             };
 
-            let pos_label = format!("{:<2}", pos);
+            let pos_label = pad_display(&pos.to_string(), 2);
             let assigned = starters.slot(*pos);
             let body = match assigned {
-                None => Span::styled(format!("{:<28}", "[empty — auto-pick]"), theme.muted_style()),
+                None => Span::styled(
+                    pad_display("[empty — auto-pick]", SLOT_BODY_WIDTH),
+                    theme.muted_style(),
+                ),
                 Some(pid) => match index.and_then(|m| m.get(&pid)) {
                     Some(opt) => {
                         let mut text = format!("{} ({} OVR)", opt.name, opt.overall);
@@ -169,20 +177,17 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                         } else {
                             row_style
                         };
-                        Span::styled(format!("{:<28}", text), style)
+                        Span::styled(pad_display(&text, SLOT_BODY_WIDTH), style)
                     }
                     None => Span::styled(
-                        format!("{:<28}", format!("#{} (off roster)", pid.0)),
+                        pad_display(&format!("#{} (off roster)", pid.0), SLOT_BODY_WIDTH),
                         theme.muted_style(),
                     ),
                 },
             };
 
             let hint = match assigned {
-                None => Span::styled(
-                    "press Enter to choose".to_string(),
-                    theme.muted_style(),
-                ),
+                None => Span::styled("press Enter to choose".to_string(), theme.muted_style()),
                 Some(_) => Span::styled(
                     "press Enter to change, c to clear".to_string(),
                     theme.muted_style(),
@@ -466,9 +471,7 @@ fn open_picker(slot: Position) {
             .unwrap_or_default()
     });
     let title = format!("Pick {}", pos_to_str(slot));
-    let picker: Picker<PlayerOption> = Picker::new(title, bucket, |o| {
-        format!("{:<24}  {}  {} OVR", o.name, o.primary, o.overall)
-    });
+    let picker: Picker<PlayerOption> = Picker::new(title, bucket, format_picker_option);
     CACHE.with(|c| {
         c.borrow_mut().modal = Modal::Pick { slot, picker };
     });
@@ -520,6 +523,26 @@ fn clean_name(name: &str) -> String {
     name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn format_picker_option(o: &PlayerOption) -> String {
+    format!(
+        "{}  {}  {} OVR",
+        pad_display(&o.name, PICKER_NAME_WIDTH),
+        pad_display(&o.primary.to_string(), PICKER_POS_WIDTH),
+        o.overall
+    )
+}
+
+fn pad_display(s: &str, target: usize) -> String {
+    let width = UnicodeWidthStr::width(s);
+    if width >= target {
+        s.to_string()
+    } else {
+        let mut out = String::from(s);
+        out.extend(std::iter::repeat(' ').take(target - width));
+        out
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Modal action enum (drop the borrow before touching `app` / `tui`).
 // ---------------------------------------------------------------------------
@@ -534,4 +557,54 @@ enum ModalAction {
         player_name: String,
     },
     ClearAllSubmit,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn option(name: &str, primary: Position, overall: u8) -> PlayerOption {
+        PlayerOption {
+            id: PlayerId(overall as u32),
+            name: name.to_string(),
+            primary,
+            overall,
+            on_roster: true,
+        }
+    }
+
+    #[test]
+    fn pad_display_uses_terminal_width_not_byte_len() {
+        let padded = pad_display("Jusuf Nurkić", 14);
+        assert_eq!(UnicodeWidthStr::width(padded.as_str()), 14);
+        assert!(padded.ends_with("  "));
+    }
+
+    #[test]
+    fn picker_formatter_aligns_ovr_for_unicode_names_and_positions() {
+        let rows = [
+            format_picker_option(&option("Al Horford", Position::C, 82)),
+            format_picker_option(&option("Jusuf Nurkić", Position::C, 81)),
+            format_picker_option(&option("Tidjane Salaün", Position::PF, 80)),
+        ];
+        let ovr_columns: Vec<usize> = rows
+            .iter()
+            .map(|row| {
+                let byte_idx = row.find("OVR").expect("row should contain OVR");
+                UnicodeWidthStr::width(&row[..byte_idx])
+            })
+            .collect();
+        assert!(ovr_columns.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[test]
+    fn slot_body_width_keeps_hint_column_stable_for_unicode_names() {
+        let ascii = pad_display("Jayson Tatum (95 OVR)", SLOT_BODY_WIDTH);
+        let unicode = pad_display("Jusuf Nurkić (81 OVR)", SLOT_BODY_WIDTH);
+        let empty = pad_display("[empty — auto-pick]", SLOT_BODY_WIDTH);
+
+        assert_eq!(UnicodeWidthStr::width(ascii.as_str()), SLOT_BODY_WIDTH);
+        assert_eq!(UnicodeWidthStr::width(unicode.as_str()), SLOT_BODY_WIDTH);
+        assert_eq!(UnicodeWidthStr::width(empty.as_str()), SLOT_BODY_WIDTH);
+    }
 }
