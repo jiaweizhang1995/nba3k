@@ -1361,68 +1361,6 @@ impl Store {
         Ok(rows)
     }
 
-    // ------------------------------------------------------------------
-    // owner mandate (M18-A)
-    //
-    // Three season goals per team auto-seeded at season start. UPSERT on
-    // (season, team, kind) so re-running auto-gen replaces the target/weight
-    // instead of duplicating rows.
-    // ------------------------------------------------------------------
-
-    pub fn record_mandate(
-        &self,
-        season: SeasonId,
-        team: TeamId,
-        kind: &str,
-        target: i32,
-        weight: f32,
-    ) -> StoreResult<()> {
-        self.conn.execute(
-            "INSERT INTO mandate(season, team, kind, target, weight)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(season, team, kind) DO UPDATE SET
-                target = excluded.target,
-                weight = excluded.weight",
-            params![
-                season.0 as i64,
-                team.0 as i64,
-                kind,
-                target as i64,
-                weight as f64,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn read_mandates(
-        &self,
-        season: SeasonId,
-        team: TeamId,
-    ) -> StoreResult<Vec<MandateRow>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT season, team, kind, target, weight
-             FROM mandate
-             WHERE season = ?1 AND team = ?2
-             ORDER BY kind ASC",
-        )?;
-        let rows = stmt
-            .query_map(params![season.0 as i64, team.0 as i64], |r| {
-                let season: i64 = r.get(0)?;
-                let team: i64 = r.get(1)?;
-                let kind: String = r.get(2)?;
-                let target: i64 = r.get(3)?;
-                let weight: f64 = r.get(4)?;
-                Ok(MandateRow {
-                    season: SeasonId(season as u16),
-                    team: TeamId(team as u8),
-                    kind,
-                    target: target as i32,
-                    weight: weight as f32,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
 
     // ------------------------------------------------------------------
     // playoff series
@@ -1757,19 +1695,6 @@ pub struct NoteRow {
     pub player_id: PlayerId,
     pub text: Option<String>,
     pub created_at: String,
-}
-
-/// One owner-mandate goal (M18-A). `kind` is one of
-/// `"wins" | "make_playoffs" | "develop_to" | "champion" | "lottery_top3"`;
-/// `target` is the goal value (wins count, OVR threshold, or 1 for boolean
-/// goals); `weight` ∈ [0, 1] is its contribution to the season grade.
-#[derive(Debug, Clone)]
-pub struct MandateRow {
-    pub season: SeasonId,
-    pub team: TeamId,
-    pub kind: String,
-    pub target: i32,
-    pub weight: f32,
 }
 
 type PlayerRow = (

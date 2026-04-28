@@ -231,15 +231,6 @@ pub enum Command {
     },
     /// (M17) Track favorite players: add / remove / list.
     Notes(NotesArgs),
-    /// (M18) Show owner mandate (season goals + grade).
-    Mandate {
-        /// Season year (default: current).
-        #[arg(long)]
-        season: Option<u16>,
-        /// Emit JSON instead of text.
-        #[arg(long)]
-        json: bool,
-    },
     /// (M18) Recap of recent games (last N days).
     Recap {
         /// Last N days to recap (default 1).

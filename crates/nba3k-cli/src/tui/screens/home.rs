@@ -1,7 +1,6 @@
-//! Home dashboard. Single-screen overview: mandate · GM inbox · upcoming game ·
-//! recent news. Lazy-loads each panel into a per-screen cache the first time
-//! Home renders, then reuses the snapshot on subsequent draws until either the
-//! user navigates away or `invalidate()` is called from outside.
+//! Home dashboard. Single-screen overview: GM inbox · upcoming game · recent
+//! news. Lazy-loads each panel into a per-screen cache the first time Home
+//! renders, then reuses the snapshot until `invalidate()` is called.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -9,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph, Wrap},
+    widgets::{List, ListItem, Paragraph},
     Frame,
 };
 use std::cell::RefCell;
@@ -18,7 +17,7 @@ use crate::state::AppState;
 use crate::tui::widgets::Theme;
 use crate::tui::{SaveCtx, TuiApp};
 use nba3k_core::{t, Lang, PlayerRole, T};
-use nba3k_store::{MandateRow, NewsRow, ScheduledRow};
+use nba3k_store::{NewsRow, ScheduledRow};
 
 // ---------------------------------------------------------------------------
 // Per-screen cache (single-threaded TUI loop, so a thread_local RefCell is the
@@ -27,18 +26,11 @@ use nba3k_store::{MandateRow, NewsRow, ScheduledRow};
 
 #[derive(Default)]
 struct HomeCache {
-    mandate: Option<MandatePanel>,
     inbox: Option<Vec<InboxRow>>,
     news: Option<Vec<NewsRow>>,
     upcoming: Option<Option<UpcomingRow>>,
     /// Vertical scroll offset for the inbox list.
     inbox_scroll: usize,
-}
-
-struct MandatePanel {
-    season: u16,
-    team: String,
-    goals: Vec<MandateRow>,
 }
 
 struct InboxRow {
@@ -80,8 +72,6 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         return;
     }
 
-    // Top half: mandate (left) + upcoming (right banner) + inbox (right body).
-    // Bottom half: news strip.
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -92,17 +82,11 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(outer[0]);
 
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(top[1]);
-
     CACHE.with(|c| {
         let cache = c.borrow();
-        draw_mandate(f, top[0], theme, tui.lang, cache.mandate.as_ref());
         draw_upcoming(
             f,
-            right[0],
+            top[0],
             theme,
             tui.lang,
             cache.upcoming.as_ref().and_then(|x| x.as_ref()),
@@ -110,7 +94,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         );
         draw_inbox(
             f,
-            right[1],
+            top[1],
             theme,
             tui.lang,
             cache.inbox.as_deref().unwrap_or(&[]),
@@ -118,46 +102,6 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         );
         draw_news(f, outer[1], theme, tui.lang, cache.news.as_deref().unwrap_or(&[]));
     });
-}
-
-fn draw_mandate(
-    f: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    lang: Lang,
-    panel: Option<&MandatePanel>,
-) {
-    let block = theme.block(t(lang, T::HomeOwnerMandate));
-    let lines: Vec<Line> = match panel {
-        None => vec![Line::from(Span::styled(t(lang, T::HomeNoMandate), theme.muted_style()))],
-        Some(m) => {
-            let mut out: Vec<Line> = Vec::with_capacity(m.goals.len() + 2);
-            out.push(Line::from(Span::styled(
-                format!("Season {} · {}", m.season, m.team),
-                theme.accent_style(),
-            )));
-            out.push(Line::from(""));
-            if m.goals.is_empty() {
-                out.push(Line::from(Span::styled(t(lang, T::HomeNoGoals), theme.muted_style())));
-            } else {
-                for g in &m.goals {
-                    out.push(Line::from(vec![
-                        Span::styled(
-                            format!(" {:<14}", g.kind),
-                            theme.text(),
-                        ),
-                        Span::styled(
-                            format!("target {:>3}  weight {:.2}", g.target, g.weight),
-                            theme.muted_style(),
-                        ),
-                    ]));
-                }
-            }
-            out
-        }
-    };
-    let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
-    f.render_widget(p, area);
 }
 
 fn draw_upcoming(
@@ -257,25 +201,9 @@ fn draw_news(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[NewsR
 // ---------------------------------------------------------------------------
 
 fn ensure_cache(app: &mut AppState, ctx: &SaveCtx) -> Result<()> {
-    let need_mandate = CACHE.with(|c| c.borrow().mandate.is_none());
     let need_inbox = CACHE.with(|c| c.borrow().inbox.is_none());
     let need_news = CACHE.with(|c| c.borrow().news.is_none());
     let need_upcoming = CACHE.with(|c| c.borrow().upcoming.is_none());
-
-    if need_mandate {
-        let store = app.store()?;
-        let goals = store.read_mandates(ctx.season, ctx.user_team)?;
-        let team = store
-            .team_abbrev(ctx.user_team)?
-            .unwrap_or_else(|| ctx.user_abbrev.clone());
-        CACHE.with(|c| {
-            c.borrow_mut().mandate = Some(MandatePanel {
-                season: ctx.season.0,
-                team,
-                goals,
-            });
-        });
-    }
 
     if need_inbox {
         let inbox = build_inbox(app, ctx)?;

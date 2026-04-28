@@ -824,7 +824,7 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
 fn draw_menu_preview(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let item = MenuItem::ALL[tui.menu_selected];
     let blurb: &str = match item {
-        MenuItem::Home => "Owner mandate · next-game banner · recent results · GM inbox.",
+        MenuItem::Home => "Next-game banner · recent results · GM inbox.",
         MenuItem::Roster => {
             "Roster table, player details, training, extensions, cuts, roles, and free agents."
         }

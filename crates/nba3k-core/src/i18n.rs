@@ -92,12 +92,9 @@ pub enum T {
     ModalAutoDraftTitle,
 
     HomeTitle,
-    HomeOwnerMandate,
     HomeNextGame,
     HomeGmInbox,
     HomeRecentNews,
-    HomeNoMandate,
-    HomeNoGoals,
     HomeNoUpcomingGames,
     HomeNoAlerts,
     HomeNoNews,
