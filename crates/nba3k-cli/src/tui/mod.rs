@@ -979,7 +979,7 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
 fn draw_menu_preview(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let item = MenuItem::ALL[tui.menu_selected];
     let blurb: &str = match item {
-        MenuItem::Home => "Next-game banner · recent results · GM inbox.",
+        MenuItem::Home => "Record, standings, leaders, team stats, finances, and lineup.",
         MenuItem::Roster => {
             "Roster table, player details, training, extensions, cuts, roles, and free agents."
         }
@@ -1027,7 +1027,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
     let hints: &[(&str, &str)] = if tui.preview_mode {
         &[
             ("↑↓", "Navigate"),
-            ("1-8", "Jump"),
+            ("1-9", "Jump"),
             ("Enter/Tab", "Focus"),
             ("Ctrl+S", "Saves"),
             ("?", "Help"),

@@ -103,7 +103,9 @@ User wants:
 
 ## T6 — Home dashboard rewrite (per screenshot)
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 290 unit tests passed; Home old inbox/news/next-game grep clean.
 
 **Goal**: Replace current Home (mandate / next-game / inbox / recent news) with the multi-pane scoreboard layout from the screenshot.
 

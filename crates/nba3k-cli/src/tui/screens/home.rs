@@ -1,62 +1,127 @@
-//! Home dashboard. Single-screen overview: GM inbox · upcoming game · recent
-//! news. Lazy-loads each panel into a per-screen cache the first time Home
-//! renders, then reuses the snapshot until `invalidate()` is called.
+//! Home dashboard. M24 replaces the inbox/news landing page with a compact
+//! front-office dashboard: record, conference standings, leaders, team stats,
+//! finances, and starting lineup.
 
-use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
+use anyhow::{anyhow, Result};
+use crossterm::event::KeyEvent;
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph},
+    widgets::{Cell, Paragraph, Row, Table},
     Frame,
 };
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use crate::state::AppState;
 use crate::tui::widgets::Theme;
 use crate::tui::{SaveCtx, TuiApp};
-use nba3k_core::{t, Lang, PlayerRole, T};
-use nba3k_store::{NewsRow, ScheduledRow};
-
-// ---------------------------------------------------------------------------
-// Per-screen cache (single-threaded TUI loop, so a thread_local RefCell is the
-// simplest place to park state without touching the Wave-0 `TuiApp`).
-// ---------------------------------------------------------------------------
-
-#[derive(Default)]
-struct HomeCache {
-    inbox: Option<Vec<InboxRow>>,
-    news: Option<Vec<NewsRow>>,
-    upcoming: Option<Option<UpcomingRow>>,
-    /// Vertical scroll offset for the inbox list.
-    inbox_scroll: usize,
-}
-
-struct InboxRow {
-    kind: &'static str,
-    text: String,
-}
-
-struct UpcomingRow {
-    day: u32,
-    opponent_abbrev: String,
-    is_home: bool,
-}
+use nba3k_core::{
+    t, Cents, LeagueYear, Player, PlayerId, PlayerLine, Position, SeasonId, TeamId, T,
+};
+use nba3k_store::StandingRow;
 
 thread_local! {
     static CACHE: RefCell<HomeCache> = RefCell::new(HomeCache::default());
 }
 
-/// Drop the cached panels so the next render re-fetches. Called from the
-/// shell whenever sim or save mutation happens. Safe to call any time.
+#[derive(Default)]
+struct HomeCache {
+    cached_for: Option<(SeasonId, u32, TeamId)>,
+    snapshot: Option<HomeSnapshot>,
+}
+
+struct HomeSnapshot {
+    record: String,
+    conference_rank: String,
+    standings: Vec<StandingDisplay>,
+    user_team: TeamId,
+    team_leaders: Vec<LeaderRow>,
+    league_leaders: Vec<LeaderRow>,
+    team_stats: Vec<StatRow>,
+    finances: Vec<(T, String)>,
+    lineup: Vec<LineupRow>,
+}
+
+struct StandingDisplay {
+    rank: usize,
+    team: TeamId,
+    abbrev: String,
+    wins: u16,
+    losses: u16,
+    gb: String,
+}
+
+#[derive(Clone)]
+struct LeaderRow {
+    metric: &'static str,
+    name: String,
+    abbrev: Option<String>,
+    value: f32,
+}
+
+struct StatRow {
+    label: T,
+    value: f32,
+    rank: usize,
+}
+
+struct LineupRow {
+    position: Position,
+    name: String,
+    ppg: f32,
+    rpg: f32,
+    apg: f32,
+    mpg: f32,
+}
+
+#[derive(Default, Clone)]
+struct PlayerTotals {
+    gp: u32,
+    pts: u32,
+    reb: u32,
+    ast: u32,
+    minutes: u32,
+    team: Option<TeamId>,
+}
+
+impl PlayerTotals {
+    fn from_line(&mut self, line: &PlayerLine, team: TeamId) {
+        self.gp += 1;
+        self.pts += line.pts as u32;
+        self.reb += line.reb as u32;
+        self.ast += line.ast as u32;
+        self.minutes += line.minutes as u32;
+        self.team = Some(team);
+    }
+
+    fn ppg(&self) -> f32 { per_game(self.pts, self.gp) }
+    fn rpg(&self) -> f32 { per_game(self.reb, self.gp) }
+    fn apg(&self) -> f32 { per_game(self.ast, self.gp) }
+    fn mpg(&self) -> f32 { per_game(self.minutes, self.gp) }
+}
+
+#[derive(Default, Clone)]
+struct TeamTotals {
+    games: u32,
+    pts: u32,
+    opp_pts: u32,
+    reb: u32,
+    ast: u32,
+}
+
+impl TeamTotals {
+    fn ppg(&self) -> f32 { per_game(self.pts, self.games) }
+    fn oppg(&self) -> f32 { per_game(self.opp_pts, self.games) }
+    fn rpg(&self) -> f32 { per_game(self.reb, self.games) }
+    fn apg(&self) -> f32 { per_game(self.ast, self.games) }
+}
+
+/// Drop the cached dashboard so the next render re-fetches. Called from the
+/// shell whenever sim or save mutation happens.
 pub fn invalidate() {
     CACHE.with(|c| *c.borrow_mut() = HomeCache::default());
 }
-
-// ---------------------------------------------------------------------------
-// Render
-// ---------------------------------------------------------------------------
 
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
@@ -65,6 +130,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         f.render_widget(p, area);
         return;
     };
+
     if let Err(e) = ensure_cache(app, ctx) {
         let p = Paragraph::new(format!("Home unavailable: {}", e))
             .block(theme.block(t(tui.lang, T::HomeTitle)));
@@ -72,302 +138,623 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         return;
     }
 
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(area);
-
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-        .split(outer[0]);
-
     CACHE.with(|c| {
         let cache = c.borrow();
-        draw_upcoming(
-            f,
-            top[0],
-            theme,
-            tui.lang,
-            cache.upcoming.as_ref().and_then(|x| x.as_ref()),
-            ctx,
-        );
-        draw_inbox(
-            f,
-            top[1],
-            theme,
-            tui.lang,
-            cache.inbox.as_deref().unwrap_or(&[]),
-            cache.inbox_scroll,
-        );
-        draw_news(f, outer[1], theme, tui.lang, cache.news.as_deref().unwrap_or(&[]));
+        let Some(snapshot) = cache.snapshot.as_ref() else {
+            return;
+        };
+        draw_dashboard(f, area, theme, tui, snapshot);
     });
 }
 
-fn draw_upcoming(
-    f: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    lang: Lang,
-    row: Option<&UpcomingRow>,
-    ctx: &SaveCtx,
-) {
-    let line = match row {
-        None => Line::from(vec![Span::styled(
-            t(lang, T::HomeNoUpcomingGames),
-            theme.muted_style(),
-        )]),
-        Some(u) => {
-            let prep = if u.is_home { "vs" } else { "@" };
-            let venue = if u.is_home { "home" } else { "away" };
-            Line::from(vec![
-                Span::styled(format!(" Day {} ", u.day), theme.accent_style()),
-                Span::styled(
-                    format!("— {} {} {} ({})", ctx.user_abbrev, prep, u.opponent_abbrev, venue),
-                    theme.text(),
-                ),
-            ])
-        }
-    };
-    let p = Paragraph::new(line).block(theme.block(t(lang, T::HomeNextGame)));
+fn draw_dashboard(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Min(10),
+            Constraint::Length(8),
+        ])
+        .split(area);
+
+    draw_header(f, outer[0], theme, tui, s);
+
+    let middle = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(outer[1]);
+
+    draw_standings(f, middle[0], theme, tui, s);
+
+    let center = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(middle[1]);
+    draw_leaders(
+        f,
+        center[0],
+        theme,
+        t(tui.lang, T::HomeTeamLeaders),
+        &s.team_leaders,
+    );
+    draw_leaders(
+        f,
+        center[1],
+        theme,
+        t(tui.lang, T::HomeLeagueLeaders),
+        &s.league_leaders,
+    );
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(middle[2]);
+    draw_team_stats(f, right[0], theme, tui, s);
+    draw_finances(f, right[1], theme, tui, s);
+
+    draw_lineup(f, outer[2], theme, tui, s);
+}
+
+fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let lines = vec![
+        Line::from(Span::styled(s.record.clone(), theme.accent_style()))
+            .alignment(Alignment::Center),
+        Line::from(Span::styled(
+            format!("{} {}", s.conference_rank, t(tui.lang, T::HomeConferenceRank)),
+            theme.text(),
+        ))
+            .alignment(Alignment::Center),
+    ];
+    let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::HomeTitle)));
     f.render_widget(p, area);
 }
 
-fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[InboxRow], scroll: usize) {
-    let block = theme.block(t(lang, T::HomeGmInbox));
-    if rows.is_empty() {
-        let p = Paragraph::new(Line::from(Span::styled(
-            t(lang, T::HomeNoAlerts),
-            theme.muted_style(),
-        )))
-        .block(block);
-        f.render_widget(p, area);
-        return;
-    }
-    let visible_h = area.height.saturating_sub(2) as usize;
-    let start = scroll.min(rows.len().saturating_sub(1));
-    let take = visible_h.max(1);
-    let items: Vec<ListItem> = rows
-        .iter()
-        .skip(start)
-        .take(take)
-        .map(|r| {
-            let line = Line::from(vec![
-                Span::styled(format!("[{}] ", r.kind), theme.accent_style()),
-                Span::styled(r.text.clone(), theme.text()),
-            ]);
-            ListItem::new(line)
-        })
-        .collect();
-    let list = List::new(items).block(block);
-    f.render_widget(list, area);
+fn draw_standings(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let header = Row::new(["#", "Team", "W-L", "GB"]).style(theme.muted_style());
+    let rows = s.standings.iter().map(|r| {
+        let style = if r.team == s.user_team {
+            theme.highlight()
+        } else {
+            theme.text()
+        };
+        Row::new(vec![
+            Cell::from(r.rank.to_string()),
+            Cell::from(r.abbrev.clone()),
+            Cell::from(format!("{}-{}", r.wins, r.losses)),
+            Cell::from(r.gb.clone()),
+        ])
+        .style(style)
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(3),
+            Constraint::Length(6),
+            Constraint::Length(8),
+            Constraint::Length(5),
+        ],
+    )
+    .header(header)
+    .block(theme.block(t(tui.lang, T::HomeConferenceStandings)));
+    f.render_widget(table, area);
 }
 
-fn draw_news(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[NewsRow]) {
-    let block = theme.block(t(lang, T::HomeRecentNews));
-    if rows.is_empty() {
-        let p = Paragraph::new(Line::from(Span::styled(
-            t(lang, T::HomeNoNews),
-            theme.muted_style(),
-        )))
-        .block(block);
-        f.render_widget(p, area);
-        return;
-    }
-    let visible_h = area.height.saturating_sub(2) as usize;
-    let take = visible_h.max(1);
+fn draw_leaders(f: &mut Frame, area: Rect, theme: &Theme, title: &str, rows: &[LeaderRow]) {
     let lines: Vec<Line> = rows
         .iter()
-        .take(take)
-        .map(|n| {
+        .map(|r| {
+            let name = if let Some(abbrev) = r.abbrev.as_ref() {
+                format!("{} {}", short_name(&r.name), abbrev)
+            } else {
+                short_name(&r.name)
+            };
             Line::from(vec![
-                Span::styled(
-                    format!("S{} D{:<3} ", n.season.0, n.day),
-                    theme.muted_style(),
-                ),
-                Span::styled(format!("[{:<8}] ", n.kind), theme.accent_style()),
-                Span::styled(n.headline.clone(), theme.text()),
+                Span::styled(format!("{:<3} ", r.metric), theme.muted_style()),
+                Span::styled(format!("{:<16}", name), theme.text()),
+                Span::styled(format!("{:>5.1}", r.value), theme.accent_style()),
             ])
         })
         .collect();
-    let p = Paragraph::new(lines)
-        .block(block)
-        .style(Style::default());
+    let p = Paragraph::new(lines).block(theme.block(title));
     f.render_widget(p, area);
 }
 
-// ---------------------------------------------------------------------------
-// Cache population
-// ---------------------------------------------------------------------------
+fn draw_team_stats(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let lines: Vec<Line> = s
+        .team_stats
+        .iter()
+        .map(|r| {
+            Line::from(vec![
+                Span::styled(format!("{:<10}", t(tui.lang, r.label)), theme.text()),
+                Span::styled(format!("{:>6.1} ", r.value), theme.accent_style()),
+                Span::styled(format!("({})", ordinal(r.rank)), theme.muted_style()),
+            ])
+        })
+        .collect();
+    let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::HomeTeamStats)));
+    f.render_widget(p, area);
+}
+
+fn draw_finances(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let lines: Vec<Line> = s
+        .finances
+        .iter()
+        .map(|(label, value)| {
+            Line::from(vec![
+                Span::styled(format!("{:<16}", t(tui.lang, *label)), theme.text()),
+                Span::styled(value.clone(), theme.accent_style()),
+            ])
+        })
+        .collect();
+    let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::HomeFinances)));
+    f.render_widget(p, area);
+}
+
+fn draw_lineup(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let header = Row::new(["Pos", "Player", "PPG", "RPG", "APG", "MIN"]).style(theme.muted_style());
+    let rows = s.lineup.iter().map(|r| {
+        Row::new(vec![
+            Cell::from(r.position.to_string()),
+            Cell::from(short_name(&r.name)),
+            Cell::from(format!("{:.1}", r.ppg)),
+            Cell::from(format!("{:.1}", r.rpg)),
+            Cell::from(format!("{:.1}", r.apg)),
+            Cell::from(format!("{:.1}", r.mpg)),
+        ])
+        .style(theme.text())
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(4),
+            Constraint::Min(12),
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(6),
+        ],
+    )
+    .header(header)
+    .block(theme.block(t(tui.lang, T::HomeStartingLineup)));
+    f.render_widget(table, area);
+}
 
 fn ensure_cache(app: &mut AppState, ctx: &SaveCtx) -> Result<()> {
-    let need_inbox = CACHE.with(|c| c.borrow().inbox.is_none());
-    let need_news = CACHE.with(|c| c.borrow().news.is_none());
-    let need_upcoming = CACHE.with(|c| c.borrow().upcoming.is_none());
-
-    if need_inbox {
-        let inbox = build_inbox(app, ctx)?;
-        CACHE.with(|c| c.borrow_mut().inbox = Some(inbox));
+    let key = (ctx.season, ctx.season_state.day, ctx.user_team);
+    let need = CACHE.with(|c| c.borrow().cached_for != Some(key));
+    if !need {
+        return Ok(());
     }
 
-    if need_news {
-        let news = app.store()?.recent_news(10)?;
-        CACHE.with(|c| c.borrow_mut().news = Some(news));
-    }
-
-    if need_upcoming {
-        let upcoming = find_next_user_game(app, ctx)?;
-        CACHE.with(|c| c.borrow_mut().upcoming = Some(upcoming));
-    }
-
+    let snapshot = build_snapshot(app, ctx)?;
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.cached_for = Some(key);
+        c.snapshot = Some(snapshot);
+    });
     Ok(())
 }
 
-fn build_inbox(app: &mut AppState, ctx: &SaveCtx) -> Result<Vec<InboxRow>> {
+fn build_snapshot(app: &mut AppState, ctx: &SaveCtx) -> Result<HomeSnapshot> {
     let store = app.store()?;
-    let roster = store.roster_for_team(ctx.user_team)?;
-    let mut out: Vec<InboxRow> = Vec::new();
+    let season = ctx.season;
+    let teams = store.list_teams()?;
+    let team_abbrevs: HashMap<TeamId, String> =
+        teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
+    let user_conf = teams
+        .iter()
+        .find(|t| t.id == ctx.user_team)
+        .map(|t| t.conference)
+        .ok_or_else(|| anyhow!("user team missing from teams table"))?;
 
-    // Roster alerts mirror the rules in `cmd_messages` (commands.rs L3329+):
-    // injuries first, then trade-demand / role-mismatch / veteran-restless.
-    for p in &roster {
-        let name = clean_name(&p.name);
-        if let Some(i) = p.injury.as_ref() {
-            if i.games_remaining > 0 {
-                out.push(InboxRow {
-                    kind: "injury",
-                    text: format!(
-                        "{} — {}, {} game{} out.",
-                        name,
-                        i.description,
-                        i.games_remaining,
-                        if i.games_remaining == 1 { "" } else { "s" }
-                    ),
-                });
-                continue;
-            }
+    let mut all_rosters: HashMap<TeamId, Vec<Player>> = HashMap::new();
+    let mut players: HashMap<PlayerId, Player> = HashMap::new();
+    for team in &teams {
+        let roster = store.roster_for_team(team.id)?;
+        for p in &roster {
+            players.insert(p.id, p.clone());
         }
-        if p.overall >= 80 && p.morale < 0.5 {
-            out.push(InboxRow {
-                kind: "demand",
-                text: format!(
-                    "{} (OVR {}) is unhappy (morale {:.2}) — asking out.",
-                    name, p.overall, p.morale
-                ),
-            });
-            continue;
-        }
-        if p.overall >= 80
-            && matches!(p.role, PlayerRole::BenchWarmer | PlayerRole::SixthMan)
-        {
-            out.push(InboxRow {
-                kind: "role",
-                text: format!(
-                    "{} (OVR {}) slotted as {} — morale will drop.",
-                    name, p.overall, p.role
-                ),
-            });
-            continue;
-        }
-        if p.age >= 36 && p.morale < 0.5 {
-            out.push(InboxRow {
-                kind: "veteran",
-                text: format!("{} ({}yo) wants a contender.", name, p.age),
-            });
-        }
+        all_rosters.insert(team.id, roster);
     }
 
-    // Open offers targeting the user team.
-    let offers = store.read_open_chains_targeting(ctx.season, ctx.user_team)?;
-    for (id, _) in &offers {
-        out.push(InboxRow {
-            kind: "offer",
-            text: format!("Trade offer #{} pending review.", id.0),
-        });
-    }
+    let standings = store.read_standings(season)?;
+    let conference_standings = conference_rows(&standings, user_conf);
+    let user_row = conference_standings
+        .iter()
+        .find(|r| r.team == ctx.user_team)
+        .or_else(|| standings.iter().find(|r| r.team == ctx.user_team));
+    let wins = user_row.map(|r| r.wins).unwrap_or(0);
+    let losses = user_row.map(|r| r.losses).unwrap_or(0);
+    let rank = if wins == 0 && losses == 0 {
+        1
+    } else {
+        conference_standings
+            .iter()
+            .position(|r| r.team == ctx.user_team)
+            .map(|idx| idx + 1)
+            .or_else(|| user_row.and_then(|r| r.conf_rank.map(|n| n as usize)))
+            .unwrap_or(1)
+    };
 
-    // Notes (favorite players).
-    let notes = store.list_notes()?;
-    for n in &notes {
-        let name = match store.player_name(n.player_id)? {
-            Some(s) => clean_name(&s),
-            None => format!("#{}", n.player_id.0),
-        };
-        out.push(InboxRow {
-            kind: "note",
-            text: format!("{}: {}", name, n.text.as_deref().unwrap_or("(tracked)")),
-        });
-    }
+    let games = store.read_games(season)?;
+    let (player_totals, team_totals) = aggregate_games(&games);
 
-    out.truncate(10);
-    Ok(out)
+    let user_roster = all_rosters
+        .get(&ctx.user_team)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let team_leaders = leaders_for_roster(user_roster, &player_totals, &team_abbrevs, false);
+    let league_leaders = league_leaders(&players, &player_totals, &team_abbrevs);
+    let team_stats = team_stat_rows(ctx.user_team, &teams, &team_totals);
+    let finances = finance_rows(store.team_salary(ctx.user_team, season)?, season, ctx.user_team);
+    let lineup = lineup_rows(
+        store.read_starters(ctx.user_team)?,
+        user_roster,
+        &players,
+        &player_totals,
+    );
+
+    Ok(HomeSnapshot {
+        record: format!("{}-{}", wins, losses),
+        conference_rank: ordinal(rank),
+        standings: standing_display(conference_standings),
+        user_team: ctx.user_team,
+        team_leaders,
+        league_leaders,
+        team_stats,
+        finances,
+        lineup,
+    })
 }
 
-fn find_next_user_game(app: &mut AppState, ctx: &SaveCtx) -> Result<Option<UpcomingRow>> {
-    let store = app.store()?;
-    let last = store.last_scheduled_date()?;
-    let through = match last {
-        Some(d) => d,
-        None => return Ok(None),
+fn conference_rows(rows: &[StandingRow], conf: nba3k_core::Conference) -> Vec<StandingRow> {
+    let mut out: Vec<StandingRow> = rows
+        .iter()
+        .filter(|r| r.conference == conf)
+        .cloned()
+        .collect();
+    out.sort_by(|a, b| b.wins.cmp(&a.wins).then(a.losses.cmp(&b.losses)).then(a.abbrev.cmp(&b.abbrev)));
+    out
+}
+
+fn standing_display(rows: Vec<StandingRow>) -> Vec<StandingDisplay> {
+    let leader_delta = rows
+        .first()
+        .map(|r| r.wins as i32 - r.losses as i32)
+        .unwrap_or(0);
+    rows.into_iter()
+        .enumerate()
+        .map(|(idx, r)| {
+            let delta = r.wins as i32 - r.losses as i32;
+            let gb_half = (leader_delta - delta).max(0);
+            let gb = if idx == 0 {
+                "-".to_string()
+            } else if gb_half % 2 == 0 {
+                format!("{:.0}", gb_half as f32 / 2.0)
+            } else {
+                format!("{:.1}", gb_half as f32 / 2.0)
+            };
+            StandingDisplay {
+                rank: idx + 1,
+                team: r.team,
+                abbrev: r.abbrev,
+                wins: r.wins,
+                losses: r.losses,
+                gb,
+            }
+        })
+        .collect()
+}
+
+fn aggregate_games(
+    games: &[nba3k_core::GameResult],
+) -> (HashMap<PlayerId, PlayerTotals>, HashMap<TeamId, TeamTotals>) {
+    let mut players: HashMap<PlayerId, PlayerTotals> = HashMap::new();
+    let mut teams: HashMap<TeamId, TeamTotals> = HashMap::new();
+
+    for g in games.iter().filter(|g| !g.is_playoffs) {
+        let home_reb: u32 = g.box_score.home_lines.iter().map(|l| l.reb as u32).sum();
+        let home_ast: u32 = g.box_score.home_lines.iter().map(|l| l.ast as u32).sum();
+        let away_reb: u32 = g.box_score.away_lines.iter().map(|l| l.reb as u32).sum();
+        let away_ast: u32 = g.box_score.away_lines.iter().map(|l| l.ast as u32).sum();
+
+        add_team_game(&mut teams, g.home, g.home_score, g.away_score, home_reb, home_ast);
+        add_team_game(&mut teams, g.away, g.away_score, g.home_score, away_reb, away_ast);
+
+        for line in &g.box_score.home_lines {
+            players.entry(line.player).or_default().from_line(line, g.home);
+        }
+        for line in &g.box_score.away_lines {
+            players.entry(line.player).or_default().from_line(line, g.away);
+        }
+    }
+
+    (players, teams)
+}
+
+fn add_team_game(
+    teams: &mut HashMap<TeamId, TeamTotals>,
+    team: TeamId,
+    pts: u16,
+    opp_pts: u16,
+    reb: u32,
+    ast: u32,
+) {
+    let row = teams.entry(team).or_default();
+    row.games += 1;
+    row.pts += pts as u32;
+    row.opp_pts += opp_pts as u32;
+    row.reb += reb;
+    row.ast += ast;
+}
+
+fn leaders_for_roster(
+    roster: &[Player],
+    totals: &HashMap<PlayerId, PlayerTotals>,
+    abbrevs: &HashMap<TeamId, String>,
+    include_team: bool,
+) -> Vec<LeaderRow> {
+    [
+        ("PPG", Metric::Ppg),
+        ("RPG", Metric::Rpg),
+        ("APG", Metric::Apg),
+    ]
+    .into_iter()
+    .map(|(label, metric)| {
+        let player = roster.iter().max_by(|a, b| {
+            metric_value(totals.get(&a.id), metric)
+                .partial_cmp(&metric_value(totals.get(&b.id), metric))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.overall.cmp(&b.overall))
+        });
+        leader_from_player(label, player, totals, abbrevs, include_team)
+    })
+    .collect()
+}
+
+fn league_leaders(
+    players: &HashMap<PlayerId, Player>,
+    totals: &HashMap<PlayerId, PlayerTotals>,
+    abbrevs: &HashMap<TeamId, String>,
+) -> Vec<LeaderRow> {
+    [
+        ("PPG", Metric::Ppg),
+        ("RPG", Metric::Rpg),
+        ("APG", Metric::Apg),
+    ]
+    .into_iter()
+    .map(|(label, metric)| {
+        let player = players.values().max_by(|a, b| {
+            metric_value(totals.get(&a.id), metric)
+                .partial_cmp(&metric_value(totals.get(&b.id), metric))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.overall.cmp(&b.overall))
+        });
+        leader_from_player(label, player, totals, abbrevs, true)
+    })
+    .collect()
+}
+
+fn leader_from_player(
+    label: &'static str,
+    player: Option<&Player>,
+    totals: &HashMap<PlayerId, PlayerTotals>,
+    abbrevs: &HashMap<TeamId, String>,
+    include_team: bool,
+) -> LeaderRow {
+    let Some(p) = player else {
+        return LeaderRow {
+            metric: label,
+            name: "-".to_string(),
+            abbrev: None,
+            value: 0.0,
+        };
     };
-    let pending: Vec<ScheduledRow> = store.pending_games_through(through)?;
-    let next = pending
+    let row = totals.get(&p.id);
+    let team = row.and_then(|r| r.team).or(p.team);
+    LeaderRow {
+        metric: label,
+        name: clean_name(&p.name),
+        abbrev: if include_team {
+            team.and_then(|id| abbrevs.get(&id).cloned())
+        } else {
+            None
+        },
+        value: match label {
+            "PPG" => metric_value(row, Metric::Ppg),
+            "RPG" => metric_value(row, Metric::Rpg),
+            "APG" => metric_value(row, Metric::Apg),
+            _ => 0.0,
+        },
+    }
+}
+
+#[derive(Copy, Clone)]
+enum Metric {
+    Ppg,
+    Rpg,
+    Apg,
+}
+
+fn metric_value(row: Option<&PlayerTotals>, metric: Metric) -> f32 {
+    let Some(row) = row else { return 0.0 };
+    match metric {
+        Metric::Ppg => row.ppg(),
+        Metric::Rpg => row.rpg(),
+        Metric::Apg => row.apg(),
+    }
+}
+
+fn team_stat_rows(
+    user_team: TeamId,
+    teams: &[nba3k_core::Team],
+    totals: &HashMap<TeamId, TeamTotals>,
+) -> Vec<StatRow> {
+    let user = totals.get(&user_team).cloned().unwrap_or_default();
+    vec![
+        StatRow {
+            label: T::HomeStatPoints,
+            value: user.ppg(),
+            rank: rank_team(teams, totals, |t| t.ppg(), true, user_team),
+        },
+        StatRow {
+            label: T::HomeStatAllowed,
+            value: user.oppg(),
+            rank: rank_team(teams, totals, |t| t.oppg(), false, user_team),
+        },
+        StatRow {
+            label: T::HomeStatRebounds,
+            value: user.rpg(),
+            rank: rank_team(teams, totals, |t| t.rpg(), true, user_team),
+        },
+        StatRow {
+            label: T::HomeStatAssists,
+            value: user.apg(),
+            rank: rank_team(teams, totals, |t| t.apg(), true, user_team),
+        },
+    ]
+}
+
+fn rank_team<F>(
+    teams: &[nba3k_core::Team],
+    totals: &HashMap<TeamId, TeamTotals>,
+    value: F,
+    high_best: bool,
+    user_team: TeamId,
+) -> usize
+where
+    F: Fn(&TeamTotals) -> f32,
+{
+    let mut rows: Vec<(TeamId, f32)> = teams
+        .iter()
+        .map(|team| {
+            let totals = totals.get(&team.id).cloned().unwrap_or_default();
+            (team.id, value(&totals))
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        let ord = a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal);
+        if high_best { ord.reverse() } else { ord }
+    });
+    rows.iter()
+        .position(|(team, _)| *team == user_team)
+        .map(|idx| idx + 1)
+        .unwrap_or(1)
+}
+
+fn finance_rows(payroll: Cents, season: SeasonId, user_team: TeamId) -> Vec<(T, String)> {
+    let league_year = LeagueYear::for_season(season).unwrap_or_else(|| LeagueYear {
+        season,
+        cap: Cents::ZERO,
+        tax: Cents::ZERO,
+        apron_1: Cents::ZERO,
+        apron_2: Cents::ZERO,
+        mle_non_taxpayer: Cents::ZERO,
+        mle_taxpayer: Cents::ZERO,
+        mle_room: Cents::ZERO,
+        bae: Cents::ZERO,
+        min_team_salary: Cents::ZERO,
+        max_trade_cash: Cents::ZERO,
+    });
+    let attendance = 16_000 + ((user_team.0 as u32 * 379) % 3_000);
+    let revenue = Cents(payroll.0.saturating_mul(13) / 10);
+    let operating = Cents::from_dollars(18_000_000);
+    let profit = revenue - payroll - operating;
+    let cash = Cents::from_dollars(150_000_000 + user_team.0 as i64 * 1_000_000);
+    vec![
+        (T::FinanceAvgAttendance, format_number(attendance)),
+        (T::FinanceRevenueYTD, money_cell(revenue)),
+        (T::FinanceProfitYTD, money_cell(profit)),
+        (T::FinanceCash, money_cell(cash)),
+        (T::FinancePayroll, money_cell(payroll)),
+        (T::FinanceCap, money_cell(league_year.cap)),
+    ]
+}
+
+fn lineup_rows(
+    starters: nba3k_core::Starters,
+    _roster: &[Player],
+    players: &HashMap<PlayerId, Player>,
+    totals: &HashMap<PlayerId, PlayerTotals>,
+) -> Vec<LineupRow> {
+    Position::all()
         .into_iter()
-        .find(|g| g.home == ctx.user_team || g.away == ctx.user_team);
-    let Some(g) = next else { return Ok(None) };
+        .map(|pos| {
+            let pid = starters.slot(pos);
+            let player = pid.and_then(|id| players.get(&id));
+            let stats = pid.and_then(|id| totals.get(&id));
+            LineupRow {
+                position: pos,
+                name: player.map(|p| clean_name(&p.name)).unwrap_or_else(|| "-".to_string()),
+                ppg: stats.map(PlayerTotals::ppg).unwrap_or(0.0),
+                rpg: stats.map(PlayerTotals::rpg).unwrap_or(0.0),
+                apg: stats.map(PlayerTotals::apg).unwrap_or(0.0),
+                mpg: stats.map(PlayerTotals::mpg).unwrap_or(0.0),
+            }
+        })
+        .collect()
+}
 
-    let is_home = g.home == ctx.user_team;
-    let opp_id = if is_home { g.away } else { g.home };
-    let opp_abbrev = store
-        .team_abbrev(opp_id)?
-        .unwrap_or_else(|| format!("T{}", opp_id.0));
+fn per_game(num: u32, gp: u32) -> f32 {
+    if gp == 0 { 0.0 } else { num as f32 / gp as f32 }
+}
 
-    // Day index: derive from the season-start date (legacy convention is
-    // 2025-10-14). The shell exposes `season_state.day` for the current day,
-    // so a simple offset gives a "Day N" label.
-    let start = chrono::NaiveDate::from_ymd_opt(2025, 10, 14).expect("valid");
-    let day = g.date.signed_duration_since(start).num_days().max(0) as u32;
+fn ordinal(n: usize) -> String {
+    let suffix = if (11..=13).contains(&(n % 100)) {
+        "th"
+    } else {
+        match n % 10 {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        }
+    };
+    format!("{}{}", n, suffix)
+}
 
-    Ok(Some(UpcomingRow {
-        day,
-        opponent_abbrev: opp_abbrev,
-        is_home,
-    }))
+fn money_cell(c: Cents) -> String {
+    if c == Cents::ZERO {
+        "-".to_string()
+    } else {
+        format!("{}", c)
+    }
+}
+
+fn format_number(n: u32) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (idx, ch) in s.chars().rev().enumerate() {
+        if idx > 0 && idx % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
 }
 
 fn clean_name(name: &str) -> String {
     name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-// ---------------------------------------------------------------------------
-// Key handling — only ↑/↓ scroll the inbox; everything else falls through.
-// ---------------------------------------------------------------------------
+fn short_name(name: &str) -> String {
+    let clean = clean_name(name);
+    let mut parts = clean.split_whitespace().collect::<Vec<_>>();
+    if parts.len() <= 1 {
+        clean
+    } else {
+        parts.pop().unwrap_or("").to_string()
+    }
+}
 
 pub fn handle_key(
     _app: &mut AppState,
     _tui: &mut TuiApp,
-    key: KeyEvent,
+    _key: KeyEvent,
 ) -> Result<bool> {
-    match key.code {
-        KeyCode::Up => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                if c.inbox_scroll > 0 {
-                    c.inbox_scroll -= 1;
-                }
-            });
-            Ok(true)
-        }
-        KeyCode::Down => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                let max = c.inbox.as_ref().map(|v| v.len()).unwrap_or(0).saturating_sub(1);
-                if c.inbox_scroll < max {
-                    c.inbox_scroll += 1;
-                }
-            });
-            Ok(true)
-        }
-        _ => Ok(false),
-    }
+    Ok(false)
 }
