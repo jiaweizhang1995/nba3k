@@ -290,7 +290,9 @@ User-reported items 2026-04-28 after running release build. Same protocol as abo
 
 ## T10 — Default starting lineup + rotation row alignment
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 291 unit tests passed; new saves/default loads populate five starters and Rotation rows align.
 
 **Goal a**: New saves should start with a populated default starting 5 (top-OVR by adjacency-aware position fit, same algorithm as the existing auto-builder in `build_snapshot`). User then edits. No more all-empty rotation screen on first open.
 

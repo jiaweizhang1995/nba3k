@@ -157,6 +157,7 @@ impl SaveCtx {
         let user_team_name = store
             .team_name(user_team)?
             .unwrap_or_else(|| user_abbrev.clone());
+        crate::commands::populate_default_starters(store, user_team)?;
         Ok(Some(Self {
             user_team,
             user_abbrev,

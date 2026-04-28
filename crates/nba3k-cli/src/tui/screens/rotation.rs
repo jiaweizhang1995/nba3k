@@ -147,17 +147,17 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
 
         for (i, pos) in Position::all().iter().enumerate() {
             let is_cursor = i == cursor;
-            let prefix = if is_cursor { "  > " } else { "    " };
+            let prefix = if is_cursor { "> " } else { "  " };
             let row_style = if is_cursor {
                 theme.highlight()
             } else {
                 theme.text()
             };
 
-            let pos_label = format!("{:<4}", pos);
+            let pos_label = format!("{:<2}", pos);
             let assigned = starters.slot(*pos);
             let body = match assigned {
-                None => Span::styled("[empty — auto-pick]".to_string(), theme.muted_style()),
+                None => Span::styled(format!("{:<28}", "[empty — auto-pick]"), theme.muted_style()),
                 Some(pid) => match index.and_then(|m| m.get(&pid)) {
                     Some(opt) => {
                         let mut text = format!("{} ({} OVR)", opt.name, opt.overall);
@@ -169,10 +169,10 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                         } else {
                             row_style
                         };
-                        Span::styled(text, style)
+                        Span::styled(format!("{:<28}", text), style)
                     }
                     None => Span::styled(
-                        format!("#{} (off roster)", pid.0),
+                        format!("{:<28}", format!("#{} (off roster)", pid.0)),
                         theme.muted_style(),
                     ),
                 },
@@ -180,11 +180,11 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
 
             let hint = match assigned {
                 None => Span::styled(
-                    "  press Enter to choose".to_string(),
+                    "press Enter to choose".to_string(),
                     theme.muted_style(),
                 ),
                 Some(_) => Span::styled(
-                    "  press Enter to change, c to clear".to_string(),
+                    "press Enter to change, c to clear".to_string(),
                     theme.muted_style(),
                 ),
             };
@@ -194,6 +194,7 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                 Span::styled(pos_label, theme.accent_style()),
                 Span::styled("  ".to_string(), row_style),
                 body,
+                Span::styled("  ".to_string(), row_style),
                 hint,
             ]));
         }

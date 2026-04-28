@@ -222,6 +222,7 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
         // need a quick lookup (draft pick, training) don't have to deserialize
         // the full SeasonState every call.
         store.set_meta("user_team", &args.team.to_uppercase())?;
+        populate_default_starters(store, user_team_id)?;
     }
 
     // Generate + persist 82-game schedule so subsequent sim-day commands can
@@ -253,6 +254,12 @@ fn cmd_load(app: &mut AppState, path: PathBuf) -> Result<()> {
         bail!("no such save: {}", path.display());
     }
     app.open_path(path.clone())?;
+    {
+        let store = app.store()?;
+        if let Some(state) = store.load_season_state()? {
+            populate_default_starters(store, state.user_team)?;
+        }
+    }
     println!("loaded {}", path.display());
     Ok(())
 }
@@ -1248,16 +1255,46 @@ fn run_cup_final(
 // snapshot construction
 // ----------------------------------------------------------------------
 
-fn build_snapshot(app: &mut AppState, team: &Team) -> Result<TeamSnapshot> {
+fn star_roster_index() -> &'static nba3k_models::star_protection::StarRoster {
     use std::path::Path;
     use std::sync::OnceLock;
     static STAR_ROSTER: OnceLock<nba3k_models::star_protection::StarRoster> = OnceLock::new();
-    let roster_index = STAR_ROSTER.get_or_init(|| {
+    STAR_ROSTER.get_or_init(|| {
         nba3k_models::star_protection::load_star_roster(Path::new(
             nba3k_models::star_protection::STAR_ROSTER_PATH,
         ))
         .unwrap_or_default()
-    });
+    })
+}
+
+pub(crate) fn populate_default_starters(
+    store: &nba3k_store::Store,
+    user_team: TeamId,
+) -> Result<bool> {
+    let starters = store.read_starters(user_team)?;
+    if starters.iter_assigned().next().is_some() {
+        return Ok(false);
+    }
+
+    let roster = store.roster_for_team(user_team)?;
+    if roster.len() < 5 {
+        return Ok(false);
+    }
+
+    let team_abbrev = store
+        .team_abbrev(user_team)?
+        .unwrap_or_else(|| format!("T{}", user_team.0));
+    let rotation = build_position_aware_rotation(&roster, star_roster_index(), &team_abbrev);
+    let mut written = 0usize;
+    for slot in rotation.iter().take(5) {
+        store.upsert_starter(user_team, &slot.position.to_string(), slot.player)?;
+        written += 1;
+    }
+    Ok(written == 5)
+}
+
+fn build_snapshot(app: &mut AppState, team: &Team) -> Result<TeamSnapshot> {
+    let roster_index = star_roster_index();
 
     let mut roster = app.store()?.roster_for_team(team.id)?;
     // Drop active-injury players so the rotation pulls from next-up bench.
@@ -4973,6 +5010,34 @@ mod tests {
             trade_kicker_pct: None,
             role: nba3k_core::PlayerRole::RolePlayer,
             morale: 0.5,
+        }
+    }
+
+    #[test]
+    fn populate_default_starters_writes_five_slots() {
+        let (_dir, mut app) = ai_fa_test_setup();
+        let user = TeamId(1);
+        for (idx, pos) in Position::all().into_iter().enumerate() {
+            let mut player = make_test_player(100 + idx as u32, Some(user), 80 + idx as u8);
+            player.primary_position = pos;
+            app.store().unwrap().upsert_player(&player).unwrap();
+        }
+
+        let wrote = populate_default_starters(app.store().unwrap(), user).unwrap();
+        assert!(wrote);
+
+        let starters = app.store().unwrap().read_starters(user).unwrap();
+        assert!(starters.is_complete());
+        for (_, pid) in starters.iter_assigned() {
+            assert!(
+                app.store()
+                    .unwrap()
+                    .roster_for_team(user)
+                    .unwrap()
+                    .iter()
+                    .any(|p| p.id == pid),
+                "starter {pid:?} must come from the user roster"
+            );
         }
     }
 
