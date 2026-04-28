@@ -283,7 +283,7 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                     Cell::from(Span::styled(format!("{:.1}", r.ppg), style)),
                     Cell::from(Span::styled(format!("{:.1}", r.rpg), style)),
                     Cell::from(Span::styled(format!("{:.1}", r.apg), style)),
-                    Cell::from(Span::styled(short_role(r.role), style)),
+                    Cell::from(Span::styled(short_role(lang, r.role), style)),
                     Cell::from(Span::styled(format!("{:.1}%", r.cap_pct), style)),
                 ])
             })
@@ -981,16 +981,16 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
             Some(v) => vec![
                 ("team chem", format!("{:.2}", v)),
                 (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
-                (t(tui.lang, T::RosterRole), short_role(player.role)),
+                (t(tui.lang, T::RosterRole), short_role(tui.lang, player.role).to_string()),
             ],
             None => vec![
                 (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
-                (t(tui.lang, T::RosterRole), short_role(player.role)),
+                (t(tui.lang, T::RosterRole), short_role(tui.lang, player.role).to_string()),
             ],
         },
         None => vec![
             (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
-            (t(tui.lang, T::RosterRole), short_role(player.role)),
+            (t(tui.lang, T::RosterRole), short_role(tui.lang, player.role).to_string()),
         ],
     };
 
@@ -1255,7 +1255,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             if let Some(name) = roster_name(pid) {
                 CACHE.with(|c| {
                     c.borrow_mut().modal = Modal::Train {
-                        picker: train_picker(),
+                        picker: train_picker(tui.lang),
                         target_id: pid,
                         target_name: name,
                     };
@@ -1296,7 +1296,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             if let Some(name) = roster_name(pid) {
                 CACHE.with(|c| {
                     c.borrow_mut().modal = Modal::Role {
-                        picker: role_picker(),
+                        picker: role_picker(tui.lang),
                         target_id: pid,
                         target_name: name,
                     };
@@ -1421,7 +1421,7 @@ fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             if let Some((pid, name)) = current_roster_row() {
                 CACHE.with(|c| {
                     c.borrow_mut().modal = Modal::Train {
-                        picker: train_picker(),
+                        picker: train_picker(tui.lang),
                         target_id: pid,
                         target_name: name,
                     };
@@ -1462,7 +1462,7 @@ fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             if let Some((pid, name)) = current_roster_row() {
                 CACHE.with(|c| {
                     c.borrow_mut().modal = Modal::Role {
-                        picker: role_picker(),
+                        picker: role_picker(tui.lang),
                         target_id: pid,
                         target_name: name,
                     };
@@ -1574,17 +1574,17 @@ fn after_mutation(tui: &mut TuiApp, res: Result<()>, success_msg: &str) {
     crate::tui::screens::home::invalidate();
 }
 
-fn train_picker() -> Picker<&'static str> {
+fn train_picker(lang: Lang) -> Picker<&'static str> {
     Picker::new(
-        "Training focus",
+        t(lang, T::RosterTrainingFocus),
         vec!["shoot", "inside", "def", "reb", "ath", "handle"],
         |s| (*s).to_string(),
     )
 }
 
-fn role_picker() -> Picker<&'static str> {
+fn role_picker(lang: Lang) -> Picker<&'static str> {
     Picker::new(
-        "Role",
+        t(lang, T::RosterRoleHeader),
         vec!["star", "starter", "sixth", "role", "bench", "prospect"],
         |s| (*s).to_string(),
     )
@@ -1619,16 +1619,15 @@ fn clean_name(name: &str) -> String {
     name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn short_role(r: PlayerRole) -> String {
+fn short_role(lang: Lang, r: PlayerRole) -> &'static str {
     match r {
-        PlayerRole::Star => "Star",
-        PlayerRole::Starter => "Start",
-        PlayerRole::SixthMan => "6th",
-        PlayerRole::RolePlayer => "Role",
-        PlayerRole::BenchWarmer => "Bench",
-        PlayerRole::Prospect => "Prosp",
+        PlayerRole::Star => t(lang, T::RoleStar),
+        PlayerRole::Starter => t(lang, T::RoleStarter),
+        PlayerRole::SixthMan => t(lang, T::RoleSixthMan),
+        PlayerRole::RolePlayer => t(lang, T::RoleRolePlayer),
+        PlayerRole::BenchWarmer => t(lang, T::RoleBenchWarmer),
+        PlayerRole::Prospect => t(lang, T::RoleProspect),
     }
-    .to_string()
 }
 
 fn sort_label(lang: Lang, s: SortKey) -> &'static str {

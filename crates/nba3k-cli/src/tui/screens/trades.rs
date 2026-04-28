@@ -667,7 +667,7 @@ fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                         Cell::from(Span::styled(shorten(&r.player_name, 24), style)),
                         Cell::from(Span::styled(r.team_abbrev.clone(), style)),
                         Cell::from(Span::styled(format!("{}", r.ovr), style)),
-                        Cell::from(Span::styled(short_role(r.role), style)),
+                        Cell::from(Span::styled(short_role(lang, r.role), style)),
                         Cell::from(Span::styled(format!("{}", r.interest), style)),
                         Cell::from(Span::styled(
                             r.suitors
@@ -1864,16 +1864,15 @@ fn reject_reason_to_string(lang: Lang, r: &RejectReason) -> String {
     }
 }
 
-fn short_role(r: PlayerRole) -> String {
+fn short_role(lang: Lang, r: PlayerRole) -> &'static str {
     match r {
-        PlayerRole::Star => "Star",
-        PlayerRole::Starter => "Start",
-        PlayerRole::SixthMan => "6th",
-        PlayerRole::RolePlayer => "Role",
-        PlayerRole::BenchWarmer => "Bench",
-        PlayerRole::Prospect => "Prosp",
+        PlayerRole::Star => t(lang, T::RoleStar),
+        PlayerRole::Starter => t(lang, T::RoleStarter),
+        PlayerRole::SixthMan => t(lang, T::RoleSixthMan),
+        PlayerRole::RolePlayer => t(lang, T::RoleRolePlayer),
+        PlayerRole::BenchWarmer => t(lang, T::RoleBenchWarmer),
+        PlayerRole::Prospect => t(lang, T::RoleProspect),
     }
-    .to_string()
 }
 
 fn clean_name(name: &str) -> String {

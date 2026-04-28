@@ -55,20 +55,34 @@ struct WizardState {
 
 impl Default for WizardState {
     fn default() -> Self {
+        Self::new(Lang::En)
+    }
+}
+
+impl WizardState {
+    fn new(lang: Lang) -> Self {
         Self {
             step: Step::SavePath,
-            save_path: TextInput::new("Save path")
+            save_path: TextInput::new(t(lang, T::NewGameSavePath))
                 .with_initial(default_save_path()),
-            team_picker: Picker::new("Team", load_teams(), display_team),
+            team_picker: Picker::new(t(lang, T::NewGameTeam), load_teams(), display_team),
             mode_picker: Picker::new(
-                "Mode",
+                t(lang, T::NewGameMode),
                 MODES.to_vec(),
                 |s: &&'static str| s.to_string(),
             ),
-            season: NumberInput::new("Season").with_bounds(2024, 2030).with_initial(2026),
-            seed: NumberInput::new("Seed").with_bounds(0, i64::MAX).with_initial(42),
+            season: NumberInput::new(t(lang, T::NewGameSeason)).with_bounds(2024, 2030).with_initial(2026),
+            seed: NumberInput::new(t(lang, T::NewGameSeed)).with_bounds(0, i64::MAX).with_initial(42),
             error: None,
         }
+    }
+
+    fn localize(&mut self, lang: Lang) {
+        self.save_path.set_label(t(lang, T::NewGameSavePath));
+        self.team_picker.set_title(t(lang, T::NewGameTeam));
+        self.mode_picker.set_title(t(lang, T::NewGameMode));
+        self.season.set_label(t(lang, T::NewGameSeason));
+        self.seed.set_label(t(lang, T::NewGameSeed));
     }
 }
 
@@ -162,7 +176,8 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, _app: &mut AppState, tui
         .split(area);
 
     STATE.with(|s| {
-        let st = s.borrow();
+        let mut st = s.borrow_mut();
+        st.localize(tui.lang);
         draw_header(f, parts[0], theme, tui.lang, title, st.step);
         draw_body(f, parts[1], theme, tui.lang, &st);
         draw_status(f, parts[2], theme, tui.lang, submit, back, st.error.as_deref());

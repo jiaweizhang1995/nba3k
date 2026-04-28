@@ -588,7 +588,7 @@ fn load_draft_data(app: &mut AppState, tui: &TuiApp) -> Result<DraftData> {
             let (abbrev, full_name) = names
                 .get(&team_id)
                 .cloned()
-                .unwrap_or_else(|| (format!("T{}", team_id.0), "Unknown Team".to_string()));
+                .unwrap_or_else(|| (format!("T{}", team_id.0), t(tui.lang, T::DraftUnknownTeam).to_string()));
             OrderRow {
                 pick: i + 1,
                 team_id,

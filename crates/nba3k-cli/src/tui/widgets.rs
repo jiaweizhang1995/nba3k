@@ -174,6 +174,10 @@ impl TextInput {
         self
     }
 
+    pub fn set_label(&mut self, label: impl Into<String>) {
+        self.label = label.into();
+    }
+
     pub fn value(&self) -> &str {
         &self.value
     }
@@ -269,6 +273,10 @@ impl NumberInput {
         self
     }
 
+    pub fn set_label(&mut self, label: impl Into<String>) {
+        self.label = label.into();
+    }
+
     pub fn raw(&self) -> &str {
         &self.buf
     }
@@ -353,6 +361,10 @@ impl<T: Clone> Picker<T> {
     pub fn set_filter(&mut self, s: impl Into<String>) {
         self.filter = s.into().to_lowercase();
         self.cursor = 0;
+    }
+
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        self.title = title.into();
     }
 
     pub fn filter(&self) -> &str {

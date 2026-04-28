@@ -372,7 +372,7 @@ fn draw_schedule_tab(
         t(tui.lang, T::CalendarDayOf),
         ctx.season_state.day,
         SEASON_LENGTH_DAYS,
-        month_name(st.view_month.month()),
+        month_name(tui.lang, st.view_month.month()),
         st.view_month.year(),
     );
     let header = Paragraph::new(Line::from(Span::styled(
@@ -394,6 +394,7 @@ fn draw_schedule_tab(
         f,
         chunks[1],
         theme,
+        tui.lang,
         st.view_month,
         today,
         st.cell_cursor,
@@ -407,6 +408,7 @@ fn draw_month_grid(
     f: &mut Frame,
     area: Rect,
     theme: &Theme,
+    lang: Lang,
     view_month: NaiveDate,
     today: NaiveDate,
     cursor: u8,
@@ -431,11 +433,11 @@ fn draw_month_grid(
         .direction(Direction::Horizontal)
         .constraints(vec![Constraint::Ratio(1, 7); 7])
         .split(rows[0]);
-    for (i, name) in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        .iter()
-        .enumerate()
-    {
-        let p = Paragraph::new(Line::from(Span::styled(*name, theme.muted_style())))
+    for i in 0..7 {
+        let p = Paragraph::new(Line::from(Span::styled(
+            weekday_name(lang, i),
+            theme.muted_style(),
+        )))
             .alignment(Alignment::Center);
         f.render_widget(p, header_cols[i]);
     }
@@ -1488,20 +1490,33 @@ fn cell_to_date(view_month: NaiveDate, cell: u8) -> NaiveDate {
     view_month + ChronoDuration::days(cell as i64 - lead)
 }
 
-fn month_name(month: u32) -> &'static str {
+fn weekday_name(lang: Lang, day: usize) -> &'static str {
+    match day {
+        0 => t(lang, T::CalDayMon),
+        1 => t(lang, T::CalDayTue),
+        2 => t(lang, T::CalDayWed),
+        3 => t(lang, T::CalDayThu),
+        4 => t(lang, T::CalDayFri),
+        5 => t(lang, T::CalDaySat),
+        6 => t(lang, T::CalDaySun),
+        _ => "?",
+    }
+}
+
+fn month_name(lang: Lang, month: u32) -> &'static str {
     match month {
-        1 => "January",
-        2 => "February",
-        3 => "March",
-        4 => "April",
-        5 => "May",
-        6 => "June",
-        7 => "July",
-        8 => "August",
-        9 => "September",
-        10 => "October",
-        11 => "November",
-        12 => "December",
+        1 => t(lang, T::CalMonJan),
+        2 => t(lang, T::CalMonFeb),
+        3 => t(lang, T::CalMonMar),
+        4 => t(lang, T::CalMonApr),
+        5 => t(lang, T::CalMonMay),
+        6 => t(lang, T::CalMonJun),
+        7 => t(lang, T::CalMonJul),
+        8 => t(lang, T::CalMonAug),
+        9 => t(lang, T::CalMonSep),
+        10 => t(lang, T::CalMonOct),
+        11 => t(lang, T::CalMonNov),
+        12 => t(lang, T::CalMonDec),
         _ => "?",
     }
 }
