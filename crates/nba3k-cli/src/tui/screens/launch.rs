@@ -224,7 +224,7 @@ fn activate_selected(app: &mut AppState, tui: &mut TuiApp) -> Result<LaunchActio
                     tui.last_msg = Some(format!("loaded {}", path.display()));
                     crate::tui::screens::home::invalidate();
                     tui.invalidate_caches();
-                    tui.current = Screen::Menu;
+                    tui.show_home_preview();
                 }
                 Err(e) => {
                     tui.last_msg = Some(format!("load failed: {}", e));

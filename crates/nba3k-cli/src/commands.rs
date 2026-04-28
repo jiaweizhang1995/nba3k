@@ -8,7 +8,9 @@ use chrono::NaiveDate;
 use indexmap::IndexMap;
 use nba3k_core::*;
 use nba3k_season::{phases as season_phases, schedule::Schedule, standings::Standings};
-use nba3k_sim::{pick_engine, roll_injuries_from_box, tick_injury, GameContext, RotationSlot, TeamSnapshot};
+use nba3k_sim::{
+    pick_engine, roll_injuries_from_box, tick_injury, GameContext, RotationSlot, TeamSnapshot,
+};
 use nba3k_trade::{
     evaluate as evaluate_mod, negotiate as negotiate_mod,
     snapshot::{LeagueSnapshot, TeamRecordSummary},
@@ -16,13 +18,15 @@ use nba3k_trade::{
 use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Default seed DB shipped by `nba3k-scrape`. CLI `new` looks here unless overridden.
 const DEFAULT_SEED_PATH: &str = "data/seed_2025_26.sqlite";
+const FREE_AGENT_SEED: &str = include_str!("../../../data/free_agents_2025_26.toml");
+const FREE_AGENT_ID_BASE: u32 = 900_000;
 
 /// Day-of-season marker for the All-Star Game (M15-A). When `state.day`
 /// first reaches/passes this value, the simulator runs `compute_all_star`
@@ -36,6 +40,21 @@ const CUP_GROUP_DAY: u32 = 30;
 const CUP_QF_DAY: u32 = 45;
 const CUP_SF_DAY: u32 = 53;
 const CUP_FINAL_DAY: u32 = 55;
+
+#[derive(Debug, Deserialize)]
+struct FreeAgentSeedFile {
+    fa: Vec<FreeAgentSeed>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FreeAgentSeed {
+    name: String,
+    primary_position: Position,
+    secondary_position: Option<Position>,
+    age: u8,
+    overall: u8,
+    potential: u8,
+}
 
 pub fn dispatch(app: &mut AppState, cmd: Command) -> Result<()> {
     match cmd {
@@ -90,9 +109,12 @@ pub fn dispatch(app: &mut AppState, cmd: Command) -> Result<()> {
             CoachAction::Pool { limit, json } => cmd_coach_pool(app, limit, json),
         },
         Command::Scout { player } => cmd_scout(app, &player),
-        Command::Records { scope, stat, limit, json } => {
-            cmd_records(app, &scope, &stat, limit, json)
-        }
+        Command::Records {
+            scope,
+            stat,
+            limit,
+            json,
+        } => cmd_records(app, &scope, &stat, limit, json),
         Command::AllStar { season, json } => cmd_all_star(app, season, json),
         Command::Saves(args) => match args.action {
             SavesAction::List { dir, json } => cmd_saves_list(app, dir, json),
@@ -102,9 +124,17 @@ pub fn dispatch(app: &mut AppState, cmd: Command) -> Result<()> {
         },
         Command::Cup { season, json } => cmd_cup(app, season, json),
         Command::Rumors { limit, json } => cmd_rumors(app, limit, json),
-        Command::Compare { team_a, team_b, json } => cmd_compare(app, &team_a, &team_b, json),
+        Command::Compare {
+            team_a,
+            team_b,
+            json,
+        } => cmd_compare(app, &team_a, &team_b, json),
         Command::Offers { limit, json } => cmd_offers(app, limit, json),
-        Command::Extend { player, salary_m, years } => cmd_extend(app, &player, salary_m, years),
+        Command::Extend {
+            player,
+            salary_m,
+            years,
+        } => cmd_extend(app, &player, salary_m, years),
         Command::Notes(args) => match args.action {
             NotesAction::Add { player, text } => cmd_notes_add(app, &player, text.as_deref()),
             NotesAction::Remove { player } => cmd_notes_remove(app, &player),
@@ -179,8 +209,12 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
 
     app.open_path(path.clone())?;
 
-    let mode = GameMode::parse(&args.mode)
-        .ok_or_else(|| anyhow!("unknown mode '{}': use standard|god|hardcore|sandbox", args.mode))?;
+    let mode = GameMode::parse(&args.mode).ok_or_else(|| {
+        anyhow!(
+            "unknown mode '{}': use standard|god|hardcore|sandbox",
+            args.mode
+        )
+    })?;
 
     let season = SeasonId(args.season);
 
@@ -205,9 +239,12 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
             store.upsert_team(&stub_team)?;
         }
 
-        let user_team_id = store
-            .find_team_by_abbrev(&args.team)?
-            .ok_or_else(|| anyhow!("unknown team '{}' (try one of: ATL, BOS, LAL, ...)", args.team))?;
+        let user_team_id = store.find_team_by_abbrev(&args.team)?.ok_or_else(|| {
+            anyhow!(
+                "unknown team '{}' (try one of: ATL, BOS, LAL, ...)",
+                args.team
+            )
+        })?;
 
         let state = SeasonState {
             season,
@@ -223,6 +260,10 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
         // the full SeasonState every call.
         store.set_meta("user_team", &args.team.to_uppercase())?;
         populate_default_starters(store, user_team_id)?;
+        for team in store.list_teams()? {
+            assign_initial_roles(store, team.id)?;
+        }
+        seed_free_agents(store)?;
     }
 
     // Generate + persist 82-game schedule so subsequent sim-day commands can
@@ -249,6 +290,104 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
     Ok(())
 }
 
+pub fn seed_free_agents(store: &mut nba3k_store::Store) -> Result<u32> {
+    let seed: FreeAgentSeedFile =
+        toml::from_str(FREE_AGENT_SEED).context("parsing free agent seed data")?;
+    let mut inserted = 0_u32;
+    let mut next_id = FREE_AGENT_ID_BASE;
+
+    for (idx, entry) in seed.fa.into_iter().enumerate() {
+        if store.player_exists_exact_name(&entry.name)? {
+            continue;
+        }
+
+        let mut id = PlayerId(next_id + idx as u32);
+        while store.player_name(id)?.is_some() {
+            next_id = next_id.saturating_add(1);
+            id = PlayerId(next_id + idx as u32);
+        }
+
+        let player = Player {
+            id,
+            name: entry.name,
+            primary_position: entry.primary_position,
+            secondary_position: entry.secondary_position,
+            age: entry.age,
+            overall: entry.overall,
+            potential: entry.potential,
+            ratings: ratings_from_overall(entry.overall, entry.primary_position),
+            contract: None,
+            team: None,
+            injury: None,
+            no_trade_clause: false,
+            trade_kicker_pct: None,
+            role: PlayerRole::RolePlayer,
+            morale: 0.5,
+        };
+        store.upsert_player(&player)?;
+        store.cut_player(player.id)?;
+        inserted += 1;
+    }
+
+    Ok(inserted)
+}
+
+fn ratings_from_overall(overall: u8, pos: Position) -> Ratings {
+    let base = overall.saturating_sub(3);
+    let bump = overall.saturating_add(2).min(99);
+    let mut r = Ratings {
+        close_shot: base,
+        driving_layup: base,
+        driving_dunk: base,
+        standing_dunk: base,
+        post_control: base,
+        mid_range: base,
+        three_point: base,
+        free_throw: base,
+        passing_accuracy: base,
+        ball_handle: base,
+        speed_with_ball: base,
+        interior_defense: base,
+        perimeter_defense: base,
+        steal: base,
+        block: base,
+        off_reb: base,
+        def_reb: base,
+        speed: bump,
+        agility: bump,
+        strength: base,
+        vertical: bump,
+    };
+    match pos {
+        Position::PG => {
+            r.ball_handle = r.ball_handle.saturating_add(6).min(99);
+            r.passing_accuracy = r.passing_accuracy.saturating_add(5).min(99);
+            r.speed_with_ball = r.speed_with_ball.saturating_add(5).min(99);
+        }
+        Position::SG => {
+            r.three_point = r.three_point.saturating_add(5).min(99);
+            r.mid_range = r.mid_range.saturating_add(3).min(99);
+        }
+        Position::SF => {
+            r.perimeter_defense = r.perimeter_defense.saturating_add(2).min(99);
+            r.speed = r.speed.saturating_add(2).min(99);
+        }
+        Position::PF => {
+            r.off_reb = r.off_reb.saturating_add(5).min(99);
+            r.def_reb = r.def_reb.saturating_add(5).min(99);
+            r.interior_defense = r.interior_defense.saturating_add(3).min(99);
+        }
+        Position::C => {
+            r.off_reb = r.off_reb.saturating_add(8).min(99);
+            r.def_reb = r.def_reb.saturating_add(8).min(99);
+            r.interior_defense = r.interior_defense.saturating_add(8).min(99);
+            r.block = r.block.saturating_add(5).min(99);
+            r.three_point = r.three_point.saturating_sub(6);
+        }
+    }
+    r
+}
+
 fn cmd_load(app: &mut AppState, path: PathBuf) -> Result<()> {
     if !path.exists() {
         bail!("no such save: {}", path.display());
@@ -266,7 +405,9 @@ fn cmd_load(app: &mut AppState, path: PathBuf) -> Result<()> {
 
 fn cmd_save(app: &mut AppState) -> Result<()> {
     let store = app.store()?;
-    store.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    store
+        .conn()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     println!("save flushed: {}", store.path().display());
     Ok(())
 }
@@ -329,7 +470,10 @@ fn cmd_status(app: &mut AppState, JsonFlag { json: as_json }: JsonFlag) -> Resul
         println!("save:     {}", report.save_path);
         println!("season:   {} ({})", report.season, report.phase);
         println!("day:      {}", report.day);
-        println!("team:     {} (id={})", report.user_team, report.user_team_id);
+        println!(
+            "team:     {} (id={})",
+            report.user_team, report.user_team_id
+        );
         println!("mode:     {}", report.mode);
         println!("seed:     {}", report.rng_seed);
         println!(
@@ -388,7 +532,10 @@ fn cmd_sim_day(app: &mut AppState, count: u32) -> Result<()> {
 }
 
 fn cmd_sim_to(app: &mut AppState, phase_arg: &str) -> Result<()> {
-    let key = phase_arg.to_ascii_lowercase().replace('-', "").replace('_', "");
+    let key = phase_arg
+        .to_ascii_lowercase()
+        .replace('-', "")
+        .replace('_', "");
     // Day-marker targets: skip until state.day reaches the named milestone.
     if let Some(target_day) = match key.as_str() {
         "allstar" | "asg" => Some(ALL_STAR_DAY),
@@ -427,7 +574,10 @@ fn cmd_sim_to(app: &mut AppState, phase_arg: &str) -> Result<()> {
             state.phase = SeasonPhase::OffSeason;
             app.store()?.save_season_state(&state)?;
         }
-        println!("reached phase OffSeason — season {} complete", state.season.0);
+        println!(
+            "reached phase OffSeason — season {} complete",
+            state.season.0
+        );
         return Ok(());
     }
     let target = match key.as_str() {
@@ -456,13 +606,19 @@ pub(crate) fn sim_until_day(app: &mut AppState, target_day: u32) -> Result<()> {
         if matches!(state.phase, SeasonPhase::Playoffs | SeasonPhase::OffSeason) {
             bail!(
                 "season already past day {} (phase={:?}, day={})",
-                target_day, state.phase, state.day
+                target_day,
+                state.phase,
+                state.day
             );
         }
         sim_n_days(app, 1, true)?;
         iter += 1;
         if iter > cap {
-            bail!("sim-to bailing after {} days; never reached day {}", cap, target_day);
+            bail!(
+                "sim-to bailing after {} days; never reached day {}",
+                cap,
+                target_day
+            );
         }
     }
     println!("reached day {}", target_day);
@@ -529,7 +685,9 @@ fn cmd_sim_paced(app: &mut AppState, days: u32, allow_pause: bool, label: &str) 
             break;
         }
         let news = store.recent_news(50)?;
-        let new_news = &news[..news.len().saturating_sub(baseline_news_count.min(news.len()))];
+        let new_news = &news[..news
+            .len()
+            .saturating_sub(baseline_news_count.min(news.len()))];
         if let Some(injury) = new_news.iter().find(|n| {
             n.kind == "injury"
                 && user_player_ids
@@ -545,7 +703,9 @@ fn cmd_sim_paced(app: &mut AppState, days: u32, allow_pause: bool, label: &str) 
             // other teams.
             let user_abbrev = store.team_abbrev(user_team)?.unwrap_or_default();
             let user_injury = new_news.iter().any(|n| {
-                n.kind == "injury" && (n.headline.contains(&user_abbrev) || n.body.as_deref().is_some_and(|b| b.contains(&user_abbrev)))
+                n.kind == "injury"
+                    && (n.headline.contains(&user_abbrev)
+                        || n.body.as_deref().is_some_and(|b| b.contains(&user_abbrev)))
             });
             if user_injury {
                 pause_reason = Some(format!(
@@ -594,13 +754,18 @@ pub(crate) fn sim_until_phase(app: &mut AppState, target: SeasonPhase) -> Result
         if phase_ord(state.phase) > phase_ord(target) {
             bail!(
                 "season already past target phase {:?} (current={:?})",
-                target, state.phase
+                target,
+                state.phase
             );
         }
         sim_n_days(app, 1, true)?;
         iter += 1;
         if iter > cap {
-            bail!("sim-to bailing: exceeded {} sim days without reaching {:?}", cap, target);
+            bail!(
+                "sim-to bailing: exceeded {} sim days without reaching {:?}",
+                cap,
+                target
+            );
         }
     }
     println!("reached phase {:?}", target);
@@ -611,7 +776,10 @@ pub(crate) fn sim_n_days(app: &mut AppState, count: u32, quiet: bool) -> Result<
     let mut state = current_state(app)?;
     let total_teams = app.store()?.count_teams()?;
     if total_teams != 30 {
-        bail!("cannot sim: save has {} teams (need 30 — was the seed missing?)", total_teams);
+        bail!(
+            "cannot sim: save has {} teams (need 30 — was the seed missing?)",
+            total_teams
+        );
     }
 
     let teams = app.store()?.list_teams()?;
@@ -681,7 +849,10 @@ pub(crate) fn sim_n_days(app: &mut AppState, count: u32, quiet: bool) -> Result<
         // Trade deadline crossing — kick off the AI volume spike on the
         // deadline day before flipping to TradeDeadlinePassed.
         if state.phase == SeasonPhase::Regular && season_phases::is_trade_deadline_day(date) {
-            let deadline_seed = state.rng_seed.wrapping_add(state.day as u64).wrapping_add(0xDEAD);
+            let deadline_seed = state
+                .rng_seed
+                .wrapping_add(state.day as u64)
+                .wrapping_add(0xDEAD);
             run_ai_trade_volume(app, state.season, state.user_team, deadline_seed)?;
         }
 
@@ -767,26 +938,26 @@ fn decrement_injuries_for_day(app: &mut AppState) -> Result<()> {
     let store = app.store()?;
     let players = store.all_active_players()?;
     for mut p in players {
-        let Some(status) = p.injury.as_ref() else { continue };
+        let Some(status) = p.injury.as_ref() else {
+            continue;
+        };
         p.injury = tick_injury(status);
         store.upsert_player(&p)?;
     }
     Ok(())
 }
 
-fn apply_new_injuries(
-    app: &mut AppState,
-    new_injuries: &[(PlayerId, InjuryStatus)],
-) -> Result<()> {
+fn apply_new_injuries(app: &mut AppState, new_injuries: &[(PlayerId, InjuryStatus)]) -> Result<()> {
     if new_injuries.is_empty() {
         return Ok(());
     }
     let store = app.store()?;
     let active = store.all_active_players()?;
-    let mut by_id: HashMap<PlayerId, Player> =
-        active.into_iter().map(|p| (p.id, p)).collect();
+    let mut by_id: HashMap<PlayerId, Player> = active.into_iter().map(|p| (p.id, p)).collect();
     for (pid, status) in new_injuries {
-        let Some(player) = by_id.get_mut(pid) else { continue };
+        let Some(player) = by_id.get_mut(pid) else {
+            continue;
+        };
         if player.injury.is_none() {
             player.injury = Some(status.clone());
             store.upsert_player(player)?;
@@ -1096,7 +1267,10 @@ fn cup_group_standings(rows: &[nba3k_store::CupMatchRow]) -> Vec<CupGroupStandin
 fn cup_ko_field(standings: &[CupGroupStanding]) -> Vec<TeamId> {
     let mut by_group: HashMap<String, Vec<CupGroupStanding>> = HashMap::new();
     for row in standings {
-        by_group.entry(row.group_id.clone()).or_default().push(row.clone());
+        by_group
+            .entry(row.group_id.clone())
+            .or_default()
+            .push(row.clone());
     }
     let mut group_ids: Vec<String> = by_group.keys().cloned().collect();
     group_ids.sort();
@@ -1143,8 +1317,7 @@ fn run_cup_ko_round(
     nonce_salt: u64,
     field: &[TeamId],
 ) -> Result<Vec<TeamId>> {
-    let teams_by_id: HashMap<TeamId, Team> =
-        teams.iter().cloned().map(|t| (t.id, t)).collect();
+    let teams_by_id: HashMap<TeamId, Team> = teams.iter().cloned().map(|t| (t.id, t)).collect();
     let mut winners: Vec<TeamId> = Vec::with_capacity(field.len() / 2);
     let mut nonce = 0u64;
     for pair in field.chunks(2) {
@@ -1205,12 +1378,27 @@ fn run_cup_sf(
     let qf_winners: Vec<TeamId> = rows
         .iter()
         .filter(|r| r.round == "qf")
-        .map(|r| if r.home_score >= r.away_score { r.home_team } else { r.away_team })
+        .map(|r| {
+            if r.home_score >= r.away_score {
+                r.home_team
+            } else {
+                r.away_team
+            }
+        })
         .collect();
     if qf_winners.len() < 4 {
         return Ok(());
     }
-    run_cup_ko_round(app, teams, season, day, rng_seed, "sf", 0xBEEFFACE, &qf_winners)?;
+    run_cup_ko_round(
+        app,
+        teams,
+        season,
+        day,
+        rng_seed,
+        "sf",
+        0xBEEFFACE,
+        &qf_winners,
+    )?;
     Ok(())
 }
 
@@ -1225,7 +1413,13 @@ fn run_cup_final(
     let sf_winners: Vec<TeamId> = rows
         .iter()
         .filter(|r| r.round == "sf")
-        .map(|r| if r.home_score >= r.away_score { r.home_team } else { r.away_team })
+        .map(|r| {
+            if r.home_score >= r.away_score {
+                r.home_team
+            } else {
+                r.away_team
+            }
+        })
         .collect();
     if sf_winners.len() < 2 {
         return Ok(());
@@ -1293,6 +1487,39 @@ pub(crate) fn populate_default_starters(
     Ok(written == 5)
 }
 
+pub(crate) fn assign_initial_roles(store: &nba3k_store::Store, team_id: TeamId) -> Result<u32> {
+    let mut roster = store.roster_for_team(team_id)?;
+    roster.sort_by(|a, b| b.overall.cmp(&a.overall).then_with(|| a.id.0.cmp(&b.id.0)));
+
+    let mut updated = 0_u32;
+    let mut non_star_rank = 0_u32;
+    for player in &mut roster {
+        let mut target = if player.overall >= 88 {
+            PlayerRole::Star
+        } else {
+            non_star_rank += 1;
+            match non_star_rank {
+                1..=5 => PlayerRole::Starter,
+                6..=7 => PlayerRole::SixthMan,
+                8..=12 => PlayerRole::RolePlayer,
+                _ => PlayerRole::BenchWarmer,
+            }
+        };
+
+        if target == PlayerRole::BenchWarmer && player.age <= 21 && player.overall < 75 {
+            target = PlayerRole::Prospect;
+        }
+
+        if player.role != target {
+            player.role = target;
+            store.upsert_player(player)?;
+            updated += 1;
+        }
+    }
+
+    Ok(updated)
+}
+
 fn build_snapshot(app: &mut AppState, team: &Team) -> Result<TeamSnapshot> {
     let roster_index = star_roster_index();
 
@@ -1310,12 +1537,7 @@ fn build_snapshot(app: &mut AppState, team: &Team) -> Result<TeamSnapshot> {
     // and minutes stay auto. Any partial / stale override falls through to
     // the position-aware auto-builder below.
     let user_starters = app.store()?.read_starters(team.id)?;
-    let rotation = user_starters_or_auto(
-        &user_starters,
-        &roster,
-        roster_index,
-        &team.abbrev,
-    );
+    let rotation = user_starters_or_auto(&user_starters, &roster, roster_index, &team.abbrev);
 
     let team_overall = if rotation.is_empty() {
         50
@@ -1696,7 +1918,11 @@ fn cmd_standings(
         .enumerate()
         .map(|(i, r)| {
             let gp = r.wins + r.losses;
-            let pct = if gp == 0 { 0.0 } else { r.wins as f32 / gp as f32 };
+            let pct = if gp == 0 {
+                0.0
+            } else {
+                r.wins as f32 / gp as f32
+            };
             StandingsRow {
                 rank: (i as u32) + 1,
                 team: r.abbrev.clone(),
@@ -1777,12 +2003,25 @@ fn cmd_roster(app: &mut AppState, team: Option<String>, as_json: bool) -> Result
         println!("{} roster ({} players):", abbrev, mapped.len());
         // Pad ID column to fit the widest u32 we'll print, so 8/9/10-digit
         // ids all line up with the NAME column.
-        let id_w = mapped.iter().map(|p| p.id.to_string().len()).max().unwrap_or(5).max(2);
+        let id_w = mapped
+            .iter()
+            .map(|p| p.id.to_string().len())
+            .max()
+            .unwrap_or(5)
+            .max(2);
         // Leading single-char column (`*` for injured) keeps healthy and
         // injured rows the same width.
         println!(
             " {:<id_w$}  {:<26}  {:<3}  {:>3}  {:>3}  {:>3}  {:<6}  {:>5}  {:>3}",
-            "ID", "NAME", "POS", "AGE", "OVR", "POT", "ROLE", "MORAL", "INJ",
+            "ID",
+            "NAME",
+            "POS",
+            "AGE",
+            "OVR",
+            "POT",
+            "ROLE",
+            "MORAL",
+            "INJ",
             id_w = id_w
         );
         for p in mapped {
@@ -1792,7 +2031,16 @@ fn cmd_roster(app: &mut AppState, team: Option<String>, as_json: bool) -> Result
             };
             println!(
                 "{}{:<id_w$}  {:<26}  {:<3}  {:>3}  {:>3}  {:>3}  {:<6}  {:>5.2}  {:>3}",
-                mark, p.id, p.name, p.pos, p.age, p.overall, p.potential, p.role, p.morale, inj_col,
+                mark,
+                p.id,
+                p.name,
+                p.pos,
+                p.age,
+                p.overall,
+                p.potential,
+                p.role,
+                p.morale,
+                inj_col,
                 id_w = id_w
             );
         }
@@ -1846,7 +2094,12 @@ pub fn cmd_player(app: &mut AppState, name: &str, as_json: bool) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
-        println!("{} ({}) — {}", clean_name(&p.name), p.primary_position, team);
+        println!(
+            "{} ({}) — {}",
+            clean_name(&p.name),
+            p.primary_position,
+            team
+        );
         println!(
             "age {} | OVR {} | POT {} | role {} | morale {:.2}",
             p.age, p.overall, p.potential, p.role, p.morale
@@ -1911,8 +2164,7 @@ fn build_league_snapshot(app: &mut AppState) -> Result<OwnedSnapshot> {
     let picks = store.all_picks()?;
     let standing_rows = store.read_standings(state.season)?;
 
-    let players_by_id: HashMap<PlayerId, Player> =
-        players.into_iter().map(|p| (p.id, p)).collect();
+    let players_by_id: HashMap<PlayerId, Player> = players.into_iter().map(|p| (p.id, p)).collect();
     let picks_by_id: HashMap<DraftPickId, DraftPick> =
         picks.into_iter().map(|p| (p.id, p)).collect();
 
@@ -1954,9 +2206,13 @@ fn build_league_snapshot(app: &mut AppState) -> Result<OwnedSnapshot> {
 
 fn cmd_trade(app: &mut AppState, action: TradeAction) -> Result<()> {
     match action {
-        TradeAction::Propose { from, to, send, receive, json } => {
-            cmd_trade_propose(app, &from, &to, &send, &receive, json)
-        }
+        TradeAction::Propose {
+            from,
+            to,
+            send,
+            receive,
+            json,
+        } => cmd_trade_propose(app, &from, &to, &send, &receive, json),
         TradeAction::List(JsonFlag { json }) => cmd_trade_list(app, json),
         TradeAction::Respond { id, action, json } => {
             cmd_trade_respond(app, TradeId(id), &action, json)
@@ -1975,27 +2231,21 @@ fn resolve_team(store: &nba3k_store::Store, abbrev: &str) -> Result<TeamId> {
 /// Resolve player tokens from a team's roster, falling back to fuzzy
 /// `find_player_by_name` if the exact roster scan misses (handles two-way
 /// players or roster moves that haven't synced).
-fn resolve_player(
-    store: &nba3k_store::Store,
-    team: TeamId,
-    token: &str,
-) -> Result<PlayerId> {
+fn resolve_player(store: &nba3k_store::Store, team: TeamId, token: &str) -> Result<PlayerId> {
     let token = token.trim();
     if looks_like_pick_token(token) {
         bail!("pick assets ('{}') not supported until M5", token);
     }
     // Try team roster first.
     let roster = store.roster_for_team(team)?;
-    if let Some(p) = roster
-        .iter()
-        .find(|p| p.name.eq_ignore_ascii_case(token))
-    {
+    if let Some(p) = roster.iter().find(|p| p.name.eq_ignore_ascii_case(token)) {
         return Ok(p.id);
     }
-    if let Some(p) = roster
-        .iter()
-        .find(|p| p.name.to_ascii_lowercase().contains(&token.to_ascii_lowercase()))
-    {
+    if let Some(p) = roster.iter().find(|p| {
+        p.name
+            .to_ascii_lowercase()
+            .contains(&token.to_ascii_lowercase())
+    }) {
         return Ok(p.id);
     }
     // Fall back to global lookup.
@@ -2041,8 +2291,7 @@ fn cmd_trade_propose(
     }
 
     let send_clean: Vec<&String> = send.iter().filter(|s| !s.trim().is_empty()).collect();
-    let receive_clean: Vec<&String> =
-        receive.iter().filter(|s| !s.trim().is_empty()).collect();
+    let receive_clean: Vec<&String> = receive.iter().filter(|s| !s.trim().is_empty()).collect();
     if send_clean.is_empty() {
         bail!("--send requires at least one player");
     }
@@ -2062,11 +2311,19 @@ fn cmd_trade_propose(
     let mut assets_by_team = IndexMap::new();
     assets_by_team.insert(
         from_id,
-        TradeAssets { players_out: send_ids, picks_out: vec![], cash_out: Cents::ZERO },
+        TradeAssets {
+            players_out: send_ids,
+            picks_out: vec![],
+            cash_out: Cents::ZERO,
+        },
     );
     assets_by_team.insert(
         to_id,
-        TradeAssets { players_out: receive_ids, picks_out: vec![], cash_out: Cents::ZERO },
+        TradeAssets {
+            players_out: receive_ids,
+            picks_out: vec![],
+            cash_out: Cents::ZERO,
+        },
     );
 
     let offer = TradeOffer {
@@ -2090,12 +2347,15 @@ fn cmd_trade_propose(
         let mut rng = ChaCha8Rng::seed_from_u64(state.rng_seed.wrapping_add(state.day as u64));
         // Round 1: receiving team evaluates.
         let evaluation = evaluate_mod::evaluate(&offer, to_id, &snapshot, &mut rng);
-        let initial_chain_state = NegotiationState::Open { chain: vec![offer.clone()] };
+        let initial_chain_state = NegotiationState::Open {
+            chain: vec![offer.clone()],
+        };
         match evaluation.verdict {
             Verdict::Accept => NegotiationState::Accepted(offer),
-            Verdict::Reject(reason) => {
-                NegotiationState::Rejected { final_offer: offer, reason }
-            }
+            Verdict::Reject(reason) => NegotiationState::Rejected {
+                final_offer: offer,
+                reason,
+            },
             Verdict::Counter(_) => {
                 // Generate the counter via Worker D.
                 match negotiate_mod::generate_counter(&offer, to_id, &snapshot, &mut rng) {
@@ -2159,17 +2419,18 @@ fn run_ai_trade_volume(
 
     for shopper_id in &teams {
         let shopper = snap.team(*shopper_id);
-        let aggression = shopper
-            .map(|t| t.gm.traits.aggression)
-            .unwrap_or(0.5);
+        let aggression = shopper.map(|t| t.gm.traits.aggression).unwrap_or(0.5);
         // Aggressive GMs (≥0.7) act ~50% of deadlines; conservative (~0.3)
         // act ~10%. Tunable.
         let p_act = (aggression * 0.5).clamp(0.0, 0.6);
         if rng.gen::<f32>() > p_act {
             continue;
         }
-        let candidates: Vec<TeamId> =
-            teams.iter().filter(|t| **t != *shopper_id).copied().collect();
+        let candidates: Vec<TeamId> = teams
+            .iter()
+            .filter(|t| **t != *shopper_id)
+            .copied()
+            .collect();
         let Some(&partner_id) = candidates.choose(&mut rng) else {
             continue;
         };
@@ -2236,8 +2497,7 @@ fn run_ai_trade_volume(
         app.store()?
             .record_news(season, 0, "trade", &headline, None)?;
         let chain = NegotiationState::Accepted(offer.clone());
-        app.store()?
-            .insert_trade_chain(season, 0, &chain)?;
+        app.store()?.insert_trade_chain(season, 0, &chain)?;
     }
     eprintln!("trade deadline: {} AI trade(s) executed", accepted.len());
     Ok(())
@@ -2268,9 +2528,7 @@ fn run_ai_inbox_offers(
             .read_open_chains_targeting(season, user_team)?
             .into_iter()
             .filter_map(|(_, st)| match st {
-                NegotiationState::Open { chain } => {
-                    chain.last().map(|o| o.initiator)
-                }
+                NegotiationState::Open { chain } => chain.last().map(|o| o.initiator),
                 _ => None,
             })
             .collect()
@@ -2302,7 +2560,13 @@ fn run_ai_inbox_offers(
             archetypes.insert(infer_archetype(p));
             *position_counts.entry(p.primary_position).or_insert(0) += 1;
         }
-        fingerprints.insert(t.id, TeamFingerprint { archetypes, position_counts });
+        fingerprints.insert(
+            t.id,
+            TeamFingerprint {
+                archetypes,
+                position_counts,
+            },
+        );
     }
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
@@ -2334,7 +2598,9 @@ fn run_ai_inbox_offers(
             continue;
         }
 
-        let Some(suitor_fp) = fingerprints.get(ai_team) else { continue };
+        let Some(suitor_fp) = fingerprints.get(ai_team) else {
+            continue;
+        };
 
         // Pick the user player who best fills a hole on the suitor.
         let mut targets: Vec<(&Player, f32)> = Vec::new();
@@ -2411,7 +2677,8 @@ fn run_ai_inbox_offers(
         }
 
         let mut local_rng = ChaCha8Rng::seed_from_u64(
-            seed.wrapping_add(ai_team.0 as u64).wrapping_add(target.id.0 as u64),
+            seed.wrapping_add(ai_team.0 as u64)
+                .wrapping_add(target.id.0 as u64),
         );
         let evaluation = evaluate_mod::evaluate(&starter, user_team, &snap, &mut local_rng);
         // Don't queue offers the user is guaranteed to reject (untouchable
@@ -2556,21 +2823,13 @@ fn cmd_trade_list(app: &mut AppState, as_json: bool) -> Result<()> {
             "ID", "STATUS", "ROUND", "TEAMS"
         );
         for r in &rows {
-            println!(
-                "{:>4}  {:<8}  {:>5}  {}",
-                r.id, r.status, r.round, r.teams
-            );
+            println!("{:>4}  {:<8}  {:>5}  {}", r.id, r.status, r.round, r.teams);
         }
     }
     Ok(())
 }
 
-fn cmd_trade_respond(
-    app: &mut AppState,
-    id: TradeId,
-    action: &str,
-    as_json: bool,
-) -> Result<()> {
+fn cmd_trade_respond(app: &mut AppState, id: TradeId, action: &str, as_json: bool) -> Result<()> {
     let snap_owned = build_league_snapshot(app)?;
     let snapshot = snap_owned.view();
     let store = app.store()?;
@@ -2606,7 +2865,10 @@ fn cmd_trade_respond(
             let mut rng = ChaCha8Rng::seed_from_u64(snap_owned.season.0 as u64 ^ id.0);
             negotiate_mod::step(state_chain, &snapshot, &mut rng)
         }
-        other => bail!("unknown respond action '{}': use accept|reject|counter", other),
+        other => bail!(
+            "unknown respond action '{}': use accept|reject|counter",
+            other
+        ),
     };
 
     if let NegotiationState::Accepted(offer) = &new_state {
@@ -2676,7 +2938,9 @@ fn cmd_trade_chain(app: &mut AppState, id: TradeId, as_json: bool) -> Result<()>
         };
         println!(
             "trade #{} ({}) — {} offer(s):",
-            id, status, chain_offers.len()
+            id,
+            status,
+            chain_offers.len()
         );
         for (i, offer) in chain_offers.iter().enumerate() {
             println!("  round {}", i + 1);
@@ -2740,7 +3004,10 @@ fn chain_summary_row(
             Some(o.clone()),
             teams_for(Some(o), store),
         ),
-        NegotiationState::Rejected { final_offer, reason } => (
+        NegotiationState::Rejected {
+            final_offer,
+            reason,
+        } => (
             "rejected".to_string(),
             format!("reject — {}", reject_reason_to_string(reason)),
             Some(final_offer.clone()),
@@ -2780,7 +3047,13 @@ fn teams_for(offer: Option<&TradeOffer>, store: &nba3k_store::Store) -> String {
     let Some(o) = offer else { return String::new() };
     o.assets_by_team
         .keys()
-        .map(|t| store.team_abbrev(*t).ok().flatten().unwrap_or_else(|| format!("{}", t.0)))
+        .map(|t| {
+            store
+                .team_abbrev(*t)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| format!("{}", t.0))
+        })
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -2829,12 +3102,23 @@ fn cmd_dev_team_strength(app: &mut AppState, abbrev: &str) -> Result<()> {
         .find(|t| t.id == team_id)
         .ok_or_else(|| anyhow!("team not in list"))?;
     let snap = build_snapshot(app, &team)?;
-    println!("=== {} rotation ({} slots) ===", team.abbrev, snap.rotation.len());
+    println!(
+        "=== {} rotation ({} slots) ===",
+        team.abbrev,
+        snap.rotation.len()
+    );
     for (i, s) in snap.rotation.iter().enumerate() {
         println!(
             "  [{}] {:<25} {:?} mins={:.2} usg={:.2} OVR={} 3PT={} BH={} PD={}",
-            i, clean_name(&s.name), s.position, s.minutes_share, s.usage,
-            s.overall, s.ratings.three_point, s.ratings.ball_handle, s.ratings.perimeter_defense
+            i,
+            clean_name(&s.name),
+            s.position,
+            s.minutes_share,
+            s.usage,
+            s.overall,
+            s.ratings.three_point,
+            s.ratings.ball_handle,
+            s.ratings.perimeter_defense
         );
     }
     let v = vector_from_rotation(&snap.rotation);
@@ -2888,11 +3172,19 @@ fn cmd_dev_calibrate(app: &mut AppState, runs: u32, as_json: bool) -> Result<()>
         let mut assets = IndexMap::new();
         assets.insert(
             a,
-            TradeAssets { players_out: vec![a_pick], picks_out: vec![], cash_out: Cents::ZERO },
+            TradeAssets {
+                players_out: vec![a_pick],
+                picks_out: vec![],
+                cash_out: Cents::ZERO,
+            },
         );
         assets.insert(
             b,
-            TradeAssets { players_out: vec![b_pick], picks_out: vec![], cash_out: Cents::ZERO },
+            TradeAssets {
+                players_out: vec![b_pick],
+                picks_out: vec![],
+                cash_out: Cents::ZERO,
+            },
         );
         let offer = TradeOffer {
             id: TradeId(0),
@@ -2925,15 +3217,18 @@ fn cmd_dev_calibrate(app: &mut AppState, runs: u32, as_json: bool) -> Result<()>
     }
 
     let total = accept + reject + counter;
-    let pct = |n: u32| if total == 0 { 0.0 } else { (n as f64 / total as f64) * 100.0 };
+    let pct = |n: u32| {
+        if total == 0 {
+            0.0
+        } else {
+            (n as f64 / total as f64) * 100.0
+        }
+    };
 
     if as_json {
         let mut by_arch_json = serde_json::Map::new();
         for (k, (a, r, c)) in &by_archetype {
-            by_arch_json.insert(
-                k.clone(),
-                json!({"accept": a, "reject": r, "counter": c}),
-            );
+            by_arch_json.insert(k.clone(), json!({"accept": a, "reject": r, "counter": c}));
         }
         let v = json!({
             "total": total,
@@ -2945,21 +3240,9 @@ fn cmd_dev_calibrate(app: &mut AppState, runs: u32, as_json: bool) -> Result<()>
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
         println!("calibration ({} runs):", total);
-        println!(
-            "  accept:  {:>4} ({:>5.1}%)",
-            accept,
-            pct(accept)
-        );
-        println!(
-            "  reject:  {:>4} ({:>5.1}%)",
-            reject,
-            pct(reject)
-        );
-        println!(
-            "  counter: {:>4} ({:>5.1}%)",
-            counter,
-            pct(counter)
-        );
+        println!("  accept:  {:>4} ({:>5.1}%)", accept, pct(accept));
+        println!("  reject:  {:>4} ({:>5.1}%)", reject, pct(reject));
+        println!("  counter: {:>4} ({:>5.1}%)", counter, pct(counter));
         println!("by archetype:");
         let mut entries: Vec<_> = by_archetype.iter().collect();
         entries.sort_by_key(|(k, _)| (*k).clone());
@@ -3010,10 +3293,7 @@ fn cmd_roster_set_role(app: &mut AppState, query: &str, role_str: &str) -> Resul
     let new_role = player.role;
     let morale = player.morale;
     app.store()?.upsert_player(&player)?;
-    println!(
-        "{}: role -> {} (morale {:.2})",
-        name, new_role, morale
-    );
+    println!("{}: role -> {} (morale {:.2})", name, new_role, morale);
     Ok(())
 }
 
@@ -3051,9 +3331,11 @@ fn cmd_chemistry(app: &mut AppState, abbrev: &str, as_json: bool) -> Result<()> 
 }
 
 fn cmd_awards(app: &mut AppState, season_arg: Option<u16>, as_json: bool) -> Result<()> {
-    let season = season_arg
-        .map(SeasonId)
-        .unwrap_or_else(|| current_state(app).map(|s| s.season).unwrap_or(SeasonId(2026)));
+    let season = season_arg.map(SeasonId).unwrap_or_else(|| {
+        current_state(app)
+            .map(|s| s.season)
+            .unwrap_or(SeasonId(2026))
+    });
     let store = app.store()?;
     let games = store.read_games(season)?;
     let teams = store.list_teams()?;
@@ -3104,16 +3386,12 @@ fn cmd_awards(app: &mut AppState, season_arg: Option<u16>, as_json: bool) -> Res
     // COY fallback: if no prev-season standings, award to the best regular
     // record. Better than always-null when the user just simmed one season.
     if bundle.coy.winner.is_none() {
-        if let Some(best) = standings
-            .records
-            .values()
-            .max_by(|a, b| {
-                a.win_pct()
-                    .partial_cmp(&b.win_pct())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.point_diff.cmp(&b.point_diff))
-            })
-        {
+        if let Some(best) = standings.records.values().max_by(|a, b| {
+            a.win_pct()
+                .partial_cmp(&b.win_pct())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.point_diff.cmp(&b.point_diff))
+        }) {
             bundle.coy.winner = Some(best.team);
         }
     }
@@ -3385,7 +3663,8 @@ fn cmd_playoffs_sim(app: &mut AppState, as_json: bool) -> Result<()> {
             let home_snap = build_snapshot(app, teams_by_id.get(&series.home).expect("home"))?;
             let away_snap = build_snapshot(app, teams_by_id.get(&series.away).expect("away"))?;
             let mut rng = ChaCha8Rng::seed_from_u64(
-                state.rng_seed
+                state
+                    .rng_seed
                     .wrapping_add(state.season.0 as u64)
                     .wrapping_add(round_idx as u64 * 1000)
                     .wrapping_add(next_game_id),
@@ -3420,8 +3699,16 @@ fn cmd_playoffs_sim(app: &mut AppState, as_json: bool) -> Result<()> {
         let mut winners: Vec<(TeamId, u8)> = round_results
             .iter()
             .map(|r| {
-                let winner = if r.home_wins == 4 { r.series.home } else { r.series.away };
-                let seed = if r.home_wins == 4 { r.series.home_seed } else { r.series.away_seed };
+                let winner = if r.home_wins == 4 {
+                    r.series.home
+                } else {
+                    r.series.away
+                };
+                let seed = if r.home_wins == 4 {
+                    r.series.home_seed
+                } else {
+                    r.series.away_seed
+                };
                 (winner, seed)
             })
             .collect();
@@ -3450,8 +3737,11 @@ fn cmd_playoffs_sim(app: &mut AppState, as_json: bool) -> Result<()> {
                 continue;
             }
             let (a, b) = (pair[0], pair[1]);
-            let (home, away, home_seed, away_seed) =
-                if a.1 <= b.1 { (a.0, b.0, a.1, b.1) } else { (b.0, a.0, b.1, a.1) };
+            let (home, away, home_seed, away_seed) = if a.1 <= b.1 {
+                (a.0, b.0, a.1, b.1)
+            } else {
+                (b.0, a.0, b.1, a.1)
+            };
             let conf = if matches!(next_round_kind, nba3k_season::PlayoffRound::Finals) {
                 None
             } else {
@@ -3558,9 +3848,7 @@ fn cmd_messages(app: &mut AppState, as_json: bool) -> Result<()> {
         }
         // Role mismatch: high-OVR talent slotted into a low role even if
         // morale hasn't fully dropped yet.
-        if p.overall >= 80
-            && matches!(p.role, PlayerRole::BenchWarmer | PlayerRole::SixthMan)
-        {
+        if p.overall >= 80 && matches!(p.role, PlayerRole::BenchWarmer | PlayerRole::SixthMan) {
             alerts.push((
                 "role-mismatch".to_string(),
                 name.clone(),
@@ -3670,9 +3958,7 @@ fn draft_order(app: &mut AppState) -> Result<Vec<TeamId>> {
     // season — that's the one the draft is tied to.
     let mut standings = Standings::new(&teams);
     let mut games = store.read_games(state.season)?;
-    if games.iter().all(|g| g.is_playoffs)
-        || games.is_empty()
-    {
+    if games.iter().all(|g| g.is_playoffs) || games.is_empty() {
         if state.season.0 > 1 {
             games = store.read_games(SeasonId(state.season.0 - 1))?;
         }
@@ -3727,9 +4013,8 @@ fn draft_order(app: &mut AppState) -> Result<Vec<TeamId>> {
         .map(|(i, (id, _, _, _))| (*id, ODDS_BPS.get(i).copied().unwrap_or(0)))
         .collect();
 
-    let mut rng = ChaCha8Rng::seed_from_u64(
-        (state.season.0 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
-    );
+    let mut rng =
+        ChaCha8Rng::seed_from_u64((state.season.0 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
     let mut lottery_order: Vec<TeamId> = Vec::with_capacity(lottery_count);
     // Top 4 picks drawn weighted; rest fall back to reverse-record among
     // the un-drawn teams (NBA-style).
@@ -3811,12 +4096,20 @@ fn cmd_draft_board(app: &mut AppState, as_json: bool) -> Result<()> {
             if *scouted {
                 println!(
                     "  {:>2}. {:<24} {} age={} ovr={} pot={}",
-                    i + 1, p.name, p.primary_position, p.age, p.overall, p.potential
+                    i + 1,
+                    p.name,
+                    p.primary_position,
+                    p.age,
+                    p.overall,
+                    p.potential
                 );
             } else {
                 println!(
                     "  {:>2}. {:<24} {} age={} ovr=??? pot=???",
-                    i + 1, p.name, p.primary_position, p.age
+                    i + 1,
+                    p.name,
+                    p.primary_position,
+                    p.age
                 );
             }
         }
@@ -3827,8 +4120,7 @@ fn cmd_draft_board(app: &mut AppState, as_json: bool) -> Result<()> {
 fn cmd_draft_order(app: &mut AppState, as_json: bool) -> Result<()> {
     let order = draft_order(app)?;
     let teams = app.store()?.list_teams()?;
-    let abbrev: HashMap<TeamId, String> =
-        teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
+    let abbrev: HashMap<TeamId, String> = teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
     if as_json {
         let arr: Vec<_> = order
             .iter()
@@ -3881,8 +4173,7 @@ fn cmd_draft_sim(app: &mut AppState, as_json: bool) -> Result<()> {
         }
         // BPA: best-available is index 0 (Store sort: potential DESC, overall DESC).
         let player = prospects.remove(0);
-        app.store()?
-            .assign_player_to_team(player.id, team_id)?;
+        app.store()?.assign_player_to_team(player.id, team_id)?;
         picks.push((idx + 1, team_id, player));
     }
 
@@ -3974,26 +4265,21 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
     let mut devs: Vec<nba3k_models::progression::PlayerDevelopment> =
         Vec::with_capacity(players.len());
     for p in &players {
-        let dev = app
-            .store()?
-            .read_player_dev(p.id, state.season)?
-            .unwrap_or(nba3k_models::progression::PlayerDevelopment {
+        let dev = app.store()?.read_player_dev(p.id, state.season)?.unwrap_or(
+            nba3k_models::progression::PlayerDevelopment {
                 player_id: p.id,
                 peak_start_age: 25,
                 peak_end_age: 30,
                 dynamic_potential: p.potential,
                 work_ethic: 70,
                 last_progressed_season: state.season,
-            });
+            },
+        );
         devs.push(dev);
     }
     let next_season = SeasonId(state.season.0 + 1);
-    let summary = nba3k_season::run_progression_pass(
-        &mut players,
-        &mut devs,
-        &minutes,
-        next_season,
-    );
+    let summary =
+        nba3k_season::run_progression_pass(&mut players, &mut devs, &minutes, next_season);
     // Persist mutated players + devs.
     for p in &players {
         app.store()?.upsert_player(p)?;
@@ -4021,8 +4307,7 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
             break;
         }
         let player = prospects.remove(0);
-        app.store()?
-            .assign_player_to_team(player.id, team_id)?;
+        app.store()?.assign_player_to_team(player.id, team_id)?;
         draftees += 1;
     }
     if draftees > 0 {
@@ -4081,11 +4366,7 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
 /// User team is skipped — their FA flow stays manual.
 ///
 /// Returns the count of FAs signed.
-fn run_ai_free_agency(
-    app: &mut AppState,
-    season: SeasonId,
-    user_team: TeamId,
-) -> Result<u32> {
+fn run_ai_free_agency(app: &mut AppState, season: SeasonId, user_team: TeamId) -> Result<u32> {
     let league_year = LeagueYear::for_season(season);
     let cap = league_year.map(|ly| ly.cap).unwrap_or(Cents::ZERO);
     // Soft ceiling = cap × 1.30. Saturating math avoids any i64 overflow on
@@ -4116,7 +4397,7 @@ fn run_ai_free_agency(
             break;
         }
         // Sort by cap room desc — most-room teams pick first.
-        team_state.sort_by(|a, b| (cap.0 - b.1.0).cmp(&(cap.0 - a.1.0)));
+        team_state.sort_by(|a, b| (cap.0 - b.1 .0).cmp(&(cap.0 - a.1 .0)));
 
         let mut signed_this_sweep = false;
         for (team_id, team_salary, roster_size) in team_state.iter_mut() {
@@ -4205,7 +4486,13 @@ fn cmd_season_summary(app: &mut AppState, as_json: bool) -> Result<()> {
     let finals = series_rows
         .iter()
         .find(|s| s.round == nba3k_season::PlayoffRound::Finals as u8);
-    let champion = finals.map(|s| if s.home_wins == 4 { s.home_team } else { s.away_team });
+    let champion = finals.map(|s| {
+        if s.home_wins == 4 {
+            s.home_team
+        } else {
+            s.away_team
+        }
+    });
 
     if as_json {
         let award = |key: &str, fallback: Option<PlayerId>| {
@@ -4649,7 +4936,11 @@ fn cmd_trade_propose3(app: &mut AppState, legs: &[String], as_json: bool) -> Res
     for (team_id, players) in &parsed {
         assets_by_team.insert(
             *team_id,
-            TradeAssets { players_out: players.clone(), picks_out: vec![], cash_out: Cents::ZERO },
+            TradeAssets {
+                players_out: players.clone(),
+                picks_out: vec![],
+                cash_out: Cents::ZERO,
+            },
         );
     }
 
@@ -4759,7 +5050,11 @@ fn cmd_cap(app: &mut AppState, team_arg: Option<String>, as_json: bool) -> Resul
 
     println!("{} salary cap ({}):", abbrev, label);
     println!("  payroll:        {}", payroll);
-    println!("  cap:            {}  {}", ly.cap, fmt_delta(payroll, ly.cap));
+    println!(
+        "  cap:            {}  {}",
+        ly.cap,
+        fmt_delta(payroll, ly.cap)
+    );
     println!(
         "  luxury tax:     {}  {}",
         ly.tax,
@@ -4808,10 +5103,7 @@ fn cmd_retire(app: &mut AppState, player: &str) -> Result<()> {
     app.store()?
         .record_news(state.season, state.day, "retire", &headline, None)?;
 
-    println!(
-        "retired {} (age={}, ovr={})",
-        p.name, p.age, p.overall
-    );
+    println!("retired {} (age={}, ovr={})", p.name, p.age, p.overall);
     Ok(())
 }
 
@@ -4832,10 +5124,18 @@ struct HofEntry {
 
 impl HofEntry {
     fn rpg(&self) -> f32 {
-        if self.gp == 0 { 0.0 } else { self.reb as f32 / self.gp as f32 }
+        if self.gp == 0 {
+            0.0
+        } else {
+            self.reb as f32 / self.gp as f32
+        }
     }
     fn apg(&self) -> f32 {
-        if self.gp == 0 { 0.0 } else { self.ast as f32 / self.gp as f32 }
+        if self.gp == 0 {
+            0.0
+        } else {
+            self.ast as f32 / self.gp as f32
+        }
     }
     /// Tiebreak: PTS + 2.5*AST + 1.2*REB — rewards well-rounded careers
     /// when raw scoring totals tie.
@@ -5042,6 +5342,61 @@ mod tests {
     }
 
     #[test]
+    fn assign_initial_roles_uses_ovr_rank_and_prospect_override() {
+        let (_dir, mut app) = ai_fa_test_setup();
+        let user = TeamId(1);
+        let overalls = [90, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78, 77, 76, 74, 73];
+        for (idx, overall) in overalls.into_iter().enumerate() {
+            let mut player = make_test_player(100 + idx as u32, Some(user), overall);
+            if idx == 14 {
+                player.age = 20;
+            }
+            app.store().unwrap().upsert_player(&player).unwrap();
+        }
+
+        let updated = assign_initial_roles(app.store().unwrap(), user).unwrap();
+        assert_eq!(updated, 10);
+        let rerun = assign_initial_roles(app.store().unwrap(), user).unwrap();
+        assert_eq!(rerun, 0, "role assignment should be idempotent");
+
+        let roles: HashMap<PlayerId, PlayerRole> = app
+            .store()
+            .unwrap()
+            .roster_for_team(user)
+            .unwrap()
+            .into_iter()
+            .map(|p| (p.id, p.role))
+            .collect();
+
+        assert_eq!(roles[&PlayerId(100)], PlayerRole::Star);
+        for id in 101..=105 {
+            assert_eq!(roles[&PlayerId(id)], PlayerRole::Starter);
+        }
+        for id in 106..=107 {
+            assert_eq!(roles[&PlayerId(id)], PlayerRole::SixthMan);
+        }
+        for id in 108..=112 {
+            assert_eq!(roles[&PlayerId(id)], PlayerRole::RolePlayer);
+        }
+        assert_eq!(roles[&PlayerId(113)], PlayerRole::BenchWarmer);
+        assert_eq!(roles[&PlayerId(114)], PlayerRole::Prospect);
+    }
+
+    #[test]
+    fn seed_free_agents_inserts_pool_idempotently() {
+        let (_dir, mut app) = ai_fa_test_setup();
+        let store = app.store().unwrap();
+
+        let inserted = seed_free_agents(store).unwrap();
+        assert!(inserted >= 20, "seed should insert a playable FA pool");
+        assert_eq!(store.count_free_agents().unwrap(), inserted);
+
+        let second = seed_free_agents(store).unwrap();
+        assert_eq!(second, 0, "seed must skip exact-name duplicates");
+        assert_eq!(store.count_free_agents().unwrap(), inserted);
+    }
+
+    #[test]
     fn ai_fa_pass_signs_available_free_agent() {
         let (_dir, mut app) = ai_fa_test_setup();
         let user = TeamId(1);
@@ -5154,8 +5509,10 @@ fn cmd_awards_race(app: &mut AppState, as_json: bool) -> Result<()> {
         teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
     let player_name: HashMap<PlayerId, String> =
         players.iter().map(|p| (p.id, p.name.clone())).collect();
-    let player_team: HashMap<PlayerId, TeamId> =
-        players.iter().filter_map(|p| p.team.map(|t| (p.id, t))).collect();
+    let player_team: HashMap<PlayerId, TeamId> = players
+        .iter()
+        .filter_map(|p| p.team.map(|t| (p.id, t)))
+        .collect();
 
     let mut standings = Standings::new(&teams);
     for g in &regular {
@@ -5259,11 +5616,7 @@ fn cmd_awards_race(app: &mut AppState, as_json: bool) -> Result<()> {
                 .get(pid)
                 .map(|t| team_record_str(*t))
                 .unwrap_or_else(|| "—".into());
-            let ppg = aggregate
-                .by_player
-                .get(pid)
-                .map(|p| p.ppg())
-                .unwrap_or(0.0);
+            let ppg = aggregate.by_player.get(pid).map(|p| p.ppg()).unwrap_or(0.0);
             let detail = format!("{} ({}, {:.1} PPG, {})", name, team_str, ppg, record);
             let prefix = if i == 0 {
                 format!("  {:<12}", label)
@@ -5421,7 +5774,10 @@ fn cmd_coach_fire(app: &mut AppState, team: Option<String>) -> Result<()> {
     );
     store.record_news(season, day, "coach", &headline, None)?;
 
-    println!("fired {}; hired {} (overall {})", fired_name, hired_name, hired_overall);
+    println!(
+        "fired {}; hired {} (overall {})",
+        fired_name, hired_name, hired_overall
+    );
     Ok(())
 }
 
@@ -5457,7 +5813,10 @@ fn cmd_coach_pool(app: &mut AppState, limit: u32, as_json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&arr)?);
     } else {
         println!("Coach pool ({} candidates):", pool.len());
-        println!("  {:<3}  {:<24}  {:>3}  {:<18}  {:<18}", "#", "NAME", "OVR", "OFFENSE", "DEFENSE");
+        println!(
+            "  {:<3}  {:<24}  {:>3}  {:<18}  {:<18}",
+            "#", "NAME", "OVR", "OFFENSE", "DEFENSE"
+        );
         for (i, c) in pool.iter().enumerate() {
             println!(
                 "  {:<3}  {:<24}  {:>3}  {:<18}  {:<18}",
@@ -5676,7 +6035,9 @@ fn cmd_records(
     if as_json {
         let mut rows = Vec::with_capacity(scored.len());
         for (rank, (pid, ps, val)) in scored.iter().enumerate() {
-            let name = store.player_name(*pid)?.unwrap_or_else(|| format!("#{}", pid.0));
+            let name = store
+                .player_name(*pid)?
+                .unwrap_or_else(|| format!("#{}", pid.0));
             let abbrev = match ps.team {
                 Some(t) => {
                     if let Some(s) = team_abbrev_cache.get(&t) {
@@ -5699,17 +6060,20 @@ fn cmd_records(
                 "value": format_records_value(stat_kind, *val),
             }));
         }
-        println!("{}", serde_json::to_string_pretty(&json!({
-            "scope": match scope_kind {
-                RecordScope::Season => "season",
-                RecordScope::Career => "career",
-            },
-            "season": state.season.0,
-            "stat": stat_kind.json_key(),
-            "min_gp": min_gp,
-            "limit": limit,
-            "rows": rows,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "scope": match scope_kind {
+                    RecordScope::Season => "season",
+                    RecordScope::Career => "career",
+                },
+                "season": state.season.0,
+                "stat": stat_kind.json_key(),
+                "min_gp": min_gp,
+                "limit": limit,
+                "rows": rows,
+            }))?
+        );
         return Ok(());
     }
 
@@ -5736,7 +6100,9 @@ fn cmd_records(
     );
     println!("RANK  NAME                  TM    GP  {}", stat_label);
     for (rank, (pid, ps, val)) in scored.iter().enumerate() {
-        let name = store.player_name(*pid)?.unwrap_or_else(|| format!("#{}", pid.0));
+        let name = store
+            .player_name(*pid)?
+            .unwrap_or_else(|| format!("#{}", pid.0));
         let abbrev = match ps.team {
             Some(t) => {
                 if let Some(s) = team_abbrev_cache.get(&t) {
@@ -5827,10 +6193,7 @@ fn parse_records_scope(s: &str) -> Result<RecordScope> {
     match s {
         "season" => Ok(RecordScope::Season),
         "career" => Ok(RecordScope::Career),
-        other => bail!(
-            "unknown scope `{}` — supported: season, career",
-            other
-        ),
+        other => bail!("unknown scope `{}` — supported: season, career", other),
     }
 }
 
@@ -5970,13 +6333,21 @@ fn cmd_all_star(app: &mut AppState, season_arg: Option<u16>, as_json: bool) -> R
             season.0.saturating_sub(1),
             yy_end
         );
-        for pid in &east_starters { print_row(*pid); }
+        for pid in &east_starters {
+            print_row(*pid);
+        }
         println!("East reserves");
-        for pid in &east_reserves { print_row(*pid); }
+        for pid in &east_reserves {
+            print_row(*pid);
+        }
         println!("West starters");
-        for pid in &west_starters { print_row(*pid); }
+        for pid in &west_starters {
+            print_row(*pid);
+        }
         println!("West reserves");
-        for pid in &west_reserves { print_row(*pid); }
+        for pid in &west_reserves {
+            print_row(*pid);
+        }
     }
     Ok(())
 }
@@ -5992,7 +6363,9 @@ struct SaveListRow {
 }
 
 fn scan_db_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in rd.flatten() {
         let p = entry.path();
         if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("db") {
@@ -6078,7 +6451,10 @@ fn cmd_saves_list(_app: &mut AppState, dir: Option<PathBuf>, as_json: bool) -> R
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "???".into());
             let created = r.created.as_deref().unwrap_or("???");
-            println!("  {}    team={} season={} created={}", r.path, team, season, created);
+            println!(
+                "  {}    team={} season={} created={}",
+                r.path, team, season, created
+            );
         }
     }
     Ok(())
@@ -6155,7 +6531,10 @@ fn cmd_saves_show(_app: &mut AppState, path: PathBuf, as_json: bool) -> Result<(
     );
     println!(
         "day:      {}",
-        report.day.map(|d| d.to_string()).unwrap_or_else(|| "???".into())
+        report
+            .day
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "???".into())
     );
     println!("team:     {}", report.team.as_deref().unwrap_or("???"));
     println!(
@@ -6188,14 +6567,10 @@ fn cmd_saves_delete(app: &mut AppState, path: PathBuf, yes: bool) -> Result<()> 
             _ => open == &path,
         };
         if same {
-            bail!(
-                "refusing to delete currently-open save {}",
-                path.display()
-            );
+            bail!("refusing to delete currently-open save {}", path.display());
         }
     }
-    std::fs::remove_file(&path)
-        .with_context(|| format!("deleting {}", path.display()))?;
+    std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
     println!("deleted {}", path.display());
     Ok(())
 }
@@ -6247,7 +6622,10 @@ fn cmd_cup(app: &mut AppState, season_arg: Option<u16>, as_json: bool) -> Result
     let standings = cup_group_standings(&rows);
     let mut by_group: HashMap<String, Vec<CupGroupStanding>> = HashMap::new();
     for s in &standings {
-        by_group.entry(s.group_id.clone()).or_default().push(s.clone());
+        by_group
+            .entry(s.group_id.clone())
+            .or_default()
+            .push(s.clone());
     }
     let mut group_ids: Vec<String> = by_group.keys().cloned().collect();
     group_ids.sort();
@@ -6696,10 +7074,7 @@ fn cmd_compare(app: &mut AppState, a: &str, b: &str, as_json: bool) -> Result<()
     let n = breakdown_a.top8.len().max(breakdown_b.top8.len());
     for i in 0..n {
         let (label_a, cell_a) = match breakdown_a.top8.get(i) {
-            Some((pos, _, name, ovr)) => (
-                pos.to_string(),
-                format!("{} {}", clean_name(name), ovr),
-            ),
+            Some((pos, _, name, ovr)) => (pos.to_string(), format!("{} {}", clean_name(name), ovr)),
             None => (String::new(), String::from("-")),
         };
         let cell_b = match breakdown_b.top8.get(i) {
@@ -6793,7 +7168,9 @@ fn cmd_offers(app: &mut AppState, limit: u32, as_json: bool) -> Result<()> {
     let mut rows: Vec<OfferRow> = Vec::with_capacity(chains.len());
     let mut rng = ChaCha8Rng::seed_from_u64(state.rng_seed ^ 0xC0FFEE);
     for (id, st) in chains {
-        let NegotiationState::Open { chain } = st else { continue };
+        let NegotiationState::Open { chain } = st else {
+            continue;
+        };
         let Some(latest) = chain.last() else { continue };
 
         let from = latest.initiator;
@@ -6980,12 +7357,12 @@ fn cmd_extend(app: &mut AppState, player: &str, salary_m: f64, years: u8) -> Res
             );
             store.record_news(season, state.day, "extension", &headline, None)?;
 
-            println!(
-                "extended {} {}yr/${:.0}M.",
-                display_name, years, total_m
-            );
+            println!("extended {} {}yr/${:.0}M.", display_name, years, total_m);
         }
-        ExtensionDecision::Counter { request_salary_cents, request_years } => {
+        ExtensionDecision::Counter {
+            request_salary_cents,
+            request_years,
+        } => {
             let request_m = request_salary_cents as f64 / 100.0 / 1_000_000.0;
             println!(
                 "counter — {} wants ${:.0}M/{}yr.",
@@ -7093,7 +7470,11 @@ fn cmd_notes_list(app: &mut AppState, as_json: bool) -> Result<()> {
     );
     println!("  {:<22} {:<4} {:>3}  {}", "PLAYER", "TEAM", "OVR", "NOTE");
     for n in &out {
-        let text = if n.text.is_empty() { "—" } else { n.text.as_str() };
+        let text = if n.text.is_empty() {
+            "—"
+        } else {
+            n.text.as_str()
+        };
         println!(
             "  {:<22} {:<4} {:>3}  {}",
             truncate_name(&n.name, 22),
@@ -7247,8 +7628,7 @@ fn cmd_saves_export(_app: &mut AppState, path: PathBuf, to: PathBuf) -> Result<(
     };
 
     let pretty = serde_json::to_string_pretty(&dump)?;
-    std::fs::write(&to, pretty)
-        .with_context(|| format!("writing dump to {}", to.display()))?;
+    std::fs::write(&to, pretty).with_context(|| format!("writing dump to {}", to.display()))?;
 
     println!(
         "exported {} → {} ({} tables, {} rows total)",

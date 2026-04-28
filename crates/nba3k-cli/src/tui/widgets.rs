@@ -79,7 +79,9 @@ impl Theme {
 
     /// Accent style for headers / labels.
     pub fn accent_style(&self) -> Style {
-        Style::default().fg(self.accent).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(self.accent)
+            .add_modifier(Modifier::BOLD)
     }
 
     /// Muted style for de-emphasized text.
@@ -218,10 +220,14 @@ impl TextInput {
 
 impl FormWidget for TextInput {
     fn render(&self, f: &mut Frame, area: Rect, theme: &Theme) {
+        let chars: Vec<char> = self.value.chars().collect();
+        let cursor = self.cursor.min(chars.len());
+        let (left, right) = chars.split_at(cursor);
         let line = Line::from(vec![
             Span::styled(format!(" {} ", self.label), theme.accent_style()),
-            Span::styled(self.value.clone(), theme.text()),
+            Span::styled(left.iter().collect::<String>(), theme.text()),
             Span::styled("█", theme.text()),
+            Span::styled(right.iter().collect::<String>(), theme.text()),
         ]);
         let p = Paragraph::new(line).block(theme.block(""));
         f.render_widget(p, area);
@@ -238,6 +244,34 @@ impl FormWidget for TextInput {
                     self.value = chars.into_iter().collect();
                     self.cursor -= 1;
                 }
+                WidgetEvent::None
+            }
+            KeyCode::Delete => {
+                let mut chars: Vec<char> = self.value.chars().collect();
+                if self.cursor < chars.len() {
+                    chars.remove(self.cursor);
+                    self.value = chars.into_iter().collect();
+                }
+                WidgetEvent::None
+            }
+            KeyCode::Left => {
+                if self.cursor > 0 {
+                    self.cursor -= 1;
+                }
+                WidgetEvent::None
+            }
+            KeyCode::Right => {
+                if self.cursor < self.value.chars().count() {
+                    self.cursor += 1;
+                }
+                WidgetEvent::None
+            }
+            KeyCode::Home => {
+                self.cursor = 0;
+                WidgetEvent::None
+            }
+            KeyCode::End => {
+                self.cursor = self.value.chars().count();
                 WidgetEvent::None
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -333,9 +367,7 @@ impl FormWidget for NumberInput {
                 self.buf.pop();
                 WidgetEvent::None
             }
-            KeyCode::Char(c)
-                if c.is_ascii_digit() || (c == '-' && self.buf.is_empty()) =>
-            {
+            KeyCode::Char(c) if c.is_ascii_digit() || (c == '-' && self.buf.is_empty()) => {
                 self.buf.push(c);
                 WidgetEvent::None
             }
@@ -591,7 +623,7 @@ impl<T: Clone> FormWidget for MultiSelect<T> {
 // Confirm
 // ---------------------------------------------------------------------------
 
-/// Yes/no modal. `Y`/`Enter` → Submitted; `N`/`Esc` → Cancelled.
+/// Confirmation modal. `Enter` → Submitted; `Esc` → Cancelled.
 #[derive(Clone, Debug)]
 pub struct Confirm {
     prompt: String,
@@ -615,14 +647,12 @@ impl Confirm {
 
 impl FormWidget for Confirm {
     fn render(&self, f: &mut Frame, area: Rect, theme: &Theme) {
-        let yes = if self.default_yes { "[Y]es" } else { " Yes " };
-        let no = if self.default_yes { " No  " } else { "[N]o " };
         let lines = vec![
             Line::from(""),
             Line::from(Span::styled(self.prompt.clone(), theme.accent_style()))
                 .alignment(Alignment::Center),
             Line::from(""),
-            Line::from(format!("    {}    {}    ", yes, no)).alignment(Alignment::Center),
+            Line::from("    Enter Confirm    Esc Cancel    ").alignment(Alignment::Center),
         ];
         let p = Paragraph::new(lines).block(theme.block(" Confirm "));
         f.render_widget(p, area);
@@ -630,17 +660,66 @@ impl FormWidget for Confirm {
 
     fn handle_key(&mut self, key: KeyEvent) -> WidgetEvent {
         match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => WidgetEvent::Submitted,
-            KeyCode::Enter => {
-                if self.default_yes {
-                    WidgetEvent::Submitted
-                } else {
-                    WidgetEvent::Cancelled
-                }
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => WidgetEvent::Cancelled,
+            KeyCode::Enter => WidgetEvent::Submitted,
+            KeyCode::Esc => WidgetEvent::Cancelled,
             _ => WidgetEvent::None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn text_input_cursor_navigation_inserts_and_deletes_at_cursor() {
+        let mut input = TextInput::new("Save").with_initial("abcd");
+
+        input.handle_key(key(KeyCode::Left));
+        input.handle_key(key(KeyCode::Left));
+        input.handle_key(key(KeyCode::Char('X')));
+        assert_eq!(input.value(), "abXcd");
+        assert_eq!(input.cursor, 3);
+
+        input.handle_key(key(KeyCode::Delete));
+        assert_eq!(input.value(), "abXd");
+        assert_eq!(input.cursor, 3);
+
+        input.handle_key(key(KeyCode::Home));
+        input.handle_key(key(KeyCode::Char('>')));
+        assert_eq!(input.value(), ">abXd");
+        assert_eq!(input.cursor, 1);
+
+        input.handle_key(key(KeyCode::End));
+        input.handle_key(key(KeyCode::Backspace));
+        assert_eq!(input.value(), ">abX");
+        assert_eq!(input.cursor, 4);
+    }
+
+    #[test]
+    fn confirm_accepts_only_enter_and_esc() {
+        let mut confirm = Confirm::new("Quit?");
+
+        assert_eq!(
+            confirm.handle_key(key(KeyCode::Char('y'))),
+            WidgetEvent::None
+        );
+        assert_eq!(
+            confirm.handle_key(key(KeyCode::Char('n'))),
+            WidgetEvent::None
+        );
+        assert_eq!(
+            confirm.handle_key(key(KeyCode::Enter)),
+            WidgetEvent::Submitted
+        );
+        assert_eq!(
+            confirm.handle_key(key(KeyCode::Esc)),
+            WidgetEvent::Cancelled
+        );
     }
 }
 
@@ -678,7 +757,10 @@ impl<'a> ActionBar<'a> {
         // Render as a 2-cell layout: status (flex) | hints (right-aligned).
         let layout = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(self.hints_len() as u16)])
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(self.hints_len() as u16),
+            ])
             .split(area);
 
         // Outer block (drawn under both halves).
@@ -734,13 +816,7 @@ fn inset(r: Rect) -> Rect {
 // ---------------------------------------------------------------------------
 
 /// Helper to centered-render a short message inside a bordered block.
-pub fn centered_block(
-    f: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    title: &str,
-    lines: &[&str],
-) {
+pub fn centered_block(f: &mut Frame, area: Rect, theme: &Theme, title: &str, lines: &[&str]) {
     let block = theme.block(title);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -774,6 +850,5 @@ pub fn kv_table<'a>(rows: &'a [(&'a str, String)], theme: &Theme, title: &'a str
             ])
         })
         .collect();
-    Table::new(body, [Constraint::Length(14), Constraint::Min(0)])
-        .block(theme.block(title))
+    Table::new(body, [Constraint::Length(14), Constraint::Min(0)]).block(theme.block(title))
 }

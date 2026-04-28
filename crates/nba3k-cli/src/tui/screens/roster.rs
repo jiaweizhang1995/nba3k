@@ -1,4 +1,4 @@
-//! Roster screen (M21): sortable player table (OVR/Pos/Age), per-row
+//! Roster screen (M21): sortable player table (OVR/PTS/Pos), per-row
 //! actions for Train / Extend / Cut / Role, and a Player Detail modal
 //! (Stats / Career / Contract / Chemistry).
 //!
@@ -47,8 +47,8 @@ use nba3k_season::career::{career_totals, SeasonAvgRow};
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum SortKey {
     Ovr,
+    Pts,
     Position,
-    Age,
 }
 
 #[derive(Clone, Debug)]
@@ -107,7 +107,9 @@ struct RosterCache {
 }
 
 impl Default for SortKey {
-    fn default() -> Self { SortKey::Ovr }
+    fn default() -> Self {
+        SortKey::Ovr
+    }
 }
 
 #[derive(Default)]
@@ -115,16 +117,37 @@ enum Modal {
     #[default]
     None,
     /// Train: pick focus from `["shoot","inside","def","reb","ath","handle"]`.
-    Train { picker: Picker<&'static str>, target_id: PlayerId, target_name: String },
+    Train {
+        picker: Picker<&'static str>,
+        target_id: PlayerId,
+        target_name: String,
+    },
     /// Extend step 1: salary in $M (NumberInput holds whole millions; we
     /// convert + bound when the user submits).
-    ExtendSalary { input: NumberInput, target_id: PlayerId, target_name: String },
+    ExtendSalary {
+        input: NumberInput,
+        target_id: PlayerId,
+        target_name: String,
+    },
     /// Extend step 2: years.
-    ExtendYears { input: NumberInput, target_id: PlayerId, target_name: String, salary_m: i64 },
+    ExtendYears {
+        input: NumberInput,
+        target_id: PlayerId,
+        target_name: String,
+        salary_m: i64,
+    },
     /// Cut confirm.
-    Cut { confirm: Confirm, target_id: PlayerId, target_name: String },
+    Cut {
+        confirm: Confirm,
+        target_id: PlayerId,
+        target_name: String,
+    },
     /// Role assign.
-    Role { picker: Picker<&'static str>, target_id: PlayerId, target_name: String },
+    Role {
+        picker: Picker<&'static str>,
+        target_id: PlayerId,
+        target_name: String,
+    },
     /// Player Detail overlay.
     Detail { player_id: PlayerId },
 }
@@ -190,9 +213,15 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         let header = Row::new(vec![
             Cell::from(Span::styled("#", theme.accent_style())),
             Cell::from(Span::styled(t(lang, T::RosterPlayer), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterPosition), theme.accent_style())),
+            Cell::from(Span::styled(
+                t(lang, T::RosterPosition),
+                theme.accent_style(),
+            )),
             Cell::from(Span::styled(t(lang, T::RosterAge), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterOverall), theme.accent_style())),
+            Cell::from(Span::styled(
+                t(lang, T::RosterOverall),
+                theme.accent_style(),
+            )),
             Cell::from(Span::styled("PPG", theme.accent_style())),
             Cell::from(Span::styled("RPG", theme.accent_style())),
             Cell::from(Span::styled("APG", theme.accent_style())),
@@ -234,16 +263,16 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         let table = Table::new(
             body,
             [
-                Constraint::Length(3),  // #
-                Constraint::Min(20),    // name
-                Constraint::Length(4),  // pos
-                Constraint::Length(4),  // age
-                Constraint::Length(4),  // ovr
-                Constraint::Length(5),  // ppg
-                Constraint::Length(5),  // rpg
-                Constraint::Length(5),  // apg
-                Constraint::Length(7),  // role
-                Constraint::Length(7),  // cap%
+                Constraint::Length(3), // #
+                Constraint::Min(20),   // name
+                Constraint::Length(4), // pos
+                Constraint::Length(4), // age
+                Constraint::Length(4), // ovr
+                Constraint::Length(5), // ppg
+                Constraint::Length(5), // rpg
+                Constraint::Length(5), // apg
+                Constraint::Length(7), // role
+                Constraint::Length(7), // cap%
             ],
         )
         .header(header)
@@ -270,7 +299,12 @@ fn modal_rect(area: Rect) -> Rect {
     let h = area.height.saturating_sub(4).min(28).max(8);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState, lang: Lang) {
@@ -279,32 +313,60 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState, lang
     // touch app today but keeps the signature uniform for future panels.
     enum DrawSpec {
         None,
-        TrainOrRolePicker { title: String, picker: Picker<&'static str> },
-        ExtendSalary { input: NumberInput, target_name: String },
-        ExtendYears { input: NumberInput, target_name: String, salary_m: i64 },
+        TrainOrRolePicker {
+            title: String,
+            picker: Picker<&'static str>,
+        },
+        ExtendSalary {
+            input: NumberInput,
+            target_name: String,
+        },
+        ExtendYears {
+            input: NumberInput,
+            target_name: String,
+            salary_m: i64,
+        },
         Confirm(Confirm),
-        Detail { player_id: PlayerId, detail: DetailData },
+        Detail {
+            player_id: PlayerId,
+            detail: DetailData,
+        },
     }
 
     let spec = CACHE.with(|c| {
         let cache = c.borrow();
         match &cache.modal {
             Modal::None => DrawSpec::None,
-            Modal::Train { picker, target_name, .. } => DrawSpec::TrainOrRolePicker {
+            Modal::Train {
+                picker,
+                target_name,
+                ..
+            } => DrawSpec::TrainOrRolePicker {
                 title: format!(" {}: {}", t(lang, T::RosterTrain), target_name),
                 picker: picker.clone(),
             },
-            Modal::ExtendSalary { input, target_name, .. } => DrawSpec::ExtendSalary {
+            Modal::ExtendSalary {
+                input, target_name, ..
+            } => DrawSpec::ExtendSalary {
                 input: input.clone(),
                 target_name: target_name.clone(),
             },
-            Modal::ExtendYears { input, target_name, salary_m, .. } => DrawSpec::ExtendYears {
+            Modal::ExtendYears {
+                input,
+                target_name,
+                salary_m,
+                ..
+            } => DrawSpec::ExtendYears {
                 input: input.clone(),
                 target_name: target_name.clone(),
                 salary_m: *salary_m,
             },
             Modal::Cut { confirm, .. } => DrawSpec::Confirm(confirm.clone()),
-            Modal::Role { picker, target_name, .. } => DrawSpec::TrainOrRolePicker {
+            Modal::Role {
+                picker,
+                target_name,
+                ..
+            } => DrawSpec::TrainOrRolePicker {
                 title: format!(" {}: {}", t(lang, T::RosterSetRole), target_name),
                 picker: picker.clone(),
             },
@@ -330,10 +392,18 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState, lang
         DrawSpec::ExtendSalary { input, target_name } => {
             let parts = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                ])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" {}: {} (1/2)", t(lang, T::ModalExtendContractTitle), target_name),
+                format!(
+                    " {}: {} (1/2)",
+                    t(lang, T::ModalExtendContractTitle),
+                    target_name
+                ),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
@@ -351,13 +421,26 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState, lang
             .block(theme.block(""));
             f.render_widget(hint, parts[2]);
         }
-        DrawSpec::ExtendYears { input, target_name, salary_m } => {
+        DrawSpec::ExtendYears {
+            input,
+            target_name,
+            salary_m,
+        } => {
             let parts = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                ])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" {}: {} (2/2) - ${} M/yr", t(lang, T::ModalExtendContractTitle), target_name, salary_m),
+                format!(
+                    " {}: {} (2/2) - ${} M/yr",
+                    t(lang, T::ModalExtendContractTitle),
+                    target_name,
+                    salary_m
+                ),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
@@ -403,8 +486,11 @@ fn draw_detail_modal(
         ])
         .split(rect);
 
-    let head = Paragraph::new(Line::from(Span::styled(d.title.clone(), theme.accent_style())))
-        .block(theme.block(""));
+    let head = Paragraph::new(Line::from(Span::styled(
+        d.title.clone(),
+        theme.accent_style(),
+    )))
+    .block(theme.block(""));
     f.render_widget(head, parts[0]);
 
     // 2x2 grid.
@@ -615,23 +701,29 @@ fn build_roster_rows(app: &mut AppState, tui: &TuiApp) -> Result<Vec<RosterRow>>
 }
 
 fn apply_sort(cache: &mut RosterCache) {
-    let Some(rows) = cache.rows.as_mut() else { return };
+    let Some(rows) = cache.rows.as_mut() else {
+        return;
+    };
     match cache.sort {
         SortKey::Ovr => rows.sort_by(|a, b| {
-            b.overall.cmp(&a.overall).then_with(|| a.name.cmp(&b.name))
+            b.overall
+                .cmp(&a.overall)
+                .then_with(|| a.player_id.0.cmp(&b.player_id.0))
+        }),
+        SortKey::Pts => rows.sort_by(|a, b| {
+            b.ppg
+                .partial_cmp(&a.ppg)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.player_id.0.cmp(&b.player_id.0))
         }),
         SortKey::Position => rows.sort_by(|a, b| {
             position_order(a.position)
                 .cmp(&position_order(b.position))
                 .then_with(|| b.overall.cmp(&a.overall))
-        }),
-        SortKey::Age => rows.sort_by(|a, b| {
-            a.age.cmp(&b.age).then_with(|| b.overall.cmp(&a.overall))
+                .then_with(|| a.player_id.0.cmp(&b.player_id.0))
         }),
     }
-    cache.roster_cursor = cache
-        .roster_cursor
-        .min(rows.len().saturating_sub(1));
+    cache.roster_cursor = cache.roster_cursor.min(rows.len().saturating_sub(1));
 }
 
 fn position_order(p: Position) -> u8 {
@@ -671,27 +763,27 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
             });
         }
     };
-    let player = store
-        .find_player_by_name(&name)?
-        .unwrap_or_else(|| Player {
-            id: player_id,
-            name: name.clone(),
-            primary_position: Position::SF,
-            secondary_position: None,
-            age: 0,
-            overall: 0,
-            potential: 0,
-            ratings: Default::default(),
-            contract: None,
-            team: None,
-            injury: None,
-            no_trade_clause: false,
-            trade_kicker_pct: None,
-            role: PlayerRole::RolePlayer,
-            morale: 0.5,
-        });
+    let player = store.find_player_by_name(&name)?.unwrap_or_else(|| Player {
+        id: player_id,
+        name: name.clone(),
+        primary_position: Position::SF,
+        secondary_position: None,
+        age: 0,
+        overall: 0,
+        potential: 0,
+        ratings: Default::default(),
+        contract: None,
+        team: None,
+        injury: None,
+        no_trade_clause: false,
+        trade_kicker_pct: None,
+        role: PlayerRole::RolePlayer,
+        morale: 0.5,
+    });
     let team_label = match player.team {
-        Some(id) => store.team_abbrev(id)?.unwrap_or_else(|| format!("T{}", id.0)),
+        Some(id) => store
+            .team_abbrev(id)?
+            .unwrap_or_else(|| format!("T{}", id.0)),
         None => "FA".into(),
     };
     let title = format!(
@@ -730,7 +822,11 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
             Some(id) => team_abbrev_cache
                 .entry(id)
                 .or_insert_with(|| {
-                    store.team_abbrev(id).ok().flatten().unwrap_or_else(|| format!("T{}", id.0))
+                    store
+                        .team_abbrev(id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| format!("T{}", id.0))
                 })
                 .clone(),
             None => "—".into(),
@@ -789,10 +885,7 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
     }
     if let Some(i) = player.injury.as_ref() {
         if i.games_remaining > 0 {
-            flags.push(format!(
-                "INJ: {} ({}g)",
-                i.description, i.games_remaining
-            ));
+            flags.push(format!("INJ: {} ({}g)", i.description, i.games_remaining));
         }
     }
 
@@ -803,17 +896,35 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
         Some(team_id) => match team_chemistry_value(app, team_id) {
             Some(v) => vec![
                 ("team chem", format!("{:.2}", v)),
-                (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
-                (t(tui.lang, T::RosterRole), short_role(tui.lang, player.role).to_string()),
+                (
+                    t(tui.lang, T::RosterMorale),
+                    format!("{:.2}", player.morale),
+                ),
+                (
+                    t(tui.lang, T::RosterRole),
+                    short_role(tui.lang, player.role).to_string(),
+                ),
             ],
             None => vec![
-                (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
-                (t(tui.lang, T::RosterRole), short_role(tui.lang, player.role).to_string()),
+                (
+                    t(tui.lang, T::RosterMorale),
+                    format!("{:.2}", player.morale),
+                ),
+                (
+                    t(tui.lang, T::RosterRole),
+                    short_role(tui.lang, player.role).to_string(),
+                ),
             ],
         },
         None => vec![
-            (t(tui.lang, T::RosterMorale), format!("{:.2}", player.morale)),
-            (t(tui.lang, T::RosterRole), short_role(tui.lang, player.role).to_string()),
+            (
+                t(tui.lang, T::RosterMorale),
+                format!("{:.2}", player.morale),
+            ),
+            (
+                t(tui.lang, T::RosterRole),
+                short_role(tui.lang, player.role).to_string(),
+            ),
         ],
     };
 
@@ -828,9 +939,9 @@ fn build_detail(app: &mut AppState, tui: &TuiApp, player_id: PlayerId) -> Result
 }
 
 fn team_chemistry_value(app: &mut AppState, team_id: TeamId) -> Option<f32> {
+    use nba3k_core::{LeagueYear, SeasonPhase};
     use nba3k_models::team_chemistry::team_chemistry;
     use nba3k_trade::snapshot::{LeagueSnapshot, TeamRecordSummary};
-    use nba3k_core::{LeagueYear, SeasonPhase};
 
     let store = app.store().ok()?;
     let state = store.load_season_state().ok()??;
@@ -883,7 +994,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         let mut c = c.borrow_mut();
         match &mut c.modal {
             Modal::None => ModalAction::None,
-            Modal::Train { picker, target_id, target_name } => match picker.handle_key(key) {
+            Modal::Train {
+                picker,
+                target_id,
+                target_name,
+            } => match picker.handle_key(key) {
                 WidgetEvent::Submitted => match picker.selected().copied() {
                     Some(focus) => ModalAction::TrainSubmit {
                         target_id: *target_id,
@@ -895,7 +1010,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 WidgetEvent::Cancelled => ModalAction::CloseModal,
                 _ => ModalAction::Pending,
             },
-            Modal::ExtendSalary { input, target_id, target_name } => match input.handle_key(key) {
+            Modal::ExtendSalary {
+                input,
+                target_id,
+                target_name,
+            } => match input.handle_key(key) {
                 WidgetEvent::Submitted => match input.value() {
                     Some(salary_m) => ModalAction::ExtendSalaryNext {
                         target_id: *target_id,
@@ -907,22 +1026,29 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 WidgetEvent::Cancelled => ModalAction::CloseModal,
                 _ => ModalAction::Pending,
             },
-            Modal::ExtendYears { input, target_id, target_name, salary_m } => {
-                match input.handle_key(key) {
-                    WidgetEvent::Submitted => match input.value() {
-                        Some(years) => ModalAction::ExtendSubmit {
-                            target_id: *target_id,
-                            target_name: target_name.clone(),
-                            salary_m: *salary_m,
-                            years,
-                        },
-                        None => ModalAction::Pending,
+            Modal::ExtendYears {
+                input,
+                target_id,
+                target_name,
+                salary_m,
+            } => match input.handle_key(key) {
+                WidgetEvent::Submitted => match input.value() {
+                    Some(years) => ModalAction::ExtendSubmit {
+                        target_id: *target_id,
+                        target_name: target_name.clone(),
+                        salary_m: *salary_m,
+                        years,
                     },
-                    WidgetEvent::Cancelled => ModalAction::CloseModal,
-                    _ => ModalAction::Pending,
-                }
-            }
-            Modal::Cut { confirm, target_id, target_name } => match confirm.handle_key(key) {
+                    None => ModalAction::Pending,
+                },
+                WidgetEvent::Cancelled => ModalAction::CloseModal,
+                _ => ModalAction::Pending,
+            },
+            Modal::Cut {
+                confirm,
+                target_id,
+                target_name,
+            } => match confirm.handle_key(key) {
                 WidgetEvent::Submitted => ModalAction::CutSubmit {
                     target_id: *target_id,
                     target_name: target_name.clone(),
@@ -930,7 +1056,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 WidgetEvent::Cancelled => ModalAction::CloseModal,
                 _ => ModalAction::Pending,
             },
-            Modal::Role { picker, target_id, target_name } => match picker.handle_key(key) {
+            Modal::Role {
+                picker,
+                target_id,
+                target_name,
+            } => match picker.handle_key(key) {
                 WidgetEvent::Submitted => match picker.selected().copied() {
                     Some(role) => ModalAction::RoleSubmit {
                         target_id: *target_id,
@@ -965,7 +1095,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             return Ok(true);
         }
-        ModalAction::TrainSubmit { target_id: _, target_name, focus } => {
+        ModalAction::TrainSubmit {
+            target_id: _,
+            target_name,
+            focus,
+        } => {
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             let res = with_silenced_io(|| {
                 crate::commands::dispatch(
@@ -979,7 +1113,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             after_mutation(tui, res, &format!("trained {} ({})", target_name, focus));
             return Ok(true);
         }
-        ModalAction::ExtendSalaryNext { target_id, target_name, salary_m } => {
+        ModalAction::ExtendSalaryNext {
+            target_id,
+            target_name,
+            salary_m,
+        } => {
             CACHE.with(|c| {
                 c.borrow_mut().modal = Modal::ExtendYears {
                     input: NumberInput::new("Years (1-5)")
@@ -992,7 +1130,12 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             });
             return Ok(true);
         }
-        ModalAction::ExtendSubmit { target_id: _, target_name, salary_m, years } => {
+        ModalAction::ExtendSubmit {
+            target_id: _,
+            target_name,
+            salary_m,
+            years,
+        } => {
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             let res = with_silenced_io(|| {
                 crate::commands::dispatch(
@@ -1007,24 +1150,36 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             after_mutation(
                 tui,
                 res,
-                &format!("extension submitted for {} (${}M × {}yr)", target_name, salary_m, years),
+                &format!(
+                    "extension submitted for {} (${}M × {}yr)",
+                    target_name, salary_m, years
+                ),
             );
             return Ok(true);
         }
-        ModalAction::CutSubmit { target_id: _, target_name } => {
+        ModalAction::CutSubmit {
+            target_id: _,
+            target_name,
+        } => {
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             let res = with_silenced_io(|| {
                 crate::commands::dispatch(
                     app,
                     Command::Fa(FaArgs {
-                        action: FaAction::Cut { player: target_name.clone() },
+                        action: FaAction::Cut {
+                            player: target_name.clone(),
+                        },
                     }),
                 )
             });
             after_mutation(tui, res, &format!("cut {}", target_name));
             return Ok(true);
         }
-        ModalAction::RoleSubmit { target_id: _, target_name, role } => {
+        ModalAction::RoleSubmit {
+            target_id: _,
+            target_name,
+            role,
+        } => {
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             let res = with_silenced_io(|| {
                 crate::commands::dispatch(
@@ -1068,10 +1223,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             if let Some(name) = roster_name(pid) {
                 CACHE.with(|c| {
                     c.borrow_mut().modal = Modal::Cut {
-                        confirm: Confirm::new(format!(
-                            "Cut {}? They become a free agent.",
-                            name
-                        )),
+                        confirm: Confirm::new(format!("Cut {}? They become a free agent.", name)),
                         target_id: pid,
                         target_name: name,
                     };
@@ -1193,10 +1345,7 @@ fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             if let Some((pid, name)) = current_roster_row() {
                 CACHE.with(|c| {
                     c.borrow_mut().modal = Modal::Cut {
-                        confirm: Confirm::new(format!(
-                            "Cut {}? They become a free agent.",
-                            name
-                        )),
+                        confirm: Confirm::new(format!("Cut {}? They become a free agent.", name)),
                         target_id: pid,
                         target_name: name,
                     };
@@ -1280,11 +1429,31 @@ enum ModalAction {
     None,
     Pending,
     CloseModal,
-    TrainSubmit { target_id: PlayerId, target_name: String, focus: &'static str },
-    ExtendSalaryNext { target_id: PlayerId, target_name: String, salary_m: i64 },
-    ExtendSubmit { target_id: PlayerId, target_name: String, salary_m: i64, years: i64 },
-    CutSubmit { target_id: PlayerId, target_name: String },
-    RoleSubmit { target_id: PlayerId, target_name: String, role: &'static str },
+    TrainSubmit {
+        target_id: PlayerId,
+        target_name: String,
+        focus: &'static str,
+    },
+    ExtendSalaryNext {
+        target_id: PlayerId,
+        target_name: String,
+        salary_m: i64,
+    },
+    ExtendSubmit {
+        target_id: PlayerId,
+        target_name: String,
+        salary_m: i64,
+        years: i64,
+    },
+    CutSubmit {
+        target_id: PlayerId,
+        target_name: String,
+    },
+    RoleSubmit {
+        target_id: PlayerId,
+        target_name: String,
+        role: &'static str,
+    },
     OpenTrainFromDetail(PlayerId),
     OpenExtendFromDetail(PlayerId),
     OpenCutFromDetail(PlayerId),
@@ -1313,8 +1482,8 @@ fn short_role(lang: Lang, r: PlayerRole) -> &'static str {
 fn sort_label(lang: Lang, s: SortKey) -> &'static str {
     match s {
         SortKey::Ovr => t(lang, T::RosterSortOverall),
+        SortKey::Pts => t(lang, T::RosterSortPoints),
         SortKey::Position => t(lang, T::RosterSortPosition),
-        SortKey::Age => t(lang, T::RosterSortAge),
     }
 }
 
@@ -1324,17 +1493,17 @@ fn sort_action_label(lang: Lang, s: SortKey) -> String {
 
 fn next_sort(sort: SortKey) -> SortKey {
     match sort {
-        SortKey::Ovr => SortKey::Position,
-        SortKey::Position => SortKey::Age,
-        SortKey::Age => SortKey::Ovr,
+        SortKey::Ovr => SortKey::Pts,
+        SortKey::Pts => SortKey::Position,
+        SortKey::Position => SortKey::Ovr,
     }
 }
 
 fn prev_sort(sort: SortKey) -> SortKey {
     match sort {
-        SortKey::Ovr => SortKey::Age,
-        SortKey::Position => SortKey::Ovr,
-        SortKey::Age => SortKey::Position,
+        SortKey::Ovr => SortKey::Position,
+        SortKey::Pts => SortKey::Ovr,
+        SortKey::Position => SortKey::Pts,
     }
 }
 

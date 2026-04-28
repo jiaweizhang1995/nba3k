@@ -1,10 +1,9 @@
 //! Trades screen (M22).
 //!
-//! Five sub-tabs:
+//! Four sub-tabs:
 //! - Inbox: AI offers targeting the user's team.
 //! - My Proposals: user-involved negotiation chains.
 //! - Builder: 2-team or 3-team player-for-player proposal flow.
-//! - Rumors: read-only market interest table.
 //! - Free Agents: signable FA pool.
 //!
 //! All mutations route through `commands::dispatch` behind `with_silenced_io`
@@ -28,11 +27,10 @@ use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, FormWidget, Picker, Theme, WidgetEvent};
 use crate::tui::{with_silenced_io, TuiApp};
 use nba3k_core::{
-    t, DraftPick, DraftPickId, Lang, LeagueSnapshot, LeagueYear, NegotiationState, Player, PlayerId,
-    PlayerRole, Position, RejectReason, SeasonId, SeasonPhase, Team, TeamId, TeamRecordSummary,
+    t, DraftPick, DraftPickId, Lang, LeagueSnapshot, LeagueYear, NegotiationState, Player,
+    PlayerId, Position, RejectReason, SeasonId, SeasonPhase, Team, TeamId, TeamRecordSummary,
     TradeId, TradeOffer, Verdict, T,
 };
-use nba3k_models::stat_projection::infer_archetype;
 use nba3k_trade::evaluate as evaluate_mod;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -43,7 +41,6 @@ enum SubTab {
     Inbox,
     Proposals,
     Builder,
-    Rumors,
     FreeAgents,
 }
 
@@ -120,16 +117,6 @@ struct ChainRow {
 }
 
 #[derive(Clone, Debug)]
-struct RumorRow {
-    player_name: String,
-    team_abbrev: String,
-    ovr: u8,
-    role: PlayerRole,
-    interest: u32,
-    suitors: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
 struct FaRow {
     player_id: PlayerId,
     name: String,
@@ -164,7 +151,6 @@ const FA_ROSTER_CAP: usize = 18;
 struct TradesCache {
     inbox_rows: Option<Vec<OfferRow>>,
     chain_rows: Option<Vec<ChainRow>>,
-    rumor_rows: Option<Vec<RumorRow>>,
     fa_rows: Option<Vec<FaRow>>,
     teams: Option<Vec<TeamOption>>,
     user_roster: Option<Vec<PlayerOption>>,
@@ -176,7 +162,6 @@ struct TradesCache {
     tab: SubTab,
     inbox_cursor: usize,
     chain_cursor: usize,
-    rumor_cursor: usize,
     fa_cursor: usize,
 
     builder_panel: BuilderPanel,
@@ -224,7 +209,6 @@ pub fn invalidate() {
         let mut c = c.borrow_mut();
         c.inbox_rows = None;
         c.chain_rows = None;
-        c.rumor_rows = None;
         c.fa_rows = None;
         c.teams = None;
         c.user_roster = None;
@@ -259,7 +243,6 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         SubTab::Inbox => draw_inbox(f, parts[1], theme, tui.lang),
         SubTab::Proposals => draw_proposals(f, parts[1], theme, tui.lang),
         SubTab::Builder => draw_builder(f, parts[1], theme, tui),
-        SubTab::Rumors => draw_rumors(f, parts[1], theme, tui.lang),
         SubTab::FreeAgents => draw_free_agents(f, parts[1], theme, tui.lang),
     }
 
@@ -279,20 +262,30 @@ fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: Sub
         }
     };
     let line = Line::from(vec![
-        Span::styled(format!(" 1. {} ", t(lang, T::TradesInbox)), style(SubTab::Inbox)),
-        Span::styled("   ", theme.text()),
-        Span::styled(format!(" 2. {} ", t(lang, T::TradesMyProposals)), style(SubTab::Proposals)),
-        Span::styled("   ", theme.text()),
-        Span::styled(format!(" 3. {} ", t(lang, T::TradesBuilder)), style(SubTab::Builder)),
-        Span::styled("   ", theme.text()),
-        Span::styled(format!(" 4. {} ", t(lang, T::TradesRumors)), style(SubTab::Rumors)),
+        Span::styled(
+            format!(" 1. {} ", t(lang, T::TradesInbox)),
+            style(SubTab::Inbox),
+        ),
         Span::styled("   ", theme.text()),
         Span::styled(
-            format!(" 5. {} ", t(lang, T::RosterFreeAgents)),
+            format!(" 2. {} ", t(lang, T::TradesMyProposals)),
+            style(SubTab::Proposals),
+        ),
+        Span::styled("   ", theme.text()),
+        Span::styled(
+            format!(" 3. {} ", t(lang, T::TradesBuilder)),
+            style(SubTab::Builder),
+        ),
+        Span::styled("   ", theme.text()),
+        Span::styled(
+            format!(" 4. {} ", t(lang, T::RosterFreeAgents)),
             style(SubTab::FreeAgents),
         ),
     ]);
-    f.render_widget(Paragraph::new(line).block(theme.block(t(lang, T::TradesTitle))), area);
+    f.render_widget(
+        Paragraph::new(line).block(theme.block(t(lang, T::TradesTitle))),
+        area,
+    );
 }
 
 fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
@@ -303,8 +296,8 @@ fn draw_inbox(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         let parts = body_with_bar(area);
 
         if rows.is_empty() {
-            let p =
-                Paragraph::new(t(lang, T::TradesIncomingOffersNone)).block(theme.block(t(lang, T::TradesInbox)));
+            let p = Paragraph::new(t(lang, T::TradesIncomingOffersNone))
+                .block(theme.block(t(lang, T::TradesInbox)));
             f.render_widget(p, parts[0]);
         } else {
             let header = Row::new(vec![
@@ -675,8 +668,14 @@ fn draw_builder_submit(
         Line::from(""),
         Line::from(Span::styled(status.to_string(), panel_style)),
         Line::from(""),
-        Line::from(Span::styled(t(tui.lang, T::TradesToggleTeamMode), theme.muted_style())),
-        Line::from(Span::styled(t(tui.lang, T::TradesSwapIncomingTeam), theme.muted_style())),
+        Line::from(Span::styled(
+            t(tui.lang, T::TradesToggleTeamMode),
+            theme.muted_style(),
+        )),
+        Line::from(Span::styled(
+            t(tui.lang, T::TradesSwapIncomingTeam),
+            theme.muted_style(),
+        )),
     ]);
     f.render_widget(
         Paragraph::new(lines)
@@ -684,81 +683,6 @@ fn draw_builder_submit(
             .wrap(Wrap { trim: true }),
         area,
     );
-}
-
-fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
-    CACHE.with(|c| {
-        let cache = c.borrow();
-        let rows = cache.rumor_rows.as_deref().unwrap_or(&[]);
-        let cursor = cache.rumor_cursor.min(rows.len().saturating_sub(1));
-        let parts = body_with_bar(area);
-
-        if rows.is_empty() {
-            let p = Paragraph::new(t(lang, T::TradesNoRumors)).block(theme.block(t(lang, T::TradesRumors)));
-            f.render_widget(p, parts[0]);
-        } else {
-            let header = Row::new(vec![
-                head("#", theme),
-                head(t(lang, T::RosterPlayer), theme),
-                head("TM", theme),
-                head(t(lang, T::RosterOverall), theme),
-                head(t(lang, T::RosterRole), theme),
-                head("INT", theme),
-                head("TOP SUITORS", theme),
-            ]);
-            let body: Vec<Row> = rows
-                .iter()
-                .enumerate()
-                .map(|(i, r)| {
-                    let style = if i == cursor {
-                        theme.highlight()
-                    } else {
-                        theme.text()
-                    };
-                    Row::new(vec![
-                        Cell::from(Span::styled(format!("{:>2}", i + 1), style)),
-                        Cell::from(Span::styled(shorten(&r.player_name, 24), style)),
-                        Cell::from(Span::styled(r.team_abbrev.clone(), style)),
-                        Cell::from(Span::styled(format!("{}", r.ovr), style)),
-                        Cell::from(Span::styled(short_role(lang, r.role), style)),
-                        Cell::from(Span::styled(format!("{}", r.interest), style)),
-                        Cell::from(Span::styled(
-                            r.suitors
-                                .iter()
-                                .take(5)
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            style,
-                        )),
-                    ])
-                })
-                .collect();
-            let title = format!(" {} ({}) ", t(lang, T::TradesRumors), rows.len());
-            let table = Table::new(
-                body,
-                [
-                    Constraint::Length(4),
-                    Constraint::Percentage(28),
-                    Constraint::Length(5),
-                    Constraint::Length(5),
-                    Constraint::Length(7),
-                    Constraint::Length(5),
-                    Constraint::Percentage(40),
-                ],
-            )
-            .header(header)
-            .block(theme.block(&title));
-            f.render_widget(table, parts[0]);
-        }
-
-        ActionBar::new(&[
-            ("Up/Down", t(lang, T::CommonMove)),
-            ("Tab", t(lang, T::CommonTabs)),
-            ("Esc", t(lang, T::CommonBack)),
-        ])
-            .render(f, parts[1], theme);
-    });
 }
 
 fn draw_free_agents(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
@@ -927,11 +851,6 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
                 c.chain_rows = Some(chains);
             }
         });
-    }
-
-    if CACHE.with(|c| c.borrow().rumor_rows.is_none()) {
-        let rows = build_rumor_rows(app, tui.season)?;
-        CACHE.with(|c| c.borrow_mut().rumor_rows = Some(rows));
     }
 
     if CACHE.with(|c| c.borrow().fa_rows.is_none()) {
@@ -1121,103 +1040,6 @@ fn build_chain_rows(
     Ok(rows)
 }
 
-fn build_rumor_rows(app: &mut AppState, season: SeasonId) -> Result<Vec<RumorRow>> {
-    let store = app.store()?;
-    let teams = store.list_teams()?;
-    let players = store.all_active_players()?;
-    let ly = LeagueYear::for_season(season)
-        .ok_or_else(|| anyhow!("no LeagueYear constants for season {}", season.0))?;
-
-    struct TeamCtx {
-        id: TeamId,
-        abbrev: String,
-        archetypes: HashSet<String>,
-        position_counts: HashMap<Position, u32>,
-        cap_room_cents: i64,
-    }
-
-    let mut team_ctx: HashMap<TeamId, TeamCtx> = HashMap::new();
-    for t in &teams {
-        let mut roster = store.roster_for_team(t.id)?;
-        roster.truncate(8);
-        let mut archetypes = HashSet::new();
-        let mut position_counts: HashMap<Position, u32> = HashMap::new();
-        for p in &roster {
-            archetypes.insert(infer_archetype(p));
-            *position_counts.entry(p.primary_position).or_insert(0) += 1;
-        }
-        let payroll = store.team_salary(t.id, season)?;
-        team_ctx.insert(
-            t.id,
-            TeamCtx {
-                id: t.id,
-                abbrev: t.abbrev.clone(),
-                archetypes,
-                position_counts,
-                cap_room_cents: ly.apron_1.0 - payroll.0,
-            },
-        );
-    }
-
-    let mut rumors = Vec::new();
-    for p in &players {
-        let Some(player_team) = p.team else { continue };
-        let archetype = infer_archetype(p);
-        let first_year_cents = p
-            .contract
-            .as_ref()
-            .map(|c| c.salary_for(season).0)
-            .unwrap_or(0);
-        let needed_room = first_year_cents / 2;
-        let mut suitors: Vec<(String, f32)> = Vec::new();
-        for ctx in team_ctx.values() {
-            if ctx.id == player_team || ctx.cap_room_cents < needed_room {
-                continue;
-            }
-            let score = if !ctx.archetypes.contains(&archetype) {
-                1.0
-            } else if ctx
-                .position_counts
-                .get(&p.primary_position)
-                .copied()
-                .unwrap_or(0)
-                <= 1
-            {
-                0.5
-            } else {
-                0.0
-            };
-            if score >= 0.5 {
-                suitors.push((ctx.abbrev.clone(), score));
-            }
-        }
-        if suitors.is_empty() {
-            continue;
-        }
-        suitors.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
-        rumors.push(RumorRow {
-            player_name: clean_name(&p.name),
-            team_abbrev: team_abbrev(store, player_team)?,
-            ovr: p.overall,
-            role: p.role,
-            interest: suitors.len() as u32,
-            suitors: suitors.into_iter().map(|(abbr, _)| abbr).collect(),
-        });
-    }
-    rumors.sort_by(|a, b| {
-        b.interest
-            .cmp(&a.interest)
-            .then_with(|| b.ovr.cmp(&a.ovr))
-            .then_with(|| a.player_name.cmp(&b.player_name))
-    });
-    rumors.truncate(30);
-    Ok(rumors)
-}
-
 fn build_fa_rows(app: &mut AppState) -> Result<Vec<FaRow>> {
     let store = app.store()?;
     let mut rows: Vec<FaRow> = store
@@ -1349,16 +1171,21 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             });
             Ok(true)
         }
+        KeyCode::BackTab => {
+            CACHE.with(|c| {
+                let tab = c.borrow().tab;
+                c.borrow_mut().tab = prev_tab(tab);
+            });
+            Ok(true)
+        }
         KeyCode::Char('1') => set_tab(SubTab::Inbox),
         KeyCode::Char('2') => set_tab(SubTab::Proposals),
         KeyCode::Char('3') => set_tab(SubTab::Builder),
-        KeyCode::Char('4') => set_tab(SubTab::Rumors),
-        KeyCode::Char('5') => set_tab(SubTab::FreeAgents),
+        KeyCode::Char('4') => set_tab(SubTab::FreeAgents),
         _ => match CACHE.with(|c| c.borrow().tab) {
             SubTab::Inbox => handle_inbox_key(app, tui, key),
             SubTab::Proposals => handle_proposals_key(app, tui, key),
             SubTab::Builder => handle_builder_key(app, tui, key),
-            SubTab::Rumors => handle_rumors_key(key),
             SubTab::FreeAgents => handle_free_agents_key(app, tui, key),
         },
     }
@@ -1373,9 +1200,17 @@ fn next_tab(tab: SubTab) -> SubTab {
     match tab {
         SubTab::Inbox => SubTab::Proposals,
         SubTab::Proposals => SubTab::Builder,
-        SubTab::Builder => SubTab::Rumors,
-        SubTab::Rumors => SubTab::FreeAgents,
+        SubTab::Builder => SubTab::FreeAgents,
         SubTab::FreeAgents => SubTab::Inbox,
+    }
+}
+
+fn prev_tab(tab: SubTab) -> SubTab {
+    match tab {
+        SubTab::Inbox => SubTab::FreeAgents,
+        SubTab::Proposals => SubTab::Inbox,
+        SubTab::Builder => SubTab::Proposals,
+        SubTab::FreeAgents => SubTab::Builder,
     }
 }
 
@@ -1473,16 +1308,6 @@ fn handle_builder_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Re
     }
 }
 
-fn handle_rumors_key(key: KeyEvent) -> Result<bool> {
-    match key.code {
-        KeyCode::Up => move_rumor(-1),
-        KeyCode::Down => move_rumor(1),
-        KeyCode::PageUp => move_rumor(-10),
-        KeyCode::PageDown => move_rumor(10),
-        _ => Ok(false),
-    }
-}
-
 fn handle_free_agents_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Up => move_fa(-1),
@@ -1508,15 +1333,6 @@ fn move_chain(delta: isize) -> Result<bool> {
         let mut c = c.borrow_mut();
         let len = c.chain_rows.as_ref().map(|r| r.len()).unwrap_or(0);
         c.chain_cursor = moved(c.chain_cursor, len, delta);
-    });
-    Ok(true)
-}
-
-fn move_rumor(delta: isize) -> Result<bool> {
-    CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        let len = c.rumor_rows.as_ref().map(|r| r.len()).unwrap_or(0);
-        c.rumor_cursor = moved(c.rumor_cursor, len, delta);
     });
     Ok(true)
 }
@@ -2191,17 +2007,6 @@ fn quick_label(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "Quick",
         Lang::Zh => "快捷",
-    }
-}
-
-fn short_role(lang: Lang, r: PlayerRole) -> &'static str {
-    match r {
-        PlayerRole::Star => t(lang, T::RoleStar),
-        PlayerRole::Starter => t(lang, T::RoleStarter),
-        PlayerRole::SixthMan => t(lang, T::RoleSixthMan),
-        PlayerRole::RolePlayer => t(lang, T::RoleRolePlayer),
-        PlayerRole::BenchWarmer => t(lang, T::RoleBenchWarmer),
-        PlayerRole::Prospect => t(lang, T::RoleProspect),
     }
 }
 

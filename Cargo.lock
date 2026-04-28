@@ -1214,6 +1214,7 @@ dependencies = [
  "shlex",
  "tempfile",
  "thiserror 1.0.69",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "unicode-width 0.1.14",

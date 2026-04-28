@@ -58,7 +58,9 @@ impl Store {
     pub fn get_meta(&self, key: &str) -> StoreResult<Option<String>> {
         let v: Option<String> = self
             .conn
-            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get(0))
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
             .optional()?;
         Ok(v)
     }
@@ -113,9 +115,11 @@ impl Store {
     pub fn load_season_state(&self) -> StoreResult<Option<SeasonState>> {
         let json: Option<String> = self
             .conn
-            .query_row("SELECT state_json FROM season_state WHERE singleton = 0", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT state_json FROM season_state WHERE singleton = 0",
+                [],
+                |r| r.get(0),
+            )
             .optional()?;
         Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
     }
@@ -138,18 +142,30 @@ impl Store {
                conference = excluded.conference,
                division = excluded.division,
                gm_json = excluded.gm_json",
-            params![team.id.0 as i64, team.abbrev, team.city, team.name, conf, div, gm],
+            params![
+                team.id.0 as i64,
+                team.abbrev,
+                team.city,
+                team.name,
+                conf,
+                div,
+                gm
+            ],
         )?;
         Ok(())
     }
 
     pub fn count_teams(&self) -> StoreResult<u32> {
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM teams", [], |r| r.get(0))?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM teams", [], |r| r.get(0))?;
         Ok(n as u32)
     }
 
     pub fn count_players(&self) -> StoreResult<u32> {
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM players", [], |r| r.get(0))?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM players", [], |r| r.get(0))?;
         Ok(n as u32)
     }
 
@@ -698,6 +714,15 @@ impl Store {
         }
     }
 
+    pub fn player_exists_exact_name(&self, name: &str) -> StoreResult<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM players WHERE lower(name) = lower(?1)",
+            params![name],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
     // ------------------------------------------------------------------
     // schedule
     // ------------------------------------------------------------------
@@ -739,7 +764,9 @@ impl Store {
     }
 
     pub fn count_schedule(&self) -> StoreResult<u32> {
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM schedule", [], |r| r.get(0))?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM schedule", [], |r| r.get(0))?;
         Ok(n as u32)
     }
 
@@ -776,11 +803,9 @@ impl Store {
     pub fn first_unplayed_date(&self) -> StoreResult<Option<chrono::NaiveDate>> {
         let v: Option<String> = self
             .conn
-            .query_row(
-                "SELECT MIN(date) FROM schedule WHERE played = 0",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT MIN(date) FROM schedule WHERE played = 0", [], |r| {
+                r.get(0)
+            })
             .optional()?
             .flatten();
         Ok(v.and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()))
@@ -796,11 +821,11 @@ impl Store {
     }
 
     pub fn count_unplayed(&self) -> StoreResult<u32> {
-        let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM schedule WHERE played = 0",
-            [],
-            |r| r.get(0),
-        )?;
+        let n: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM schedule WHERE played = 0", [], |r| {
+                    r.get(0)
+                })?;
         Ok(n as u32)
     }
 
@@ -884,7 +909,9 @@ impl Store {
                 let ot: i64 = r.get(7)?;
                 let pl: i64 = r.get(8)?;
                 let box_json: String = r.get(9)?;
-                Ok((id, season, date_s, home, away, home_score, away_score, ot, pl, box_json))
+                Ok((
+                    id, season, date_s, home, away, home_score, away_score, ot, pl, box_json,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
@@ -1024,7 +1051,13 @@ impl Store {
         self.conn.execute(
             "INSERT INTO trade_history(season, day, accepted, chain_json, final_json)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![season.0 as i64, day as i64, accepted, chain_json, final_json],
+            params![
+                season.0 as i64,
+                day as i64,
+                accepted,
+                chain_json,
+                final_json
+            ],
         )?;
         Ok(TradeId(self.conn.last_insert_rowid() as u64))
     }
@@ -1059,7 +1092,10 @@ impl Store {
     }
 
     /// Returns (id, state) for every chain in the season ordered by id desc.
-    pub fn list_trade_chains(&self, season: SeasonId) -> StoreResult<Vec<(TradeId, NegotiationState)>> {
+    pub fn list_trade_chains(
+        &self,
+        season: SeasonId,
+    ) -> StoreResult<Vec<(TradeId, NegotiationState)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, chain_json FROM trade_history WHERE season = ?1 ORDER BY id DESC",
         )?;
@@ -1089,7 +1125,9 @@ impl Store {
         let chains = self.list_trade_chains(season)?;
         let mut out = Vec::new();
         for (id, state) in chains {
-            let NegotiationState::Open { ref chain } = state else { continue };
+            let NegotiationState::Open { ref chain } = state else {
+                continue;
+            };
             let Some(latest) = chain.last() else { continue };
             if latest.initiator == team {
                 continue;
@@ -1109,12 +1147,7 @@ impl Store {
     /// Insert (or replace) one award winner row. Existing rows for the same
     /// (season, award) key are overwritten — re-running the awards engine is
     /// idempotent.
-    pub fn record_award(
-        &self,
-        season: SeasonId,
-        award: &str,
-        player: PlayerId,
-    ) -> StoreResult<()> {
+    pub fn record_award(&self, season: SeasonId, award: &str, player: PlayerId) -> StoreResult<()> {
         self.conn.execute(
             "INSERT INTO awards(season, award, player_id) VALUES (?1, ?2, ?3)
              ON CONFLICT(season, award) DO UPDATE SET
@@ -1126,9 +1159,9 @@ impl Store {
 
     /// All awards for `season` ordered by award name.
     pub fn read_awards(&self, season: SeasonId) -> StoreResult<Vec<(String, PlayerId)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT award, player_id FROM awards WHERE season = ?1 ORDER BY award ASC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT award, player_id FROM awards WHERE season = ?1 ORDER BY award ASC")?;
         let rows = stmt
             .query_map(params![season.0 as i64], |r| {
                 let award: String = r.get(0)?;
@@ -1189,7 +1222,11 @@ impl Store {
         let out = rows
             .into_iter()
             .map(|(conf, role, pid)| {
-                let c = if conf == "West" { Conference::West } else { Conference::East };
+                let c = if conf == "West" {
+                    Conference::West
+                } else {
+                    Conference::East
+                };
                 (c, role, pid)
             })
             .collect();
@@ -1372,7 +1409,6 @@ impl Store {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
-
 
     // ------------------------------------------------------------------
     // playoff series
@@ -1710,21 +1746,21 @@ pub struct NoteRow {
 }
 
 type PlayerRow = (
-    i64,                  // 0  id
-    String,               // 1  name
-    String,               // 2  primary_position
-    Option<String>,       // 3  secondary_position
-    i64,                  // 4  age
-    i64,                  // 5  overall
-    i64,                  // 6  potential
-    String,               // 7  ratings_json
-    Option<String>,       // 8  contract_json
-    Option<i64>,          // 9  team_id
-    Option<String>,       // 10 injury_json
-    i64,                  // 11 no_trade_clause
-    Option<i64>,          // 12 trade_kicker_pct
-    String,               // 13 role_str
-    f64,                  // 14 morale
+    i64,            // 0  id
+    String,         // 1  name
+    String,         // 2  primary_position
+    Option<String>, // 3  secondary_position
+    i64,            // 4  age
+    i64,            // 5  overall
+    i64,            // 6  potential
+    String,         // 7  ratings_json
+    Option<String>, // 8  contract_json
+    Option<i64>,    // 9  team_id
+    Option<String>, // 10 injury_json
+    i64,            // 11 no_trade_clause
+    Option<i64>,    // 12 trade_kicker_pct
+    String,         // 13 role_str
+    f64,            // 14 morale
 );
 
 fn read_player_row(r: &rusqlite::Row) -> rusqlite::Result<PlayerRow> {
@@ -1751,11 +1787,9 @@ fn deserialize_player(r: PlayerRow) -> StoreResult<Player> {
     let primary_position = parse_position(&r.2);
     let secondary_position = r.3.as_deref().map(parse_position);
     let ratings: Ratings = serde_json::from_str(&r.7)?;
-    let contract: Option<Contract> =
-        r.8.as_deref().map(serde_json::from_str).transpose()?;
+    let contract: Option<Contract> = r.8.as_deref().map(serde_json::from_str).transpose()?;
     let team = r.9.map(|n| TeamId(n as u8));
-    let injury: Option<InjuryStatus> =
-        r.10.as_deref().map(serde_json::from_str).transpose()?;
+    let injury: Option<InjuryStatus> = r.10.as_deref().map(serde_json::from_str).transpose()?;
     Ok(Player {
         id: PlayerId(r.0 as u32),
         name: r.1,

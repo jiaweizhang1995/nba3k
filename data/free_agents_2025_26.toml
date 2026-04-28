@@ -1,0 +1,319 @@
+[[fa]]
+name = "Russell Westbrook"
+primary_position = "PG"
+secondary_position = "SG"
+age = 37
+overall = 75
+potential = 75
+
+[[fa]]
+name = "Ben Simmons"
+primary_position = "PG"
+secondary_position = "PF"
+age = 29
+overall = 74
+potential = 75
+
+[[fa]]
+name = "Malcolm Brogdon"
+primary_position = "PG"
+secondary_position = "SG"
+age = 33
+overall = 74
+potential = 74
+
+[[fa]]
+name = "Markelle Fultz"
+primary_position = "PG"
+secondary_position = "SG"
+age = 27
+overall = 73
+potential = 74
+
+[[fa]]
+name = "Dennis Smith Jr."
+primary_position = "PG"
+secondary_position = "SG"
+age = 28
+overall = 71
+potential = 72
+
+[[fa]]
+name = "Patty Mills"
+primary_position = "PG"
+secondary_position = "SG"
+age = 37
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Seth Curry"
+primary_position = "SG"
+secondary_position = "PG"
+age = 35
+overall = 73
+potential = 73
+
+[[fa]]
+name = "Alec Burks"
+primary_position = "SG"
+secondary_position = "SF"
+age = 34
+overall = 72
+potential = 72
+
+[[fa]]
+name = "Reggie Bullock"
+primary_position = "SG"
+secondary_position = "SF"
+age = 34
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Landry Shamet"
+primary_position = "SG"
+secondary_position = "PG"
+age = 28
+overall = 70
+potential = 71
+
+[[fa]]
+name = "Lonnie Walker IV"
+primary_position = "SG"
+secondary_position = "SF"
+age = 27
+overall = 72
+potential = 73
+
+[[fa]]
+name = "T.J. Warren"
+primary_position = "SF"
+secondary_position = "PF"
+age = 32
+overall = 72
+potential = 72
+
+[[fa]]
+name = "Robert Covington"
+primary_position = "SF"
+secondary_position = "PF"
+age = 35
+overall = 71
+potential = 71
+
+[[fa]]
+name = "Jae Crowder"
+primary_position = "SF"
+secondary_position = "PF"
+age = 35
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Justin Holiday"
+primary_position = "SF"
+secondary_position = "SG"
+age = 36
+overall = 69
+potential = 69
+
+[[fa]]
+name = "Cedi Osman"
+primary_position = "SF"
+secondary_position = "PF"
+age = 30
+overall = 72
+potential = 72
+
+[[fa]]
+name = "Danilo Gallinari"
+primary_position = "PF"
+secondary_position = "SF"
+age = 37
+overall = 71
+potential = 71
+
+[[fa]]
+name = "Marcus Morris Sr."
+primary_position = "PF"
+secondary_position = "SF"
+age = 36
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Taj Gibson"
+primary_position = "PF"
+secondary_position = "C"
+age = 40
+overall = 68
+potential = 68
+
+[[fa]]
+name = "Chimezie Metu"
+primary_position = "PF"
+secondary_position = "C"
+age = 28
+overall = 70
+potential = 71
+
+[[fa]]
+name = "Davis Bertans"
+primary_position = "PF"
+secondary_position = "SF"
+age = 33
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Bismack Biyombo"
+primary_position = "C"
+secondary_position = "PF"
+age = 33
+overall = 71
+potential = 71
+
+[[fa]]
+name = "JaVale McGee"
+primary_position = "C"
+secondary_position = "PF"
+age = 38
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Tristan Thompson"
+primary_position = "C"
+secondary_position = "PF"
+age = 34
+overall = 69
+potential = 69
+
+[[fa]]
+name = "Robin Lopez"
+primary_position = "C"
+secondary_position = "PF"
+age = 37
+overall = 68
+potential = 68
+
+[[fa]]
+name = "John Wall"
+primary_position = "PG"
+secondary_position = "SG"
+age = 35
+overall = 70
+potential = 70
+
+[[fa]]
+name = "Isaiah Thomas"
+primary_position = "PG"
+secondary_position = "SG"
+age = 36
+overall = 68
+potential = 68
+
+[[fa]]
+name = "Austin Rivers"
+primary_position = "SG"
+secondary_position = "PG"
+age = 33
+overall = 69
+potential = 69
+
+[[fa]]
+name = "Cory Joseph"
+primary_position = "PG"
+secondary_position = "SG"
+age = 34
+overall = 68
+potential = 68
+
+[[fa]]
+name = "Ish Smith"
+primary_position = "PG"
+secondary_position = "SG"
+age = 37
+overall = 67
+potential = 67
+
+[[fa]]
+name = "Will Barton"
+primary_position = "SG"
+secondary_position = "SF"
+age = 35
+overall = 69
+potential = 69
+
+[[fa]]
+name = "Terrence Ross"
+primary_position = "SG"
+secondary_position = "SF"
+age = 34
+overall = 69
+potential = 69
+
+[[fa]]
+name = "Danny Green"
+primary_position = "SF"
+secondary_position = "SG"
+age = 38
+overall = 67
+potential = 67
+
+[[fa]]
+name = "Rudy Gay"
+primary_position = "SF"
+secondary_position = "PF"
+age = 39
+overall = 68
+potential = 68
+
+[[fa]]
+name = "JaMychal Green"
+primary_position = "PF"
+secondary_position = "C"
+age = 35
+overall = 68
+potential = 68
+
+[[fa]]
+name = "Nerlens Noel"
+primary_position = "C"
+secondary_position = "PF"
+age = 31
+overall = 69
+potential = 69
+
+[[fa]]
+name = "Dewayne Dedmon"
+primary_position = "C"
+secondary_position = "PF"
+age = 36
+overall = 67
+potential = 67
+
+[[fa]]
+name = "Hassan Whiteside"
+primary_position = "C"
+secondary_position = "PF"
+age = 36
+overall = 68
+potential = 68
+
+[[fa]]
+name = "Serge Ibaka"
+primary_position = "C"
+secondary_position = "PF"
+age = 36
+overall = 68
+potential = 68
+
+[[fa]]
+name = "Boban Marjanovic"
+primary_position = "C"
+secondary_position = "PF"
+age = 37
+overall = 67
+potential = 67

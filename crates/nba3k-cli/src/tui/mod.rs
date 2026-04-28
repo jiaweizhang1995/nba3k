@@ -27,11 +27,13 @@ use ratatui::{
 };
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::cli::{Command, JsonFlag};
 use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, Confirm, FormWidget, Theme, WidgetEvent};
-use nba3k_core::{t, Cents, Lang, SeasonId, SeasonState, TeamId, T};
+use nba3k_core::{t, Cents, Lang, SeasonId, SeasonPhase, SeasonState, TeamId, T};
+use nba3k_season::phases as season_phases;
 
 // ---------------------------------------------------------------------------
 // Menu / Screen enums
@@ -131,6 +133,25 @@ pub enum FocusZone {
     Content,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SimTarget {
+    Days(u32),
+    TradeDeadline,
+    SeasonAdvance,
+}
+
+impl SimTarget {
+    fn label(self, lang: Lang) -> &'static str {
+        match self {
+            SimTarget::Days(7) => t(lang, T::SimWeek),
+            SimTarget::Days(30) => t(lang, T::SimMonth),
+            SimTarget::Days(_) => t(lang, T::SimDay),
+            SimTarget::TradeDeadline => t(lang, T::SimTradeDeadline),
+            SimTarget::SeasonAdvance => t(lang, T::SimSeasonAdvance),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TuiApp — top-level state
 // ---------------------------------------------------------------------------
@@ -227,6 +248,8 @@ pub struct TuiApp {
 
     /// Confirm widget shown when QuitConfirm is current.
     quit_confirm: Confirm,
+    pending_sim: Option<SimTarget>,
+    sim_animating: bool,
 }
 
 impl TuiApp {
@@ -249,6 +272,8 @@ impl TuiApp {
             last_msg: None,
             help_open: false,
             quit_confirm: Confirm::new(t(lang, T::ModalQuitTitle)),
+            pending_sim: None,
+            sim_animating: false,
         };
         app.set_save_ctx(save_ctx);
         app
@@ -321,7 +346,17 @@ impl TuiApp {
         app.open_path(new_path)?;
         self.refresh_save_ctx(app)?;
         self.load_lang(app);
+        self.show_home_preview();
         Ok(())
+    }
+
+    pub fn show_home_preview(&mut self) {
+        if self.has_save() {
+            self.help_open = false;
+            self.menu_selected = 0;
+            self.current = Screen::Home;
+            self.preview_mode = true;
+        }
     }
 
     fn open_quit_confirm(&mut self, return_to: Screen) {
@@ -401,6 +436,9 @@ pub fn run(app: &mut AppState, tv: bool) -> Result<()> {
     };
 
     let mut tui = TuiApp::new(theme, save_ctx, lang);
+    if tui.has_save() {
+        with_silenced_io(|| backfill_free_agents_if_empty(app))?;
+    }
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -419,6 +457,15 @@ pub fn run(app: &mut AppState, tv: bool) -> Result<()> {
 /// `tui --legacy` entry — preserves the M19 5-tab dashboard.
 pub fn run_legacy(app: &mut AppState) -> Result<()> {
     screens::legacy::run(app)
+}
+
+fn backfill_free_agents_if_empty(app: &mut AppState) -> Result<()> {
+    let store = app.store()?;
+    if store.load_season_state()?.is_none() || store.count_free_agents()? > 0 {
+        return Ok(());
+    }
+    crate::commands::seed_free_agents(store)?;
+    Ok(())
 }
 
 fn read_lang(app: &mut AppState) -> Lang {
@@ -464,6 +511,9 @@ fn event_loop<B: ratatui::backend::Backend>(
         let exit = handle_key(app, tui, k)?;
         if exit {
             break;
+        }
+        if let Some(target) = tui.pending_sim.take() {
+            run_animated_sim(app, tui, terminal, target)?;
         }
     }
     Ok(())
@@ -681,38 +731,25 @@ fn menu_key(_app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> 
 }
 
 fn handle_global_sim_key(app: &mut AppState, tui: &mut TuiApp, k: KeyEvent) -> Result<bool> {
-    if !tui.has_save() || !k.modifiers.contains(KeyModifiers::CONTROL) {
+    if !tui.has_save() || tui.sim_animating || !k.modifiers.contains(KeyModifiers::CONTROL) {
         return Ok(false);
     }
     let KeyCode::Char(c) = k.code else {
         return Ok(false);
     };
-    let (cmd, label) = match c.to_ascii_lowercase() {
-        'd' => (
+    match c.to_ascii_lowercase() {
+        'd' => run_global_sim(
+            app,
+            tui,
             Command::SimDay { count: Some(1) },
-            t(tui.lang, T::SimDay).to_string(),
-        ),
-        'w' => (
-            Command::SimWeek { no_pause: true },
-            t(tui.lang, T::SimWeek).to_string(),
-        ),
-        'n' => (
-            Command::SimMonth { no_pause: true },
-            t(tui.lang, T::SimMonth).to_string(),
-        ),
-        't' => (
-            Command::SimTo {
-                phase: "trade-deadline".to_string(),
-            },
-            t(tui.lang, T::SimTradeDeadline).to_string(),
-        ),
-        'a' => (
-            Command::SeasonAdvance(JsonFlag { json: false }),
-            t(tui.lang, T::SimSeasonAdvance).to_string(),
-        ),
+            t(tui.lang, T::SimDay),
+        )?,
+        'w' => tui.pending_sim = Some(SimTarget::Days(7)),
+        'n' => tui.pending_sim = Some(SimTarget::Days(30)),
+        't' => tui.pending_sim = Some(SimTarget::TradeDeadline),
+        'a' => tui.pending_sim = Some(SimTarget::SeasonAdvance),
         _ => return Ok(false),
-    };
-    run_global_sim(app, tui, cmd, &label)?;
+    }
     Ok(true)
 }
 
@@ -738,6 +775,209 @@ fn run_global_sim(app: &mut AppState, tui: &mut TuiApp, cmd: Command, label: &st
         }
     }
     Ok(())
+}
+
+const ANIMATION_DELAY_MS: u64 = 100;
+const ANIMATION_CAP_DAYS: u32 = 365;
+
+pub fn run_animated_sim<B: ratatui::backend::Backend>(
+    app: &mut AppState,
+    tui: &mut TuiApp,
+    terminal: &mut Terminal<B>,
+    target: SimTarget,
+) -> Result<()> {
+    let pre_day = tui.season_state.day;
+    let label = target.label(tui.lang).to_string();
+    tui.sim_animating = true;
+    let result = match target {
+        SimTarget::Days(days) => run_animated_days(app, tui, terminal, days),
+        SimTarget::TradeDeadline => {
+            let days = days_until_trade_deadline(tui);
+            run_animated_days(app, tui, terminal, days)
+        }
+        SimTarget::SeasonAdvance => run_animated_season_advance(app, tui, terminal),
+    };
+    tui.sim_animating = false;
+
+    match result {
+        Ok(()) => {
+            tui.refresh_season_state(app)?;
+            invalidate_all_screens(tui);
+            let post_day = tui.season_state.day;
+            let delta = post_day.saturating_sub(pre_day);
+            tui.last_msg = Some(format!(
+                "{}: +{}d ({} {})",
+                label,
+                delta,
+                t(tui.lang, T::CalendarDayOf),
+                post_day
+            ));
+        }
+        Err(e) => {
+            tui.last_msg = Some(format!("{}: {}", t(tui.lang, T::CommonError), e));
+        }
+    }
+    Ok(())
+}
+
+fn run_animated_days<B: ratatui::backend::Backend>(
+    app: &mut AppState,
+    tui: &mut TuiApp,
+    terminal: &mut Terminal<B>,
+    days: u32,
+) -> Result<()> {
+    let completed = animate_days(app, tui, terminal, days)?;
+    let remaining = days.saturating_sub(completed);
+    if remaining > 0 {
+        fast_forward_days(app, tui, remaining)?;
+    }
+    Ok(())
+}
+
+fn run_animated_season_advance<B: ratatui::backend::Backend>(
+    app: &mut AppState,
+    tui: &mut TuiApp,
+    terminal: &mut Terminal<B>,
+) -> Result<()> {
+    let skipped = animate_until_playoffs(app, tui, terminal)?;
+    if skipped
+        && !matches!(
+            tui.season_state.phase,
+            SeasonPhase::Playoffs | SeasonPhase::OffSeason
+        )
+    {
+        with_silenced_io(|| {
+            crate::commands::dispatch(
+                app,
+                Command::SimTo {
+                    phase: "regular-end".to_string(),
+                },
+            )
+        })?;
+        tui.refresh_season_state(app)?;
+        invalidate_all_screens(tui);
+    }
+
+    if tui.season_state.phase == SeasonPhase::Playoffs {
+        with_silenced_io(|| {
+            crate::commands::dispatch(
+                app,
+                Command::SimTo {
+                    phase: "season-end".to_string(),
+                },
+            )
+        })?;
+        tui.refresh_season_state(app)?;
+        invalidate_all_screens(tui);
+    }
+
+    with_silenced_io(|| {
+        crate::commands::dispatch(app, Command::SeasonAdvance(JsonFlag { json: false }))
+    })?;
+    tui.refresh_season_state(app)?;
+    invalidate_all_screens(tui);
+    Ok(())
+}
+
+fn animate_until_playoffs<B: ratatui::backend::Backend>(
+    app: &mut AppState,
+    tui: &mut TuiApp,
+    terminal: &mut Terminal<B>,
+) -> Result<bool> {
+    for _ in 0..ANIMATION_CAP_DAYS {
+        if matches!(
+            tui.season_state.phase,
+            SeasonPhase::Playoffs | SeasonPhase::OffSeason
+        ) {
+            return Ok(false);
+        }
+        if animation_skip_requested()? {
+            return Ok(true);
+        }
+        sim_one_animated_day(app, tui, terminal)?;
+    }
+    anyhow::bail!(
+        "season advance animation exceeded {} days without reaching playoffs",
+        ANIMATION_CAP_DAYS
+    );
+}
+
+fn animate_days<B: ratatui::backend::Backend>(
+    app: &mut AppState,
+    tui: &mut TuiApp,
+    terminal: &mut Terminal<B>,
+    days: u32,
+) -> Result<u32> {
+    let mut completed = 0;
+    for _ in 0..days {
+        if animation_skip_requested()? {
+            break;
+        }
+        sim_one_animated_day(app, tui, terminal)?;
+        completed += 1;
+    }
+    Ok(completed)
+}
+
+fn sim_one_animated_day<B: ratatui::backend::Backend>(
+    app: &mut AppState,
+    tui: &mut TuiApp,
+    terminal: &mut Terminal<B>,
+) -> Result<()> {
+    with_silenced_io(|| crate::commands::dispatch(app, Command::SimDay { count: Some(1) }))?;
+    tui.refresh_season_state(app)?;
+    invalidate_all_screens(tui);
+    ensure_shell_cache(app, tui)?;
+    terminal.draw(|f| draw(f, app, tui))?;
+    std::thread::sleep(Duration::from_millis(ANIMATION_DELAY_MS));
+    Ok(())
+}
+
+fn fast_forward_days(app: &mut AppState, tui: &mut TuiApp, days: u32) -> Result<()> {
+    if days == 0 {
+        return Ok(());
+    }
+    with_silenced_io(|| crate::commands::dispatch(app, Command::SimDay { count: Some(days) }))?;
+    tui.refresh_season_state(app)?;
+    invalidate_all_screens(tui);
+    Ok(())
+}
+
+fn animation_skip_requested() -> Result<bool> {
+    if !event::poll(Duration::from_millis(0))? {
+        return Ok(false);
+    }
+    let Event::Key(k) = event::read()? else {
+        return Ok(false);
+    };
+    if k.kind == KeyEventKind::Release {
+        return Ok(false);
+    }
+    Ok(matches!(
+        k.code,
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
+    ))
+}
+
+fn days_until_trade_deadline(tui: &TuiApp) -> u32 {
+    if matches!(
+        tui.season_state.phase,
+        SeasonPhase::TradeDeadlinePassed | SeasonPhase::Playoffs | SeasonPhase::OffSeason
+    ) {
+        return 0;
+    }
+    let deadline = chrono::NaiveDate::from_ymd_opt(
+        season_phases::TRADE_DEADLINE.0,
+        season_phases::TRADE_DEADLINE.1,
+        season_phases::TRADE_DEADLINE.2,
+    )
+    .expect("valid trade deadline date");
+    let first_after_deadline = (0..ANIMATION_CAP_DAYS)
+        .find(|day| crate::commands::day_index_to_date(*day) > deadline)
+        .unwrap_or(tui.season_state.day);
+    first_after_deadline
+        .saturating_add(1)
+        .saturating_sub(tui.season_state.day)
 }
 
 pub(crate) fn invalidate_all_screens(tui: &mut TuiApp) {
@@ -860,6 +1100,22 @@ fn draw_sim_banner(f: &mut Frame, area: Rect, tui: &TuiApp) {
         "Season {}  ·  Day {}  ·  {:?}",
         season_label, tui.season_state.day, tui.season_state.phase
     );
+    if tui.sim_animating {
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(t(tui.lang, T::SimAnimating), tui.theme.accent_style()),
+                Span::raw("  "),
+                Span::styled(
+                    format!("[Esc {}]", t(tui.lang, T::SimSkip)),
+                    tui.theme.text(),
+                ),
+            ]),
+            Line::from(Span::styled(status, tui.theme.text())),
+            Line::from(Span::styled("q / Esc", tui.theme.muted_style())),
+        ];
+        f.render_widget(Paragraph::new(lines), area);
+        return;
+    }
     let buttons = Line::from(vec![
         Span::styled("[D] ", tui.theme.accent_style()),
         Span::styled(t(tui.lang, T::SimDay), tui.theme.text()),
@@ -1106,7 +1362,10 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
                 ("?", "Help"),
                 ("q", "Quit"),
             ],
-            Screen::QuitConfirm => &[("Y", "Yes"), ("N/Esc", "No")],
+            Screen::QuitConfirm => &[
+                ("Enter", t(tui.lang, T::CommonConfirm)),
+                ("Esc", t(tui.lang, T::CommonCancel)),
+            ],
             Screen::Settings => &[("↑↓", "Move"), ("Enter", "Apply"), ("Esc", "Menu")],
             Screen::Calendar => &[
                 ("←↑↓→", "Move date"),
@@ -1145,7 +1404,7 @@ fn draw_action_bar(f: &mut Frame, area: Rect, tui: &TuiApp) {
             ],
             Screen::Finance => &[
                 ("↑↓", "Navigate"),
-                ("t/y/n", "Sort"),
+                ("Tab", "Sort"),
                 ("e", "Extend"),
                 ("?", "Help"),
                 ("Esc", "Back"),
@@ -1282,7 +1541,7 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
         ],
         Screen::Finance => &[
             ("↑ / ↓", "Move selected contract"),
-            ("t / y / n", "Sort by total, years, or name"),
+            ("Tab / Shift+Tab", "Sort by total or years"),
             ("e", "Offer extension"),
         ],
         Screen::Inbox => &[
@@ -1312,7 +1571,7 @@ fn help_key_rows(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("Enter", "Continue or confirm"),
             ("Esc", "Quit when no save is loaded"),
         ],
-        Screen::QuitConfirm => &[("Y", "Quit"), ("N / Esc", "Cancel")],
+        Screen::QuitConfirm => &[("Enter", "Quit"), ("Esc", "Cancel")],
     }
 }
 

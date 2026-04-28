@@ -1,5 +1,5 @@
-//! New-game wizard. Six steps (save path → team → mode → season → seed →
-//! confirm). On confirm, dispatches `Command::New` and transitions back to the
+//! New-game wizard. Five steps (save path → team → mode → season → confirm).
+//! On confirm, dispatches `Command::New` and transitions back to the
 //! Menu screen with the new save loaded.
 //!
 //! State is kept in a thread-local since per-screen state can't live on the
@@ -38,7 +38,6 @@ enum Step {
     Team,
     Mode,
     Season,
-    Seed,
     Confirm,
 }
 
@@ -48,8 +47,7 @@ struct WizardState {
     team_picker: Picker<Team>,
     mode_picker: Picker<&'static str>,
     season: NumberInput,
-    seed: NumberInput,
-    /// Last error from a failed dispatch (`new` overwrite refuse, missing seed).
+    /// Last error from a failed dispatch (`new` overwrite refuse, invalid input).
     error: Option<String>,
 }
 
@@ -71,8 +69,9 @@ impl WizardState {
                 MODES.to_vec(),
                 |s: &&'static str| s.to_string(),
             ),
-            season: NumberInput::new(t(lang, T::NewGameSeason)).with_bounds(2024, 2030).with_initial(2026),
-            seed: NumberInput::new(t(lang, T::NewGameSeed)).with_bounds(0, i64::MAX).with_initial(42),
+            season: NumberInput::new(t(lang, T::NewGameSeason))
+                .with_bounds(2024, 2030)
+                .with_initial(2026),
             error: None,
         }
     }
@@ -82,7 +81,6 @@ impl WizardState {
         self.team_picker.set_title(t(lang, T::NewGameTeam));
         self.mode_picker.set_title(t(lang, T::NewGameMode));
         self.season.set_label(t(lang, T::NewGameSeason));
-        self.seed.set_label(t(lang, T::NewGameSeed));
     }
 }
 
@@ -123,9 +121,8 @@ fn normalize_save_path(input: &str) -> Result<PathBuf> {
         return Err(anyhow!("save path is empty"));
     }
     let mut path = PathBuf::from(trimmed);
-    let dir_like = trimmed.ends_with('/')
-        || trimmed.ends_with('\\')
-        || (path.exists() && path.is_dir());
+    let dir_like =
+        trimmed.ends_with('/') || trimmed.ends_with('\\') || (path.exists() && path.is_dir());
     if dir_like {
         path.push("save.db");
     } else if path.extension().is_none() {
@@ -180,7 +177,15 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, _app: &mut AppState, tui
         st.localize(tui.lang);
         draw_header(f, parts[0], theme, tui.lang, title, st.step);
         draw_body(f, parts[1], theme, tui.lang, &st);
-        draw_status(f, parts[2], theme, tui.lang, submit, back, st.error.as_deref());
+        draw_status(
+            f,
+            parts[2],
+            theme,
+            tui.lang,
+            submit,
+            back,
+            st.error.as_deref(),
+        );
     });
 }
 
@@ -190,8 +195,7 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, title: &str
         ("2", t(lang, T::NewGameTeam), Step::Team),
         ("3", t(lang, T::NewGameMode), Step::Mode),
         ("4", t(lang, T::NewGameSeason), Step::Season),
-        ("5", t(lang, T::NewGameSeed), Step::Seed),
-        ("6", t(lang, T::NewGameConfirm), Step::Confirm),
+        ("5", t(lang, T::NewGameConfirm), Step::Confirm),
     ];
     let mut spans: Vec<Span> = Vec::new();
     for (i, (n, label, s)) in labels.iter().enumerate() {
@@ -215,7 +219,10 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
         Step::SavePath => {
             let inner = vsplit(area, 4);
             let lines = vec![
-                Line::from(Span::styled(t(lang, T::NewGameSavePath), theme.accent_style())),
+                Line::from(Span::styled(
+                    t(lang, T::NewGameSavePath),
+                    theme.accent_style(),
+                )),
                 Line::from(Span::styled(default_save_path(), theme.muted_style())),
                 Line::from(Span::styled(t(lang, T::SavesLoad), theme.accent_style())),
             ];
@@ -223,7 +230,7 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
                 .block(theme.block(""))
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner.0);
-            render_text_value(f, inner.1, theme, t(lang, T::NewGameSavePath), st.save_path.value());
+            st.save_path.render(f, inner.1, theme);
         }
         Step::Team => {
             if st.team_picker.items().is_empty() {
@@ -244,26 +251,23 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
         Step::Season => {
             let inner = vsplit(area, 3);
             let lines = vec![
-                Line::from(Span::styled(t(lang, T::NewGameSeason), theme.accent_style())),
+                Line::from(Span::styled(
+                    t(lang, T::NewGameSeason),
+                    theme.accent_style(),
+                )),
                 Line::from(Span::styled("2024-2030", theme.muted_style())),
             ];
             let p = Paragraph::new(lines)
                 .block(theme.block(""))
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner.0);
-            render_text_value(f, inner.1, theme, t(lang, T::NewGameSeason), st.season.raw());
-        }
-        Step::Seed => {
-            let inner = vsplit(area, 3);
-            let lines = vec![
-                Line::from(Span::styled(t(lang, T::NewGameSeed), theme.accent_style())),
-                Line::from(Span::styled("42", theme.muted_style())),
-            ];
-            let p = Paragraph::new(lines)
-                .block(theme.block(""))
-                .wrap(Wrap { trim: false });
-            f.render_widget(p, inner.0);
-            render_text_value(f, inner.1, theme, t(lang, T::NewGameSeed), st.seed.raw());
+            render_text_value(
+                f,
+                inner.1,
+                theme,
+                t(lang, T::NewGameSeason),
+                st.season.raw(),
+            );
         }
         Step::Confirm => {
             let team_label = st
@@ -281,19 +285,16 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
                 .value()
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| st.season.raw().to_string());
-            let seed_label = st
-                .seed
-                .value()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| st.seed.raw().to_string());
             let lines = vec![
-                Line::from(Span::styled(t(lang, T::NewGameConfirm), theme.accent_style())),
+                Line::from(Span::styled(
+                    t(lang, T::NewGameConfirm),
+                    theme.accent_style(),
+                )),
                 Line::from(""),
                 kv_line(theme, t(lang, T::NewGameSavePath), st.save_path.value()),
                 kv_line(theme, t(lang, T::NewGameTeam), &team_label),
                 kv_line(theme, t(lang, T::NewGameMode), &mode_label),
                 kv_line(theme, t(lang, T::NewGameSeason), &season_label),
-                kv_line(theme, t(lang, T::NewGameSeed), &seed_label),
                 Line::from(""),
                 Line::from(Span::styled(
                     format!(
@@ -319,13 +320,7 @@ fn render_text_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, valu
     f.render_widget(Paragraph::new(line).block(theme.block("")), area);
 }
 
-fn render_team_picker(
-    f: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    lang: Lang,
-    picker: &Picker<Team>,
-) {
+fn render_team_picker(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, picker: &Picker<Team>) {
     render_picker_lines(
         f,
         area,
@@ -388,7 +383,13 @@ fn render_picker_lines(
     let block_title = if filter_lc.is_empty() {
         format!(" {} ({}) ", title, count)
     } else {
-        format!(" {} ({}) - {}: {} ", title, count, t(lang, T::CommonFilter), filter)
+        format!(
+            " {} ({}) - {}: {} ",
+            title,
+            count,
+            t(lang, T::CommonFilter),
+            filter
+        )
     };
     f.render_widget(List::new(items).block(theme.block(&block_title)), area);
 }
@@ -445,7 +446,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             match key.code {
                 KeyCode::Enter => return WizardAction::Submit,
                 KeyCode::Esc => {
-                    st.step = Step::Seed;
+                    st.step = Step::Season;
                     return WizardAction::Consumed;
                 }
                 _ => return WizardAction::Consumed,
@@ -457,7 +458,6 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             Step::Team => st.team_picker.handle_key(key),
             Step::Mode => st.mode_picker.handle_key(key),
             Step::Season => st.season.handle_key(key),
-            Step::Seed => st.seed.handle_key(key),
             Step::Confirm => unreachable!(),
         };
         match ev {
@@ -484,10 +484,10 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             });
             if res.is_ok() {
                 reset();
-                tui.current = Screen::Menu;
                 tui.invalidate_caches();
                 crate::tui::screens::home::invalidate();
                 crate::tui::screens::saves::invalidate();
+                tui.show_home_preview();
             }
             Ok(true)
         }
@@ -534,14 +534,6 @@ fn advance_step(st: &mut WizardState) -> WizardAction {
                 return WizardAction::Consumed;
             }
             st.error = None;
-            st.step = Step::Seed;
-        }
-        Step::Seed => {
-            if st.seed.value().is_none() {
-                st.error = Some("seed must be a non-negative integer".into());
-                return WizardAction::Consumed;
-            }
-            st.error = None;
             st.step = Step::Confirm;
         }
         Step::Confirm => unreachable!(),
@@ -556,8 +548,7 @@ fn retreat_step(st: &mut WizardState) -> WizardAction {
         Step::Team => st.step = Step::SavePath,
         Step::Mode => st.step = Step::Team,
         Step::Season => st.step = Step::Mode,
-        Step::Seed => st.step = Step::Season,
-        Step::Confirm => st.step = Step::Seed,
+        Step::Confirm => st.step = Step::Season,
     }
     WizardAction::Consumed
 }
@@ -581,12 +572,16 @@ fn submit(app: &mut AppState, tui: &mut TuiApp) -> Result<()> {
             .copied()
             .unwrap_or("standard")
             .to_string();
-        let season = st
-            .season
-            .value()
-            .ok_or_else(|| anyhow!("season not set"))? as u16;
-        let seed = st.seed.value().ok_or_else(|| anyhow!("seed not set"))? as u64;
-        Ok((save_path, NewArgs { team, mode, season, seed }))
+        let season = st.season.value().ok_or_else(|| anyhow!("season not set"))? as u16;
+        Ok((
+            save_path,
+            NewArgs {
+                team,
+                mode,
+                season,
+                seed: rand::random::<u64>(),
+            },
+        ))
     })?;
 
     if save_path.exists() {
@@ -608,5 +603,6 @@ fn submit(app: &mut AppState, tui: &mut TuiApp) -> Result<()> {
     // re-reads season_state, user team, and user_abbrev in one shot.
     tui.refresh_save_ctx(app)?;
     tui.last_msg = Some(format!("created {}", save_path.display()));
+    tui.show_home_preview();
     Ok(())
 }

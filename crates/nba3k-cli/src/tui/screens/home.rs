@@ -95,10 +95,18 @@ impl PlayerTotals {
         self.team = Some(team);
     }
 
-    fn ppg(&self) -> f32 { per_game(self.pts, self.gp) }
-    fn rpg(&self) -> f32 { per_game(self.reb, self.gp) }
-    fn apg(&self) -> f32 { per_game(self.ast, self.gp) }
-    fn mpg(&self) -> f32 { per_game(self.minutes, self.gp) }
+    fn ppg(&self) -> f32 {
+        per_game(self.pts, self.gp)
+    }
+    fn rpg(&self) -> f32 {
+        per_game(self.reb, self.gp)
+    }
+    fn apg(&self) -> f32 {
+        per_game(self.ast, self.gp)
+    }
+    fn mpg(&self) -> f32 {
+        per_game(self.minutes, self.gp)
+    }
 }
 
 #[derive(Default, Clone)]
@@ -111,10 +119,18 @@ struct TeamTotals {
 }
 
 impl TeamTotals {
-    fn ppg(&self) -> f32 { per_game(self.pts, self.games) }
-    fn oppg(&self) -> f32 { per_game(self.opp_pts, self.games) }
-    fn rpg(&self) -> f32 { per_game(self.reb, self.games) }
-    fn apg(&self) -> f32 { per_game(self.ast, self.games) }
+    fn ppg(&self) -> f32 {
+        per_game(self.pts, self.games)
+    }
+    fn oppg(&self) -> f32 {
+        per_game(self.opp_pts, self.games)
+    }
+    fn rpg(&self) -> f32 {
+        per_game(self.reb, self.games)
+    }
+    fn apg(&self) -> f32 {
+        per_game(self.ast, self.games)
+    }
 }
 
 /// Drop the cached dashboard so the next render re-fetches. Called from the
@@ -162,9 +178,9 @@ fn draw_dashboard(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &Ho
     let middle = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
+            Constraint::Percentage(32),
+            Constraint::Percentage(32),
+            Constraint::Percentage(36),
         ])
         .split(outer[1]);
 
@@ -210,10 +226,14 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeS
         Line::from(Span::styled(s.record.clone(), theme.accent_style()))
             .alignment(Alignment::Center),
         Line::from(Span::styled(
-            format!("{} {}", s.conference_rank, t(tui.lang, T::HomeConferenceRank)),
+            format!(
+                "{} {}",
+                s.conference_rank,
+                t(tui.lang, T::HomeConferenceRank)
+            ),
             theme.text(),
         ))
-            .alignment(Alignment::Center),
+        .alignment(Alignment::Center),
     ];
     let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::HomeTitle)));
     f.render_widget(p, area);
@@ -286,18 +306,21 @@ fn draw_team_stats(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &H
 }
 
 fn draw_finances(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
-    let lines: Vec<Line> = s
-        .finances
-        .iter()
-        .map(|(label, value)| {
-            Line::from(vec![
-                Span::styled(format!("{:<16}", t(tui.lang, *label)), theme.text()),
-                Span::styled(value.clone(), theme.accent_style()),
-            ])
-        })
-        .collect();
-    let p = Paragraph::new(lines).block(theme.block(t(tui.lang, T::HomeFinances)));
-    f.render_widget(p, area);
+    let rows = s.finances.iter().map(|(label, value)| {
+        Row::new([
+            Cell::from(Span::styled(t(tui.lang, *label), theme.text())),
+            Cell::from(
+                Line::from(Span::styled(value.clone(), theme.accent_style()))
+                    .alignment(Alignment::Right),
+            ),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [Constraint::Percentage(58), Constraint::Percentage(42)],
+    )
+    .block(theme.block(t(tui.lang, T::HomeFinances)));
+    f.render_widget(table, area);
 }
 
 fn draw_lineup(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
@@ -396,7 +419,11 @@ fn build_snapshot(app: &mut AppState, ctx: &SaveCtx) -> Result<HomeSnapshot> {
     let team_leaders = leaders_for_roster(user_roster, &player_totals, &team_abbrevs, false);
     let league_leaders = league_leaders(&players, &player_totals, &team_abbrevs);
     let team_stats = team_stat_rows(ctx.user_team, &teams, &team_totals);
-    let finances = finance_rows(store.team_salary(ctx.user_team, season)?, season, ctx.user_team);
+    let finances = finance_rows(
+        store.team_salary(ctx.user_team, season)?,
+        season,
+        ctx.user_team,
+    );
     let lineup = lineup_rows(
         store.read_starters(ctx.user_team)?,
         user_roster,
@@ -423,7 +450,12 @@ fn conference_rows(rows: &[StandingRow], conf: nba3k_core::Conference) -> Vec<St
         .filter(|r| r.conference == conf)
         .cloned()
         .collect();
-    out.sort_by(|a, b| b.wins.cmp(&a.wins).then(a.losses.cmp(&b.losses)).then(a.abbrev.cmp(&b.abbrev)));
+    out.sort_by(|a, b| {
+        b.wins
+            .cmp(&a.wins)
+            .then(a.losses.cmp(&b.losses))
+            .then(a.abbrev.cmp(&b.abbrev))
+    });
     out
 }
 
@@ -468,14 +500,34 @@ fn aggregate_games(
         let away_reb: u32 = g.box_score.away_lines.iter().map(|l| l.reb as u32).sum();
         let away_ast: u32 = g.box_score.away_lines.iter().map(|l| l.ast as u32).sum();
 
-        add_team_game(&mut teams, g.home, g.home_score, g.away_score, home_reb, home_ast);
-        add_team_game(&mut teams, g.away, g.away_score, g.home_score, away_reb, away_ast);
+        add_team_game(
+            &mut teams,
+            g.home,
+            g.home_score,
+            g.away_score,
+            home_reb,
+            home_ast,
+        );
+        add_team_game(
+            &mut teams,
+            g.away,
+            g.away_score,
+            g.home_score,
+            away_reb,
+            away_ast,
+        );
 
         for line in &g.box_score.home_lines {
-            players.entry(line.player).or_default().from_line(line, g.home);
+            players
+                .entry(line.player)
+                .or_default()
+                .from_line(line, g.home);
         }
         for line in &g.box_score.away_lines {
-            players.entry(line.player).or_default().from_line(line, g.away);
+            players
+                .entry(line.player)
+                .or_default()
+                .from_line(line, g.away);
         }
     }
 
@@ -644,7 +696,11 @@ where
         .collect();
     rows.sort_by(|a, b| {
         let ord = a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal);
-        if high_best { ord.reverse() } else { ord }
+        if high_best {
+            ord.reverse()
+        } else {
+            ord
+        }
     });
     rows.iter()
         .position(|(team, _)| *team == user_team)
@@ -695,7 +751,9 @@ fn lineup_rows(
             let stats = pid.and_then(|id| totals.get(&id));
             LineupRow {
                 position: pos,
-                name: player.map(|p| clean_name(&p.name)).unwrap_or_else(|| "-".to_string()),
+                name: player
+                    .map(|p| clean_name(&p.name))
+                    .unwrap_or_else(|| "-".to_string()),
                 ppg: stats.map(PlayerTotals::ppg).unwrap_or(0.0),
                 rpg: stats.map(PlayerTotals::rpg).unwrap_or(0.0),
                 apg: stats.map(PlayerTotals::apg).unwrap_or(0.0),
@@ -706,7 +764,11 @@ fn lineup_rows(
 }
 
 fn per_game(num: u32, gp: u32) -> f32 {
-    if gp == 0 { 0.0 } else { num as f32 / gp as f32 }
+    if gp == 0 {
+        0.0
+    } else {
+        num as f32 / gp as f32
+    }
 }
 
 fn ordinal(n: usize) -> String {
@@ -757,10 +819,6 @@ fn short_name(name: &str) -> String {
     }
 }
 
-pub fn handle_key(
-    _app: &mut AppState,
-    _tui: &mut TuiApp,
-    _key: KeyEvent,
-) -> Result<bool> {
+pub fn handle_key(_app: &mut AppState, _tui: &mut TuiApp, _key: KeyEvent) -> Result<bool> {
     Ok(false)
 }

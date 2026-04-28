@@ -89,7 +89,14 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
     draw_header(f, parts[0], theme, app, tui.lang);
     let modal_rect = STATE.with(|s| {
         let st = s.borrow();
-        draw_table(f, parts[1], theme, tui.lang, st.rows.as_deref().unwrap_or(&[]), st.cursor);
+        draw_table(
+            f,
+            parts[1],
+            theme,
+            tui.lang,
+            st.rows.as_deref().unwrap_or(&[]),
+            st.cursor,
+        );
         draw_hints(f, parts[2], theme, tui.lang);
         if matches!(st.modal, Modal::None) {
             None
@@ -125,12 +132,25 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, lan
     f.render_widget(p, area);
 }
 
-fn draw_table(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, rows: &[SaveRow], cursor: usize) {
+fn draw_table(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    rows: &[SaveRow],
+    cursor: usize,
+) {
     let header = Row::new(vec![
         Cell::from(Span::styled("PATH", theme.accent_style())),
         Cell::from(Span::styled("TEAM", theme.accent_style())),
-        Cell::from(Span::styled(t(lang, T::NewGameSeason), theme.accent_style())),
-        Cell::from(Span::styled(t(lang, T::CalendarDayOf), theme.accent_style())),
+        Cell::from(Span::styled(
+            t(lang, T::NewGameSeason),
+            theme.accent_style(),
+        )),
+        Cell::from(Span::styled(
+            t(lang, T::CalendarDayOf),
+            theme.accent_style(),
+        )),
         Cell::from(Span::styled("SIZE", theme.accent_style())),
         Cell::from(Span::styled("MODIFIED", theme.accent_style())),
     ]);
@@ -221,7 +241,12 @@ fn modal_rect(area: Rect) -> Rect {
     let h = 7.min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +302,9 @@ fn scan_saves() -> Vec<SaveRow> {
 }
 
 fn scan_db_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in rd.flatten() {
         let p = entry.path();
         if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("db") {
@@ -376,7 +403,10 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 crate::commands::dispatch(
                     app,
                     Command::Saves(SavesArgs {
-                        action: SavesAction::Delete { path: path.clone(), yes: true },
+                        action: SavesAction::Delete {
+                            path: path.clone(),
+                            yes: true,
+                        },
                     }),
                 )
             });
@@ -402,12 +432,17 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 crate::commands::dispatch(
                     app,
                     Command::Saves(SavesArgs {
-                        action: SavesAction::Export { path: path.clone(), to: dest.clone() },
+                        action: SavesAction::Export {
+                            path: path.clone(),
+                            to: dest.clone(),
+                        },
                     }),
                 )
             });
             match res {
-                Ok(()) => tui.last_msg = Some(format!("exported {} → {}", path.display(), dest.display())),
+                Ok(()) => {
+                    tui.last_msg = Some(format!("exported {} → {}", path.display(), dest.display()))
+                }
                 Err(e) => tui.last_msg = Some(format!("export failed: {}", e)),
             }
             return Ok(true);
@@ -428,7 +463,12 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         KeyCode::Down => {
             STATE.with(|s| {
                 let mut s = s.borrow_mut();
-                let max = s.rows.as_ref().map(|v| v.len()).unwrap_or(0).saturating_sub(1);
+                let max = s
+                    .rows
+                    .as_ref()
+                    .map(|v| v.len())
+                    .unwrap_or(0)
+                    .saturating_sub(1);
                 if s.cursor < max {
                     s.cursor += 1;
                 }
@@ -462,7 +502,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                     tui.last_msg = Some(format!("loaded {}", path.display()));
                     crate::tui::screens::home::invalidate();
                     tui.invalidate_caches();
-                    tui.current = Screen::Menu;
+                    tui.show_home_preview();
                 }
                 Err(e) => tui.last_msg = Some(format!("load failed: {}", e)),
             }
@@ -477,10 +517,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                     .map(|r| r.path.clone())
             });
             let Some(path) = path else { return Ok(true) };
-            let prompt = format!(
-                "Delete {}? This is irreversible. y/n",
-                path.display()
-            );
+            let prompt = format!("Delete {}? This is irreversible.", path.display());
             STATE.with(|s| {
                 s.borrow_mut().modal = Modal::Delete(Confirm::new(prompt), path);
             });

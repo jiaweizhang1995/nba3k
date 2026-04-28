@@ -26,7 +26,6 @@ use nba3k_core::{t, Cents, Lang, LeagueYear, Player, PlayerId, Position, SeasonI
 enum SortKey {
     Total,
     Years,
-    Name,
 }
 
 impl Default for SortKey {
@@ -57,7 +56,6 @@ struct ContractRow {
     y3: Cents,
     y4: Cents,
     total: Cents,
-    notes: String,
 }
 
 #[derive(Default)]
@@ -106,8 +104,8 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
     }
 
     if let Err(e) = ensure_cache(app, tui) {
-        let p =
-            Paragraph::new(format!("Finance unavailable: {}", e)).block(theme.block(t(tui.lang, T::FinanceTitle)));
+        let p = Paragraph::new(format!("Finance unavailable: {}", e))
+            .block(theme.block(t(tui.lang, T::FinanceTitle)));
         f.render_widget(p, area);
         return;
     }
@@ -137,7 +135,8 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     CACHE.with(|c| {
         let cache = c.borrow();
         let Some(s) = cache.snapshot.as_ref() else {
-            let p = Paragraph::new("No finance data loaded.").block(theme.block(t(lang, T::FinanceTitle)));
+            let p = Paragraph::new("No finance data loaded.")
+                .block(theme.block(t(lang, T::FinanceTitle)));
             f.render_widget(p, area);
             return;
         };
@@ -169,7 +168,10 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled(format!("{:<15}", t(lang, T::FinanceCap)), theme.accent_style()),
+                Span::styled(
+                    format!("{:<15}", t(lang, T::FinanceCap)),
+                    theme.accent_style(),
+                ),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -180,7 +182,10 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled(format!("{:<15}", t(lang, T::FinanceTax)), theme.accent_style()),
+                Span::styled(
+                    format!("{:<15}", t(lang, T::FinanceTax)),
+                    theme.accent_style(),
+                ),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -191,7 +196,10 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled(format!("{:<15}", t(lang, T::FinanceApron)), theme.accent_style()),
+                Span::styled(
+                    format!("{:<15}", t(lang, T::FinanceApron1)),
+                    theme.accent_style(),
+                ),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -202,7 +210,10 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled(format!("{:<15}", t(lang, T::FinanceApron)), theme.accent_style()),
+                Span::styled(
+                    format!("{:<15}", t(lang, T::FinanceApron2)),
+                    theme.accent_style(),
+                ),
                 Span::styled(
                     format!(
                         "{:<10} {}",
@@ -238,7 +249,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
             "{} / {} {} ({:.0}%)",
             s.payroll,
             s.league_year.apron_2,
-            t(lang, T::FinanceApron),
+            t(lang, T::FinanceApron2),
             ratio * 100.0
         );
         let right = Layout::default()
@@ -278,14 +289,16 @@ fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         let cursor = cache.cursor.min(snapshot.rows.len().saturating_sub(1));
         let header = Row::new(vec![
             Cell::from(Span::styled(t(lang, T::RosterPlayer), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterPosition), theme.accent_style())),
+            Cell::from(Span::styled(
+                t(lang, T::RosterPosition),
+                theme.accent_style(),
+            )),
             Cell::from(Span::styled(t(lang, T::RosterAge), theme.accent_style())),
             Cell::from(Span::styled("Y1", theme.accent_style())),
             Cell::from(Span::styled("Y2", theme.accent_style())),
             Cell::from(Span::styled("Y3", theme.accent_style())),
             Cell::from(Span::styled("Y4", theme.accent_style())),
             Cell::from(Span::styled(t(lang, T::FinanceTotal), theme.accent_style())),
-            Cell::from(Span::styled("NOTES", theme.accent_style())),
         ]);
 
         let body: Vec<Row> = snapshot
@@ -307,7 +320,6 @@ fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                     Cell::from(Span::styled(money_cell(r.y3), style)),
                     Cell::from(Span::styled(money_cell(r.y4), style)),
                     Cell::from(Span::styled(format!("{}", r.total), style)),
-                    Cell::from(Span::styled(r.notes.clone(), style)),
                 ])
             })
             .collect();
@@ -329,7 +341,6 @@ fn draw_contracts(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
                 Constraint::Length(8),
                 Constraint::Length(8),
                 Constraint::Length(9),
-                Constraint::Min(18),
             ],
         )
         .header(header)
@@ -344,7 +355,7 @@ fn draw_footer(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         ("Up/Dn", t(tui.lang, T::CommonMove)),
         ("PgUp/PgDn", t(tui.lang, T::CommonMove)),
         ("e", t(tui.lang, T::FinanceExtensions)),
-        ("t/y/n", t(tui.lang, T::CommonSort)),
+        ("Tab", t(tui.lang, T::CommonSort)),
         ("Esc", t(tui.lang, T::CommonBack)),
     ];
     match status {
@@ -424,7 +435,11 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
                 ])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" {}: {} (1/2)", t(lang, T::ModalExtendContractTitle), target_name),
+                format!(
+                    " {}: {} (1/2)",
+                    t(lang, T::ModalExtendContractTitle),
+                    target_name
+                ),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
@@ -456,7 +471,12 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
                 ])
                 .split(rect);
             let head = Paragraph::new(Line::from(Span::styled(
-                format!(" {}: {} (2/2) - ${}M/yr", t(lang, T::ModalExtendContractTitle), target_name, salary_m),
+                format!(
+                    " {}: {} (2/2) - ${}M/yr",
+                    t(lang, T::ModalExtendContractTitle),
+                    target_name,
+                    salary_m
+                ),
                 theme.accent_style(),
             )))
             .block(theme.block(""));
@@ -526,7 +546,6 @@ fn contract_row(player: Player, season: SeasonId) -> ContractRow {
     let mut year_salaries = [Cents::ZERO; 4];
     let mut years_remaining = 0usize;
     let mut total = Cents::ZERO;
-    let mut option_notes: Vec<String> = Vec::new();
 
     if let Some(contract) = player.contract.as_ref() {
         for year in contract.years.iter().filter(|y| y.season.0 >= season.0) {
@@ -537,25 +556,8 @@ fn contract_row(player: Player, season: SeasonId) -> ContractRow {
                     year_salaries[offset as usize] = year.salary;
                 }
             }
-            if year.team_option {
-                option_notes.push(format!("TO{}", year_label(season, year.season)));
-            }
-            if year.player_option {
-                option_notes.push(format!("PO{}", year_label(season, year.season)));
-            }
         }
     }
-
-    let mut notes: Vec<String> = Vec::new();
-    if player.no_trade_clause {
-        notes.push("NTC".to_string());
-    }
-    if let Some(kicker) = player.trade_kicker_pct {
-        if kicker > 0 {
-            notes.push(format!("{}% kicker", kicker));
-        }
-    }
-    notes.extend(option_notes);
 
     ContractRow {
         player_id: player.id,
@@ -568,11 +570,6 @@ fn contract_row(player: Player, season: SeasonId) -> ContractRow {
         y3: year_salaries[2],
         y4: year_salaries[3],
         total,
-        notes: if notes.is_empty() {
-            "-".to_string()
-        } else {
-            notes.join(", ")
-        },
     }
 }
 
@@ -593,7 +590,6 @@ fn apply_sort(cache: &mut FinanceCache) {
                 .then_with(|| b.total.cmp(&a.total))
                 .then_with(|| a.name.cmp(&b.name))
         }),
-        SortKey::Name => snapshot.rows.sort_by(|a, b| a.name.cmp(&b.name)),
     }
     cache.cursor = cache.cursor.min(snapshot.rows.len().saturating_sub(1));
 }
@@ -648,8 +644,12 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             });
             Ok(true)
         }
-        KeyCode::Char(c) if sort_key_from_char(c).is_some() => {
-            set_sort(sort_key_from_char(c).expect("guarded by is_some"));
+        KeyCode::Tab => {
+            cycle_sort(true);
+            Ok(true)
+        }
+        KeyCode::BackTab => {
+            cycle_sort(false);
             Ok(true)
         }
         KeyCode::Char('e') => {
@@ -803,28 +803,21 @@ fn current_row() -> Option<(PlayerId, String)> {
     })
 }
 
-fn set_sort(sort: SortKey) {
+fn cycle_sort(forward: bool) {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
-        c.sort = sort;
+        c.sort = match (c.sort, forward) {
+            (SortKey::Total, true) | (SortKey::Total, false) => SortKey::Years,
+            (SortKey::Years, true) | (SortKey::Years, false) => SortKey::Total,
+        };
         apply_sort(&mut c);
     });
 }
 
-fn sort_key_from_char(c: char) -> Option<SortKey> {
-    match c {
-        't' => Some(SortKey::Total),
-        'y' => Some(SortKey::Years),
-        'n' => Some(SortKey::Name),
-        _ => None,
-    }
-}
-
 fn sort_label(lang: Lang, sort: SortKey) -> &'static str {
     match sort {
-        SortKey::Total => t(lang, T::FinanceTotal),
-        SortKey::Years => t(lang, T::FinanceYears),
-        SortKey::Name => t(lang, T::RosterPlayer),
+        SortKey::Total => t(lang, T::FinanceSortTotal),
+        SortKey::Years => t(lang, T::FinanceSortYears),
     }
 }
 
@@ -833,16 +826,6 @@ fn money_cell(c: Cents) -> String {
         "-".to_string()
     } else {
         format!("{}", c)
-    }
-}
-
-fn year_label(current: SeasonId, year: SeasonId) -> String {
-    match year.0.checked_sub(current.0).unwrap_or(0) {
-        0 => "Y1".to_string(),
-        1 => "Y2".to_string(),
-        2 => "Y3".to_string(),
-        3 => "Y4".to_string(),
-        _ => format!("{}", year.0),
     }
 }
 
@@ -855,11 +838,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sort_key_from_char_maps_footer_shortcuts() {
-        assert_eq!(sort_key_from_char('t'), Some(SortKey::Total));
-        assert_eq!(sort_key_from_char('y'), Some(SortKey::Years));
-        assert_eq!(sort_key_from_char('n'), Some(SortKey::Name));
-        assert_eq!(sort_key_from_char('x'), None);
-        assert_eq!(sort_key_from_char('T'), None);
+    fn cycle_sort_toggles_total_and_years() {
+        CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.sort = SortKey::Total;
+            c.snapshot = None;
+        });
+
+        cycle_sort(true);
+        CACHE.with(|c| assert_eq!(c.borrow().sort, SortKey::Years));
+
+        cycle_sort(true);
+        CACHE.with(|c| assert_eq!(c.borrow().sort, SortKey::Total));
     }
 }
