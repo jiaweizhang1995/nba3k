@@ -241,12 +241,20 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
             t(lang, T::FinanceApron),
             ratio * 100.0
         );
-        let gauge = Gauge::default()
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(4), Constraint::Min(3)])
+            .split(chunks[1]);
+        let label_p = Paragraph::new(Line::from(Span::styled(label, theme.text())))
             .block(theme.block(t(lang, T::FinancePayroll)))
+            .wrap(Wrap { trim: false });
+        f.render_widget(label_p, right[0]);
+
+        let gauge = Gauge::default()
             .gauge_style(theme.accent_style())
-            .label(label)
+            .label(format!("{:.0}%", ratio * 100.0))
             .ratio(ratio);
-        f.render_widget(gauge, chunks[1]);
+        f.render_widget(gauge, right[1]);
     });
 }
 

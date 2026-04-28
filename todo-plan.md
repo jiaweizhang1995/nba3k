@@ -361,7 +361,9 @@ User-reported items 2026-04-28 after running release build. Same protocol as abo
 
 ## T12 — Finance text contrast + cap-line overflow
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 290 unit tests passed; Finance Gauge label shortened and cap text wraps.
 
 **Goal a**: Finance screen has a band where light cream text sits on dark blue background — barely readable (image #11). Looks like the highlight style is being applied to the cap summary band where it shouldn't be, or the highlight bg + fg combo is too close in luminance.
 
