@@ -563,7 +563,9 @@ User goal: most TUI interactions should be possible with arrows + Enter + Tab + 
 
 ## T17 — Roster sort: drop letters, Tab cycles, show current sort label
 
-**Status**: `[ ]`
+**Status**: `[x]`
+
+→ codex: done — this commit — 296 unit tests passed; o/p/a/s sort shortcut grep clean and localized sort labels synced.
 
 **Goal**: Replace `o` / `p` / `a` sort hotkeys with a single Tab-cycled sort selector. Show current sort label in Chinese (or localized — read `tui.lang`) at the top of the table.
 

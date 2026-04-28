@@ -1,4 +1,4 @@
-//! Roster screen (M21): sortable player table (OVR/Pos/Age/Salary), per-row
+//! Roster screen (M21): sortable player table (OVR/Pos/Age), per-row
 //! actions for Train / Extend / Cut / Role, and a Player Detail modal
 //! (Stats / Career / Contract / Chemistry).
 //!
@@ -11,7 +11,7 @@
 //! Key bindings:
 //!   ↑ / ↓      — move row cursor       PgUp/PgDn  — ±10 rows
 //!   Enter      — Player Detail modal
-//!   o p a s    — sort (OVR/Pos/Age/Sal) t/e/x/R     — Train/Extend/Cut/Role
+//!   Tab/Shift-Tab — cycle sort        t/e/x/R     — Train/Extend/Cut/Role
 //!   Esc        — close modal / back to menu
 //!
 //! Esc semantics: any open modal swallows the Esc; otherwise the shell
@@ -46,10 +46,9 @@ use nba3k_season::career::{career_totals, SeasonAvgRow};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum SortKey {
-    Ovr,         // o — default
-    Position,    // p
-    Age,         // a
-    Salary,      // s
+    Ovr,
+    Position,
+    Age,
 }
 
 #[derive(Clone, Debug)]
@@ -60,7 +59,6 @@ struct RosterRow {
     age: u8,
     overall: u8,
     role: PlayerRole,
-    salary_cents: i64,
     cap_pct: f32, // 0..100
     ppg: f32,
     rpg: f32,
@@ -230,7 +228,7 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
             " {} ({}) - {}: {} ",
             t(lang, T::RosterMyRoster),
             rows.len(),
-            t(lang, T::CommonSort),
+            t(lang, T::RosterSortLabel),
             sort_label(lang, cache.sort),
         );
         let table = Table::new(
@@ -252,13 +250,14 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
         .block(theme.block(&title));
         f.render_widget(table, parts[0]);
 
+        let sort_hint = sort_action_label(lang, cache.sort);
         let hints = [
             ("t", t(lang, T::RosterTrain)),
             ("e", t(lang, T::RosterExtend)),
             ("x", t(lang, T::RosterCut)),
             ("R", t(lang, T::RosterSetRole)),
             ("Enter", t(lang, T::CommonDetail)),
-            ("o/p/a/s", t(lang, T::CommonSort)),
+            ("Tab", sort_hint.as_str()),
             ("Esc", t(lang, T::CommonBack)),
         ];
         let bar = ActionBar::new(&hints);
@@ -606,7 +605,6 @@ fn build_roster_rows(app: &mut AppState, tui: &TuiApp) -> Result<Vec<RosterRow>>
             age: p.age,
             overall: p.overall,
             role: p.role,
-            salary_cents,
             cap_pct,
             ppg,
             rpg,
@@ -629,11 +627,6 @@ fn apply_sort(cache: &mut RosterCache) {
         }),
         SortKey::Age => rows.sort_by(|a, b| {
             a.age.cmp(&b.age).then_with(|| b.overall.cmp(&a.overall))
-        }),
-        SortKey::Salary => rows.sort_by(|a, b| {
-            b.salary_cents
-                .cmp(&a.salary_cents)
-                .then_with(|| b.overall.cmp(&a.overall))
         }),
     }
     cache.roster_cursor = cache
@@ -1140,34 +1133,18 @@ fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             });
             Ok(true)
         }
-        KeyCode::Char('o') => {
+        KeyCode::Tab => {
             CACHE.with(|c| {
                 let mut c = c.borrow_mut();
-                c.sort = SortKey::Ovr;
+                c.sort = next_sort(c.sort);
                 apply_sort(&mut c);
             });
             Ok(true)
         }
-        KeyCode::Char('p') => {
+        KeyCode::BackTab => {
             CACHE.with(|c| {
                 let mut c = c.borrow_mut();
-                c.sort = SortKey::Position;
-                apply_sort(&mut c);
-            });
-            Ok(true)
-        }
-        KeyCode::Char('a') => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                c.sort = SortKey::Age;
-                apply_sort(&mut c);
-            });
-            Ok(true)
-        }
-        KeyCode::Char('s') => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                c.sort = SortKey::Salary;
+                c.sort = prev_sort(c.sort);
                 apply_sort(&mut c);
             });
             Ok(true)
@@ -1335,10 +1312,29 @@ fn short_role(lang: Lang, r: PlayerRole) -> &'static str {
 
 fn sort_label(lang: Lang, s: SortKey) -> &'static str {
     match s {
-        SortKey::Ovr => t(lang, T::RosterOverall),
-        SortKey::Position => t(lang, T::RosterPosition),
-        SortKey::Age => t(lang, T::RosterAge),
-        SortKey::Salary => t(lang, T::RosterSalary),
+        SortKey::Ovr => t(lang, T::RosterSortOverall),
+        SortKey::Position => t(lang, T::RosterSortPosition),
+        SortKey::Age => t(lang, T::RosterSortAge),
+    }
+}
+
+fn sort_action_label(lang: Lang, s: SortKey) -> String {
+    format!("{} ({})", t(lang, T::RosterSortLabel), sort_label(lang, s))
+}
+
+fn next_sort(sort: SortKey) -> SortKey {
+    match sort {
+        SortKey::Ovr => SortKey::Position,
+        SortKey::Position => SortKey::Age,
+        SortKey::Age => SortKey::Ovr,
+    }
+}
+
+fn prev_sort(sort: SortKey) -> SortKey {
+    match sort {
+        SortKey::Ovr => SortKey::Age,
+        SortKey::Position => SortKey::Ovr,
+        SortKey::Age => SortKey::Position,
     }
 }
 
