@@ -137,6 +137,7 @@ pub enum Screen {
 pub struct SaveCtx {
     pub user_team: TeamId,
     pub user_abbrev: String,
+    pub user_team_name: String,
     pub season: SeasonId,
     pub season_state: SeasonState,
 }
@@ -153,9 +154,13 @@ impl SaveCtx {
         let user_abbrev = store
             .team_abbrev(user_team)?
             .unwrap_or_else(|| format!("T{}", user_team.0));
+        let user_team_name = store
+            .team_name(user_team)?
+            .unwrap_or_else(|| user_abbrev.clone());
         Ok(Some(Self {
             user_team,
             user_abbrev,
+            user_team_name,
             season: season_state.season,
             season_state,
         }))
@@ -169,7 +174,7 @@ impl SaveCtx {
 /// **No-save mode.** When the shell launches with no `--save` / no
 /// `season_state`, `save_ctx` is `None` and the shell forces
 /// `Screen::NewGame` so the wizard is the only reachable entry. The mirrored
-/// `user_team` / `user_abbrev` / `season` / `season_state` / `payroll` fields
+/// `user_team` / `user_abbrev` / `user_team_name` / `season` / `season_state` / `payroll` fields
 /// hold safe-default values in that mode — Wave-1 screens that read them
 /// must guard via `has_save()` first.
 pub struct TuiApp {
@@ -195,6 +200,8 @@ pub struct TuiApp {
     pub user_team: TeamId,
     /// User team abbreviation. Empty string when no save loaded.
     pub user_abbrev: String,
+    /// User team full name. Empty string when no save loaded.
+    pub user_team_name: String,
     /// Current season. `SeasonId(0)` when no save loaded.
     pub season: SeasonId,
     /// Current season state. Default-zeroed when no save loaded.
@@ -225,6 +232,7 @@ impl TuiApp {
             save_ctx: None,
             user_team: TeamId(0),
             user_abbrev: String::new(),
+            user_team_name: String::new(),
             season: SeasonId(0),
             season_state: empty_season_state(),
             payroll: None,
@@ -251,6 +259,7 @@ impl TuiApp {
             Some(c) => {
                 self.user_team = c.user_team;
                 self.user_abbrev = c.user_abbrev.clone();
+                self.user_team_name = c.user_team_name.clone();
                 self.season = c.season;
                 self.season_state = c.season_state.clone();
                 self.payroll = None;
@@ -259,6 +268,7 @@ impl TuiApp {
             None => {
                 self.user_team = TeamId(0);
                 self.user_abbrev = String::new();
+                self.user_team_name = String::new();
                 self.season = SeasonId(0);
                 self.season_state = empty_season_state();
                 self.payroll = None;
@@ -1334,6 +1344,7 @@ mod tests {
         SaveCtx {
             user_team: TeamId(1),
             user_abbrev: "BOS".to_string(),
+            user_team_name: "Boston Celtics".to_string(),
             season: SeasonId(2026),
             season_state: empty_season_state(),
         }

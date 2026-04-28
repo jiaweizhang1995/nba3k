@@ -189,6 +189,18 @@ impl Store {
         Ok(v)
     }
 
+    pub fn team_name(&self, id: TeamId) -> StoreResult<Option<String>> {
+        let v: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT city, name FROM teams WHERE id = ?1",
+                params![id.0 as i64],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(v.map(|(city, name)| format!("{} {}", city, name)))
+    }
+
     // ------------------------------------------------------------------
     // players
     // ------------------------------------------------------------------

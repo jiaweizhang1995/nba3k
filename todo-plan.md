@@ -281,3 +281,159 @@ User wants:
 - T7 inbox menu position: 7th, between Finance (#6) and Calendar (#8). Total menu = 9.
 - T8 mandate: delete code paths; V013 migration stays as orphan.
 - T9 calendar: view-only, kept on the menu.
+
+---
+
+# M25 — UX polish backlog (post-M24 user feedback)
+
+User-reported items 2026-04-28 after running release build. Same protocol as above (status legend / commit format / new i18n keys allowed when tables stay in sync).
+
+## T10 — Default starting lineup + rotation row alignment
+
+**Status**: `[ ]`
+
+**Goal a**: New saves should start with a populated default starting 5 (top-OVR by adjacency-aware position fit, same algorithm as the existing auto-builder in `build_snapshot`). User then edits. No more all-empty rotation screen on first open.
+
+**Goal b**: Rotation screen layout bug — when a slot is empty, the row text `> C  [empty — auto-pick]  press Enter to choose` does NOT align with filled rows like `PF  Miles Bridges (84 OVR)  press Enter to change, c to clear`. Position label width inconsistent (single-letter `C` vs two-letter `PG`/`SG`/`SF`/`PF`), and the hint column slides left.
+
+**Files**:
+- `crates/nba3k-cli/src/commands.rs` — `cmd_new(...)` (creates fresh save). After season_state + roster persist, call new helper `populate_default_starters(store, user_team) -> Result<()>` that:
+  1. Reads user team roster.
+  2. Picks 5 starters using the existing `build_snapshot` adjacency-aware top-OVR algorithm (extract that picker into a shared function in `nba3k-core::rotation` or `nba3k-cli::commands`).
+  3. Writes 5 rows into `team_starters` via `Store::upsert_starter`.
+- Same helper invoked at `Store::open` time on saves where `team_starters` is empty for the user team — guards against pre-existing saves missing defaults. Cheap idempotent check.
+- `crates/nba3k-cli/src/tui/screens/rotation.rs` — fix row formatter:
+  - Pad position label to 2 columns: `format!("{:<2}", pos.label())` so `C ` matches `PG`.
+  - Fixed-width name column (e.g. 24 cols), then fixed-width hint suffix (`>= 32 cols`).
+  - Selected-row prefix `> ` already 2 cols, ensure unselected is `  ` 2 cols (no shift).
+  - Empty-slot text should still respect the same column widths so `[empty — auto-pick]` aligns with `Miles Bridges (84 OVR)`.
+
+**Acceptance**:
+- New save → Menu → Rotation → 5 slots already filled with sensible top-OVR starters.
+- All 5 rows align column-for-column whether filled or empty.
+- User can `c` to clear a slot, picker re-opens, fill restored.
+- Existing saves (if any) get auto-populated defaults the first time they're loaded post-fix.
+
+**Verification**:
+- `cargo build --workspace` clean.
+- `cargo test --workspace` ≥ baseline (currently 289). Add 1 test in `nba3k-store/tests/rotation.rs` confirming `populate_default_starters` writes 5 rows for a team with ≥5 players.
+- Manual smoke screenshot vs current image #10 shows aligned rows.
+
+---
+
+## T11 — Focus border indicator (sidebar vs content active region)
+
+**Status**: `[ ]`
+
+**Goal**: User can't tell whether they're focused on the sidebar menu or the content pane. Add a yellow accent border around the **active** zone (whichever side currently consumes input). Mirror the existing yellow-border pattern used by the Calendar selected-day cell (image #12).
+
+**Spec**:
+
+- New enum on `TuiApp`: `pub focus: FocusZone { Sidebar, Content }`.
+- Rules:
+  - `Screen::Menu` → focus = Sidebar.
+  - Any inner screen with `tui.preview_mode == true` → focus = Sidebar (user is hovering menu items, content is preview).
+  - Any inner screen with `tui.preview_mode == false` → focus = Content (Enter/Tab focused).
+  - Launch / NewGame / Saves / QuitConfirm / Settings → focus = Content (full-area screens).
+- Renderer: introduce `Theme::focus_block(title, active: bool) -> Block` helper. When `active`, border style = `theme.accent_style()` (yellow). When inactive, border style = `theme.muted_style()` (default gray).
+- Apply at the **outer container** of each region:
+  - Sidebar (season banner + menu, currently uses `theme.block(...)`) wraps in `theme.focus_block(title, focus == FocusZone::Sidebar)`.
+  - Content area: each screen's outermost block uses `theme.focus_block(title, focus == FocusZone::Content)`.
+- Internal sub-panels (Home's standings / leaders / finances / etc.) keep their default block style — only the outer frame switches.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/widgets.rs` — `Theme::focus_block` helper.
+- `crates/nba3k-cli/src/tui/mod.rs` — derive `tui.focus` from current state in `draw()`. Pass into `draw_sidebar` and `draw_content`. Each screen render fn signature optionally accepts `focused: bool` (read from `tui.focus` at the call site).
+- Each `screens/*.rs` outer block call switches to `theme.focus_block(title, focused)`. Default to `true` for full-area screens.
+
+**Acceptance**:
+- On Menu / preview mode → sidebar has yellow border, content gray.
+- On focused inner screen (post Enter/Tab) → content has yellow border, sidebar gray.
+- Esc from inner screen → sidebar border becomes yellow again (preview_mode resumed).
+- Calendar's existing selected-day yellow cell still works (T11 doesn't regress that).
+
+**Verification**:
+- `cargo build --workspace` clean.
+- `cargo test --workspace` ≥ 289.
+- Manual screenshot smoke: launch save → arrow nav (yellow on sidebar) → Enter (yellow flips to content) → Esc (yellow flips back).
+
+---
+
+## T12 — Finance text contrast + cap-line overflow
+
+**Status**: `[ ]`
+
+**Goal a**: Finance screen has a band where light cream text sits on dark blue background — barely readable (image #11). Looks like the highlight style is being applied to the cap summary band where it shouldn't be, or the highlight bg + fg combo is too close in luminance.
+
+**Goal b**: The cap implication line `$171.11M / $207.82M 硬帽线 (` cuts off at the open paren — content overflows the panel width. Need either wrap, truncate-with-ellipsis, or shorter copy.
+
+**Spec**:
+
+- Inspect `crates/nba3k-cli/src/tui/screens/finance.rs` for any `.style(theme.highlight())` on summary lines that aren't selectable rows. If the cap summary is using highlight, switch to `theme.accent_style()` (yellow on default bg) or `theme.text()` for normal contrast.
+- For the overflow: wrap the cap line in `Paragraph::new(...).wrap(Wrap { trim: false })` so it spans 2 lines if width is tight. Or split the metric into two lines deliberately — line 1 `$171.11M / $207.82M` and line 2 `硬帽线 (剩余 $36M)` etc.
+- Theme audit: verify `Theme::DEFAULT` and `Theme::TV` highlight combos are legible. If `bg=DarkGray, fg=Yellow` produces the screenshot's near-illegible state, swap to `bg=Black, fg=Yellow` or `bg=Yellow, fg=Black` for genuine contrast — but this affects every screen using highlight. Prefer the per-screen fix unless the global combo is genuinely broken.
+- Inbox / Roster / Trades selected-row highlight should still look clearly distinct after any global theme tweak.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/finance.rs` — switch styles + add wrap to cap summary line.
+- `crates/nba3k-cli/src/tui/widgets.rs` only if global highlight needs adjustment.
+
+**Acceptance**:
+- Finance cap summary is readable at default + TV themes.
+- The 硬帽线 / 软帽线 / 第一档 / 第二档 lines fit fully within the panel; if truncation is unavoidable, the truncation is intentional and ends with `…`.
+
+**Verification**:
+- `cargo build --workspace` clean.
+- `cargo test --workspace` ≥ 289.
+- Manual screenshot smoke vs image #11.
+
+---
+
+## T13 — Home header shows team identity (abbrev + full name)
+
+**Status**: `[x]`
+
+→ codex: done — this commit — 290 unit tests passed; Home header now shows abbrev + full team name.
+
+**Goal**: Home header currently shows `2-13 / 15th 分区` but no team identity. User can't tell which franchise they're managing without checking the sidebar banner. Add team abbrev + full name above the record line.
+
+**Spec**:
+
+Header layout becomes 3 centered lines:
+
+```
+ CHO Charlotte Hornets
+
+       2-13
+   15th in conference
+```
+
+(Or 2 lines if vertical room is tight: line 1 `CHO Charlotte Hornets`, line 2 `2-13 · 15th in conference`. Codex chooses based on header height — current header is 3 lines tall, so prefer the 3-line version with a blank gap line.)
+
+Localization:
+- Team abbrev: always raw uppercase from `Team::abbrev` (data, never localized).
+- Team full name: `Team::name` from store. English in EN locale; ZH locale also shows the English `Team::name` field — locked invariant says "team abbreviations stay English (data, not chrome)" — extend that to team full names too. NO translation table for team names.
+- "in conference" / "分区" suffix is chrome → localized via existing `T::HomeConferenceRank`.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/home.rs` — `draw_header` rebuild with new 3-line layout pulling `tui.user_abbrev` + a new field `user_team_name` mirrored from `SaveCtx`.
+- `crates/nba3k-cli/src/tui/mod.rs` — `SaveCtx::load` reads `team_full_name` via `Store::team_name(team_id)` (add accessor if missing in `crates/nba3k-store/src/store.rs`).
+- `crates/nba3k-store/src/store.rs` — `team_name(team_id) -> Result<Option<String>>` if not already exposed.
+
+**Acceptance**:
+- Home header shows e.g. `CHO Charlotte Hornets` line, then `2-13`, then `15th in conference`.
+- Switching language → only the suffix `in conference / 分区` flips; team name stays English.
+
+**Verification**:
+- `cargo build --workspace` clean.
+- `cargo test --workspace` ≥ 289.
+- Manual screenshot smoke vs image #13: identifying franchise is obvious at a glance.
+
+---
+
+## Coordination protocol (M25)
+
+- Codex picks T10–T13 in any order; they touch mostly disjoint files. T11 (focus border) is the one that ripples — every screen's outer block changes — so leave it for last to avoid merge conflicts with T10/T12/T13.
+- Commit format: `M25-T<N>: <one-line summary>`.
+- Same i18n discipline: tables in lockstep when keys are added.
+- Status notes in this file: codex flips `[ ]` → `[~]` → `[x]` and leaves a `→ codex: ...` line per task.

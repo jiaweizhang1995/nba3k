@@ -151,7 +151,7 @@ fn draw_dashboard(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &Ho
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(5),
             Constraint::Min(10),
             Constraint::Length(8),
         ])
@@ -200,7 +200,13 @@ fn draw_dashboard(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &Ho
 }
 
 fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp, s: &HomeSnapshot) {
+    let team_identity = if tui.user_team_name.is_empty() {
+        tui.user_abbrev.clone()
+    } else {
+        format!("{} {}", tui.user_abbrev, tui.user_team_name)
+    };
     let lines = vec![
+        Line::from(Span::styled(team_identity, theme.text())).alignment(Alignment::Center),
         Line::from(Span::styled(s.record.clone(), theme.accent_style()))
             .alignment(Alignment::Center),
         Line::from(Span::styled(
