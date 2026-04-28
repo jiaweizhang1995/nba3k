@@ -504,3 +504,172 @@ Localization:
 - Manual screenshot: rotation picker modal shows OVR perfectly aligned column.
 
 **Commit**: `M25-T14: align rotation picker OVR column (unicode-width)`.
+
+---
+
+# M26 — Keyboard model unification (Enter / Tab / Space / arrows)
+
+User goal: most TUI interactions should be possible with arrows + Enter + Tab + Space. Letter shortcuts allowed where they're the only practical option, but anywhere a "primary action" exists on a selected row, Enter should fire it. User-confirmed answers below; deviations require re-confirmation.
+
+## T15 — Saves screen: Enter = Load
+
+**Status**: `[ ]`
+
+**Goal**: On Saves overlay, pressing `Enter` on the highlighted row loads that save. Currently requires `l` / `L`.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/saves.rs` — add `KeyCode::Enter` arm matching the existing `KeyCode::Char('l') | KeyCode::Char('L')` handler. Both keys keep working (Enter primary, `l` legacy).
+- Action-bar hint update: replace `L Load` with `Enter Load` (keep `n New / d Delete / e Export` letters as secondary actions in their own action-bar slots).
+
+**Acceptance**:
+- Highlight a save → Enter → save loads, `Screen::Menu` appears with that save's context.
+- `l` / `L` still work.
+- New / Delete / Export still on their letter keys.
+
+**Verification**:
+- `cargo build --workspace` clean. `cargo test --workspace` ≥ 295.
+- Manual smoke: open saves overlay → arrow → Enter → save loads.
+
+**Commit**: `M26-T15: saves Enter loads selection`.
+
+---
+
+## T16 — Trades Inbox / My Proposals: Enter opens action picker
+
+**Status**: `[ ]`
+
+**Goal**: Three-action rows (Accept / Reject / Counter) currently bound to `a` / `r` / `c`. Replace with: Enter on selected offer pops a small action picker modal (3 rows: 接受 / 拒绝 / 还价), arrow + Enter fires the chosen action. `a/r/c` letters stay as a fast-path.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/trades.rs`:
+  - Add `Modal::OfferAction { offer_id, picker: Picker<&'static T> }` variant (or use a simple list of localized strings + an enum tag).
+  - `KeyCode::Enter` in Inbox tab + My Proposals tab opens the modal targeting the highlighted offer / chain. Keep existing `a/r/c` handlers.
+  - Modal `Enter` → fire the same `respond_current_inbox(...)` / `respond_current_chain(...)` path.
+  - Modal `Esc` closes without firing.
+- `crates/nba3k-core/src/i18n.rs` + tables — reuse `T::TradesAccept`, `T::TradesReject`, `T::TradesCounter`. Add `T::TradesActionPickerTitle` (`"Respond to offer"` / `"响应报价"`).
+- Action-bar text: replace `a/r/c` chips with `Enter Respond  a/r/c Quick`.
+
+**Acceptance**:
+- Highlight an inbox offer → Enter → 3-row picker → arrow → Enter on `Accept` / `Reject` / `Counter` → engine responds, message lands in last_msg.
+- `a/r/c` shortcuts still fire directly without the picker.
+- Same flow for My Proposals tab (when AI's turn).
+
+**Verification**:
+- `cargo build --workspace` clean. `cargo test --workspace` ≥ 295.
+
+**Commit**: `M26-T16: trades action picker via Enter`.
+
+---
+
+## T17 — Roster sort: drop letters, Tab cycles, show current sort label
+
+**Status**: `[ ]`
+
+**Goal**: Replace `o` / `p` / `a` sort hotkeys with a single Tab-cycled sort selector. Show current sort label in Chinese (or localized — read `tui.lang`) at the top of the table.
+
+**Sort cycle**: 总评 (OVR) → 位置 (Position) → 年龄 (Age) → back to 总评. Tab forwards, Shift-Tab backwards.
+
+**Tab collision check**: Roster currently uses Tab to switch between `My Roster` ↔ `Free Agents` tabs. T18 below moves Free Agents to Trades, so Roster will no longer have sub-tabs after T18 — Tab is free. **T17 depends on T18 landing first**, OR T17 picks a different sort-cycle key (e.g. `s` "Sort" cycler).
+
+**Decision**: do T18 → T17 in that order so Tab is free.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/roster.rs`:
+  - Remove `KeyCode::Char('o' | 'p' | 'a')` arms.
+  - Add Tab / BackTab arms that cycle a `RosterSort` enum (Overall → Position → Age → Overall).
+  - Rebuild header line to include `format!("排序: {}", t(tui.lang, T::RosterSortOverall))` (or analogous) — display label updates on each cycle.
+  - Action-bar: replace `o OVR / p Pos / a Age` chips with `Tab 排序 ({当前列名})`.
+- `crates/nba3k-core/src/i18n.rs` + tables — add `T::RosterSortLabel` ("排序" / "Sort"), `T::RosterSortOverall` ("总评" / "Overall"), `T::RosterSortPosition` ("位置" / "Position"), `T::RosterSortAge` ("年龄" / "Age").
+
+**Acceptance**:
+- Roster screen no longer responds to `o` / `p` / `a`.
+- Tab cycles sort: Overall → Position → Age → Overall, header label updates.
+- Shift-Tab cycles backwards.
+- Sort persists per-screen-session (thread-local cache); resets to Overall on save reload.
+
+**Verification**:
+- `cargo build --workspace` clean. `cargo test --workspace` ≥ 295.
+
+**Commit**: `M26-T17: roster Tab-cycle sort with label`.
+
+---
+
+## T18 — Move Free Agents from Roster to Trades
+
+**Status**: `[x]`
+
+→ codex: done — this commit — 296 unit tests passed; Roster FA grep clean and Trades has 5-tab FA sign flow.
+
+**Goal**: Drop the `Free Agents` tab from Roster screen. Add a new `Free Agents` sub-tab to Trades screen as the 5th tab (after Rumors).
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/roster.rs`:
+  - Remove the `Tab` keypress handling that switched to FA.
+  - Remove FA-specific render path (`render_fa_tab` or similar).
+  - Remove `s` Sign hotkey (it lived only in FA tab).
+  - Roster becomes single-view "My Roster" only.
+- `crates/nba3k-cli/src/tui/screens/trades.rs`:
+  - Existing tab enum: `Inbox / MyProposals / Builder / Rumors`. Add `FreeAgents` as 5th.
+  - FA tab render: list FAs (`Store::list_free_agents()` or whatever was used in roster), sortable by OVR, action `s` to sign (`Command::FaSign`). Keep `s` letter for sign — the per-row action is single-purpose so a letter is OK.
+  - Tab nav already cycles via Tab — no extra wiring beyond the new tab variant.
+  - Action-bar updates per active tab (FA: `↑↓ Move · s Sign · Tab Tabs · Esc Back`).
+- `crates/nba3k-core/src/i18n.rs` + tables — `T::TradesFreeAgents` already exists? If not, add. Reuse `T::RosterFreeAgents` / `T::RosterSign` if present.
+- Drop unused `T::RosterFreeAgents` if it becomes orphan after roster cleanup (only if grep confirms zero remaining users).
+
+**Acceptance**:
+- Roster screen shows only "My Roster" content; no Free Agents tab.
+- Trades screen has 5 tabs; Tab cycles all 5.
+- FA sign action ends up on the user team's roster (verifies via switch back to Roster screen + Tab cycles → no FA tab needed).
+- Existing FA backend (M10 V006 free_agents table) untouched; only the UI surface moved.
+
+**Verification**:
+- `cargo build --workspace` clean. `cargo test --workspace` ≥ 295.
+- Manual smoke: open Trades → Tab to Free Agents → arrow on top FA → s → roster grows by 1.
+
+**Commit**: `M26-T18: move free agents from roster to trades`.
+
+---
+
+## T19 — Calendar: drop `1`-`6` sub-tab jump
+
+**Status**: `[ ]`
+
+**Goal**: Remove the `KeyCode::Char(c @ '1'..='6')` direct sub-tab jumps. Tab / Shift-Tab already cycle the 6 sub-tabs (Schedule / Standings / Playoffs / Awards / All-Star / Cup).
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/calendar.rs`:
+  - Delete the `1..=6` match arm.
+  - Action-bar: drop `1-6 Tabs` hint chip.
+- Help overlay (`tui/mod.rs:870+` Calendar entry) — drop the `1-6 Jump tab` line.
+
+**Acceptance**:
+- Pressing `1` through `6` in Calendar does nothing (or, if those keys collide with menu shortcuts, the menu shortcut wins — but Calendar is an inner screen, so menu shortcut wouldn't fire mid-screen anyway; plain `1-6` are no-ops).
+- Tab / Shift-Tab still cycle.
+
+**Verification**:
+- `cargo build --workspace` clean. `cargo test --workspace` ≥ 295.
+
+**Commit**: `M26-T19: calendar drop 1-6 sub-tab jumps`.
+
+---
+
+## Coordination protocol (M26)
+
+- Wave order: **T18 first** (frees Tab in Roster), then T17 (uses freed Tab), then T15 / T16 / T19 in any order (independent files).
+- Commit format: `M26-T<N>: <one-line summary>`.
+- Status notes: codex flips `[ ]` → `[~]` → `[x]` and leaves a `→ codex: ...` line per task.
+- Every new T enum key syncs across `i18n.rs` + `i18n_en.rs` + `i18n_zh.rs`.
+
+## Resolved decisions (2026-04-28)
+
+- T15 Saves: Enter = Load (letter `l` retained as legacy alt).
+- T16 Trades 3-action rows: Enter opens action picker; `a/r/c` retained.
+- T17 Roster sort: drop `o/p/a` letters, Tab cycles, current sort label rendered at table header in user's language.
+- T18 Free Agents: move out of Roster screen → Trades screen as 5th sub-tab (after Rumors).
+- T19 Calendar: drop `1-6` direct-jump letters; Tab cycle remains.
+- Roster row verbs (`t/e/x/R`): unchanged (Enter still opens Detail; letters fire action either on row or inside Detail).
+- Roster main `Enter` behavior: unchanged (Detail modal).
+- Finance `e` Extend: unchanged (no Enter handler added).
+- Draft `s` Scout: unchanged.
+- Rotation `c/C` clear: unchanged.
+- Trades Builder `m/i/p`: unchanged (modifier keys, kept).

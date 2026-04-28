@@ -1,9 +1,6 @@
-//! Roster screen (M21). Two sub-tabs:
-//!
-//! 1. **My Roster** — sortable player table (OVR/Pos/Age/Salary), per-row
-//!    actions for Train / Extend / Cut / Role, and a Player Detail modal
-//!    (Stats / Career / Contract / Chemistry).
-//! 2. **Free Agents** — sortable FA pool, single-action Sign.
+//! Roster screen (M21): sortable player table (OVR/Pos/Age/Salary), per-row
+//! actions for Train / Extend / Cut / Role, and a Player Detail modal
+//! (Stats / Career / Contract / Chemistry).
 //!
 //! Mirrors `home.rs`'s thread_local-RefCell cache pattern so the table is
 //! cheap to redraw between key events. `invalidate()` busts the cache after
@@ -11,14 +8,11 @@
 //! All state mutations route through `commands::dispatch` wrapped in
 //! `with_silenced_io` so inner `println!`s don't corrupt the alt-screen.
 //!
-//! Key bindings (My Roster tab):
-//!   Tab / 1/2  — switch sub-tab        ↑ / ↓        — move row cursor
-//!   PgUp/PgDn  — ±10 rows              Enter        — Player Detail modal
+//! Key bindings:
+//!   ↑ / ↓      — move row cursor       PgUp/PgDn  — ±10 rows
+//!   Enter      — Player Detail modal
 //!   o p a s    — sort (OVR/Pos/Age/Sal) t/e/x/R     — Train/Extend/Cut/Role
 //!   Esc        — close modal / back to menu
-//!
-//! Key bindings (Free Agents tab):
-//!   ↑ / ↓ / PgUp / PgDn  — move           s — Sign
 //!
 //! Esc semantics: any open modal swallows the Esc; otherwise the shell
 //! returns the user to the menu.
@@ -46,18 +40,9 @@ use nba3k_core::{
 };
 use nba3k_season::career::{career_totals, SeasonAvgRow};
 
-// Roster cap mirrors `commands::FA_ROSTER_CAP` (15 std + 3 two-way = 18).
-const FA_ROSTER_CAP: usize = 18;
-
 // ---------------------------------------------------------------------------
 // Public types & cache
 // ---------------------------------------------------------------------------
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum SubTab {
-    Roster,
-    FreeAgents,
-}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum SortKey {
@@ -80,16 +65,6 @@ struct RosterRow {
     ppg: f32,
     rpg: f32,
     apg: f32,
-}
-
-#[derive(Clone, Debug)]
-struct FaRow {
-    player_id: PlayerId,
-    name: String,
-    position: Position,
-    age: u8,
-    overall: u8,
-    asking_m: f32, // estimated $/yr in millions
 }
 
 #[derive(Default, Clone, Debug)]
@@ -122,26 +97,17 @@ struct CareerLine {
 struct RosterCache {
     /// Cached ordered roster rows for the active sort.
     rows: Option<Vec<RosterRow>>,
-    /// Cached FA rows.
-    fa_rows: Option<Vec<FaRow>>,
     /// Memoized detail data, keyed by player id.
     details: HashMap<PlayerId, DetailData>,
 
-    /// Active sub-tab.
-    tab: SubTab,
     /// Active sort key for My Roster tab.
     sort: SortKey,
     /// Cursor on My Roster tab.
     roster_cursor: usize,
-    /// Cursor on Free Agents tab.
-    fa_cursor: usize,
     /// Active modal — stacked on top of the table.
     modal: Modal,
 }
 
-impl Default for SubTab {
-    fn default() -> Self { SubTab::Roster }
-}
 impl Default for SortKey {
     fn default() -> Self { SortKey::Ovr }
 }
@@ -161,8 +127,6 @@ enum Modal {
     Cut { confirm: Confirm, target_id: PlayerId, target_name: String },
     /// Role assign.
     Role { picker: Picker<&'static str>, target_id: PlayerId, target_name: String },
-    /// FA sign confirm.
-    Sign { confirm: Confirm, target_id: PlayerId, target_name: String },
     /// Player Detail overlay.
     Detail { player_id: PlayerId },
 }
@@ -178,9 +142,8 @@ pub fn invalidate() {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         c.rows = None;
-        c.fa_rows = None;
         c.details.clear();
-        // Preserve cursor + tab + sort + open modal — only data is stale.
+        // Preserve cursor + sort + open modal — only data is stale.
     });
 }
 
@@ -202,19 +165,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         return;
     }
 
-    // Layout: tab strip (3) | table (rest).
-    let parts = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
-
-    let tab = CACHE.with(|c| c.borrow().tab);
-    draw_tab_strip(f, parts[0], theme, tui.lang, tab);
-
-    match tab {
-        SubTab::Roster => draw_roster_tab(f, parts[1], theme, tui.lang),
-        SubTab::FreeAgents => draw_fa_tab(f, parts[1], theme, tui.lang),
-    }
+    draw_roster_tab(f, area, theme, tui.lang);
 
     // Modal overlay (after tab body so it draws on top).
     let need_modal = CACHE.with(|c| !matches!(c.borrow().modal, Modal::None));
@@ -225,20 +176,6 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         f.render_widget(Clear, rect);
         draw_modal(f, rect, theme, app, tui.lang);
     }
-}
-
-fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: SubTab) {
-    let (a_style, b_style) = match tab {
-        SubTab::Roster => (theme.highlight(), theme.muted_style()),
-        SubTab::FreeAgents => (theme.muted_style(), theme.highlight()),
-    };
-    let line = Line::from(vec![
-        Span::styled(format!(" 1. {} ", t(lang, T::RosterMyRoster)), a_style),
-        Span::styled("   ", theme.text()),
-        Span::styled(format!(" 2. {} ", t(lang, T::RosterFreeAgents)), b_style),
-    ]);
-    let p = Paragraph::new(line).block(theme.block(t(lang, T::RosterTitle)));
-    f.render_widget(p, area);
 }
 
 fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
@@ -322,78 +259,6 @@ fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
             ("R", t(lang, T::RosterSetRole)),
             ("Enter", t(lang, T::CommonDetail)),
             ("o/p/a/s", t(lang, T::CommonSort)),
-            ("Tab", t(lang, T::RosterFreeAgents)),
-            ("Esc", t(lang, T::CommonBack)),
-        ];
-        let bar = ActionBar::new(&hints);
-        bar.render(f, parts[1], theme);
-    });
-}
-
-fn draw_fa_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
-    CACHE.with(|c| {
-        let cache = c.borrow();
-        let rows = cache.fa_rows.as_deref().unwrap_or(&[]);
-        let cursor = cache.fa_cursor.min(rows.len().saturating_sub(1));
-
-        let parts = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(3)])
-            .split(area);
-
-        let header = Row::new(vec![
-            Cell::from(Span::styled("#", theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterPlayer), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterPosition), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterAge), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterOverall), theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::RosterSalary), theme.accent_style())),
-        ]);
-
-        let body: Vec<Row> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                let style = if i == cursor {
-                    theme.highlight()
-                } else {
-                    theme.text()
-                };
-                Row::new(vec![
-                    Cell::from(Span::styled(format!("{:>2}", i + 1), style)),
-                    Cell::from(Span::styled(r.name.clone(), style)),
-                    Cell::from(Span::styled(format!("{}", r.position), style)),
-                    Cell::from(Span::styled(format!("{}", r.age), style)),
-                    Cell::from(Span::styled(format!("{}", r.overall), style)),
-                    Cell::from(Span::styled(format!("${:.1}M", r.asking_m), style)),
-                ])
-            })
-            .collect();
-
-        let title = format!(
-            " {} ({}) - {}: OVR ",
-            t(lang, T::RosterFreeAgents),
-            rows.len(),
-            t(lang, T::CommonSort)
-        );
-        let table = Table::new(
-            body,
-            [
-                Constraint::Length(3),
-                Constraint::Min(20),
-                Constraint::Length(4),
-                Constraint::Length(4),
-                Constraint::Length(4),
-                Constraint::Length(8),
-            ],
-        )
-        .header(header)
-        .block(theme.block(&title));
-        f.render_widget(table, parts[0]);
-
-        let hints = [
-            ("s", t(lang, T::CommonPick)),
-            ("Tab", t(lang, T::RosterTitle)),
             ("Esc", t(lang, T::CommonBack)),
         ];
         let bar = ActionBar::new(&hints);
@@ -444,7 +309,6 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, app: &mut AppState, lang
                 title: format!(" {}: {}", t(lang, T::RosterSetRole), target_name),
                 picker: picker.clone(),
             },
-            Modal::Sign { confirm, .. } => DrawSpec::Confirm(confirm.clone()),
             Modal::Detail { player_id } => DrawSpec::Detail {
                 player_id: *player_id,
                 detail: cache.details.get(player_id).cloned().unwrap_or_default(),
@@ -694,7 +558,6 @@ fn render_number_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, va
 
 fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
     let need_rows = CACHE.with(|c| c.borrow().rows.is_none());
-    let need_fa = CACHE.with(|c| c.borrow().fa_rows.is_none());
     if need_rows {
         let rows = build_roster_rows(app, tui)?;
         CACHE.with(|c| {
@@ -702,10 +565,6 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
             c.rows = Some(rows);
             apply_sort(&mut c);
         });
-    }
-    if need_fa {
-        let rows = build_fa_rows(app)?;
-        CACHE.with(|c| c.borrow_mut().fa_rows = Some(rows));
     }
     Ok(())
 }
@@ -755,35 +614,6 @@ fn build_roster_rows(app: &mut AppState, tui: &TuiApp) -> Result<Vec<RosterRow>>
         });
     }
     Ok(out)
-}
-
-fn build_fa_rows(app: &mut AppState) -> Result<Vec<FaRow>> {
-    let store = app.store()?;
-    let pool = store.list_free_agents()?;
-    Ok(pool
-        .into_iter()
-        .map(|p| FaRow {
-            player_id: p.id,
-            name: clean_name(&p.name),
-            position: p.primary_position,
-            age: p.age,
-            overall: p.overall,
-            asking_m: estimate_asking_m(p.overall),
-        })
-        .collect())
-}
-
-/// Estimate asking salary in $M using the same OVR tiers as
-/// `nba3k_models::contract_gen::generate_contract` (private there). Mirror
-/// kept tiny — only the per-year midpoint, not length.
-fn estimate_asking_m(ovr: u8) -> f32 {
-    match ovr {
-        90..=u8::MAX => 55.0,
-        85..=89 => 30.0,
-        80..=84 => 15.0,
-        70..=79 => 5.0,
-        _ => 2.0,
-    }
 }
 
 fn apply_sort(cache: &mut RosterCache) {
@@ -1119,14 +949,6 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 WidgetEvent::Cancelled => ModalAction::CloseModal,
                 _ => ModalAction::Pending,
             },
-            Modal::Sign { confirm, target_id, target_name } => match confirm.handle_key(key) {
-                WidgetEvent::Submitted => ModalAction::SignSubmit {
-                    target_id: *target_id,
-                    target_name: target_name.clone(),
-                },
-                WidgetEvent::Cancelled => ModalAction::CloseModal,
-                _ => ModalAction::Pending,
-            },
             Modal::Detail { player_id } => {
                 let pid = *player_id;
                 // Detail forwards the row-action shortcuts to the underlying
@@ -1223,34 +1045,6 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             after_mutation(tui, res, &format!("{} → {}", target_name, role));
             return Ok(true);
         }
-        ModalAction::SignSubmit { target_id: _, target_name } => {
-            CACHE.with(|c| c.borrow_mut().modal = Modal::None);
-            // Roster cap pre-check so the user gets a clean error in the
-            // status bar instead of the bail! string out of cmd_fa_sign.
-            let roster_full = app
-                .store()
-                .ok()
-                .and_then(|s| s.roster_for_team(tui.user_team).ok())
-                .map(|r| r.len() >= FA_ROSTER_CAP)
-                .unwrap_or(false);
-            if roster_full {
-                tui.last_msg = Some(format!(
-                    "roster full ({}/{}), cut a player first",
-                    FA_ROSTER_CAP, FA_ROSTER_CAP
-                ));
-                return Ok(true);
-            }
-            let res = with_silenced_io(|| {
-                crate::commands::dispatch(
-                    app,
-                    Command::Fa(FaArgs {
-                        action: FaAction::Sign { player: target_name.clone() },
-                    }),
-                )
-            });
-            after_mutation(tui, res, &format!("signed {}", target_name));
-            return Ok(true);
-        }
         ModalAction::OpenTrainFromDetail(pid) => {
             if let Some(name) = roster_name(pid) {
                 CACHE.with(|c| {
@@ -1307,32 +1101,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
     }
 
     // No modal — table-level keys.
-    let tab = CACHE.with(|c| c.borrow().tab);
-
-    // Sub-tab toggles.
-    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
-        CACHE.with(|c| {
-            let mut c = c.borrow_mut();
-            c.tab = match c.tab {
-                SubTab::Roster => SubTab::FreeAgents,
-                SubTab::FreeAgents => SubTab::Roster,
-            };
-        });
-        return Ok(true);
-    }
-    if matches!(key.code, KeyCode::Char('1')) {
-        CACHE.with(|c| c.borrow_mut().tab = SubTab::Roster);
-        return Ok(true);
-    }
-    if matches!(key.code, KeyCode::Char('2')) {
-        CACHE.with(|c| c.borrow_mut().tab = SubTab::FreeAgents);
-        return Ok(true);
-    }
-
-    match tab {
-        SubTab::Roster => roster_tab_key(app, tui, key),
-        SubTab::FreeAgents => fa_tab_key(app, tui, key),
-    }
+    roster_tab_key(app, tui, key)
 }
 
 fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
@@ -1474,61 +1243,6 @@ fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
     }
 }
 
-fn fa_tab_key(_app: &mut AppState, _tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
-    match key.code {
-        KeyCode::Up => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                if c.fa_cursor > 0 {
-                    c.fa_cursor -= 1;
-                }
-            });
-            Ok(true)
-        }
-        KeyCode::Down => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                let len = c.fa_rows.as_ref().map(|r| r.len()).unwrap_or(0);
-                if c.fa_cursor + 1 < len {
-                    c.fa_cursor += 1;
-                }
-            });
-            Ok(true)
-        }
-        KeyCode::PageUp => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                c.fa_cursor = c.fa_cursor.saturating_sub(10);
-            });
-            Ok(true)
-        }
-        KeyCode::PageDown => {
-            CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                let len = c.fa_rows.as_ref().map(|r| r.len()).unwrap_or(0);
-                c.fa_cursor = (c.fa_cursor + 10).min(len.saturating_sub(1));
-            });
-            Ok(true)
-        }
-        KeyCode::Char('s') => {
-            if let Some((pid, name, asking_m)) = current_fa_row() {
-                CACHE.with(|c| {
-                    c.borrow_mut().modal = Modal::Sign {
-                        confirm: Confirm::new(format!(
-                            "Sign {}? Estimated cap: ${:.1}M/yr.",
-                            name, asking_m
-                        )),
-                        target_id: pid,
-                        target_name: name,
-                    };
-                });
-            }
-            Ok(true)
-        }
-        _ => Ok(false),
-    }
-}
-
 fn current_roster_row() -> Option<(PlayerId, String)> {
     CACHE.with(|c| {
         let c = c.borrow();
@@ -1536,16 +1250,6 @@ fn current_roster_row() -> Option<(PlayerId, String)> {
             .as_ref()
             .and_then(|rows| rows.get(c.roster_cursor))
             .map(|r| (r.player_id, r.name.clone()))
-    })
-}
-
-fn current_fa_row() -> Option<(PlayerId, String, f32)> {
-    CACHE.with(|c| {
-        let c = c.borrow();
-        c.fa_rows
-            .as_ref()
-            .and_then(|rows| rows.get(c.fa_cursor))
-            .map(|r| (r.player_id, r.name.clone(), r.asking_m))
     })
 }
 
@@ -1604,7 +1308,6 @@ enum ModalAction {
     ExtendSubmit { target_id: PlayerId, target_name: String, salary_m: i64, years: i64 },
     CutSubmit { target_id: PlayerId, target_name: String },
     RoleSubmit { target_id: PlayerId, target_name: String, role: &'static str },
-    SignSubmit { target_id: PlayerId, target_name: String },
     OpenTrainFromDetail(PlayerId),
     OpenExtendFromDetail(PlayerId),
     OpenCutFromDetail(PlayerId),

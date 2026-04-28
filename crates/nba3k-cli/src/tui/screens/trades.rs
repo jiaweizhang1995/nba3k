@@ -1,10 +1,11 @@
 //! Trades screen (M22).
 //!
-//! Four sub-tabs:
+//! Five sub-tabs:
 //! - Inbox: AI offers targeting the user's team.
 //! - My Proposals: user-involved negotiation chains.
 //! - Builder: 2-team or 3-team player-for-player proposal flow.
 //! - Rumors: read-only market interest table.
+//! - Free Agents: signable FA pool.
 //!
 //! All mutations route through `commands::dispatch` behind `with_silenced_io`
 //! so command output cannot corrupt the alt-screen.
@@ -21,7 +22,7 @@ use ratatui::{
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use crate::cli::{Command, TradeAction, TradeArgs};
+use crate::cli::{Command, FaAction, FaArgs, TradeAction, TradeArgs};
 use crate::commands::{self, dispatch};
 use crate::state::AppState;
 use crate::tui::widgets::{ActionBar, Theme};
@@ -43,6 +44,7 @@ enum SubTab {
     Proposals,
     Builder,
     Rumors,
+    FreeAgents,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -103,6 +105,16 @@ struct RumorRow {
 }
 
 #[derive(Clone, Debug)]
+struct FaRow {
+    player_id: PlayerId,
+    name: String,
+    position: Position,
+    age: u8,
+    overall: u8,
+    asking_m: f32,
+}
+
+#[derive(Clone, Debug)]
 struct TeamOption {
     id: TeamId,
     abbrev: String,
@@ -120,11 +132,15 @@ struct PlayerOption {
     salary_m: f32,
 }
 
+// Roster cap mirrors `commands::FA_ROSTER_CAP` (15 std + 3 two-way = 18).
+const FA_ROSTER_CAP: usize = 18;
+
 #[derive(Default)]
 struct TradesCache {
     inbox_rows: Option<Vec<OfferRow>>,
     chain_rows: Option<Vec<ChainRow>>,
     rumor_rows: Option<Vec<RumorRow>>,
+    fa_rows: Option<Vec<FaRow>>,
     teams: Option<Vec<TeamOption>>,
     user_roster: Option<Vec<PlayerOption>>,
     target_roster: Option<Vec<PlayerOption>>,
@@ -136,6 +152,7 @@ struct TradesCache {
     inbox_cursor: usize,
     chain_cursor: usize,
     rumor_cursor: usize,
+    fa_cursor: usize,
 
     builder_panel: BuilderPanel,
     builder_mode: BuilderMode,
@@ -175,6 +192,7 @@ pub fn invalidate() {
         c.inbox_rows = None;
         c.chain_rows = None;
         c.rumor_rows = None;
+        c.fa_rows = None;
         c.teams = None;
         c.user_roster = None;
         c.target_roster = None;
@@ -209,6 +227,7 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         SubTab::Proposals => draw_proposals(f, parts[1], theme, tui.lang),
         SubTab::Builder => draw_builder(f, parts[1], theme, tui),
         SubTab::Rumors => draw_rumors(f, parts[1], theme, tui.lang),
+        SubTab::FreeAgents => draw_free_agents(f, parts[1], theme, tui.lang),
     }
 
     if CACHE.with(|c| !matches!(c.borrow().modal, Modal::None)) {
@@ -234,6 +253,11 @@ fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: Sub
         Span::styled(format!(" 3. {} ", t(lang, T::TradesBuilder)), style(SubTab::Builder)),
         Span::styled("   ", theme.text()),
         Span::styled(format!(" 4. {} ", t(lang, T::TradesRumors)), style(SubTab::Rumors)),
+        Span::styled("   ", theme.text()),
+        Span::styled(
+            format!(" 5. {} ", t(lang, T::RosterFreeAgents)),
+            style(SubTab::FreeAgents),
+        ),
     ]);
     f.render_widget(Paragraph::new(line).block(theme.block(t(lang, T::TradesTitle))), area);
 }
@@ -708,6 +732,72 @@ fn draw_rumors(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
     });
 }
 
+fn draw_free_agents(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
+    CACHE.with(|c| {
+        let cache = c.borrow();
+        let rows = cache.fa_rows.as_deref().unwrap_or(&[]);
+        let cursor = cache.fa_cursor.min(rows.len().saturating_sub(1));
+        let parts = body_with_bar(area);
+
+        if rows.is_empty() {
+            let p = Paragraph::new(t(lang, T::RosterNoPlayers))
+                .block(theme.block(t(lang, T::RosterFreeAgents)));
+            f.render_widget(p, parts[0]);
+        } else {
+            let header = Row::new(vec![
+                head("#", theme),
+                head(t(lang, T::RosterPlayer), theme),
+                head(t(lang, T::RosterPosition), theme),
+                head(t(lang, T::RosterAge), theme),
+                head(t(lang, T::RosterOverall), theme),
+                head(t(lang, T::RosterSalary), theme),
+            ]);
+            let body: Vec<Row> = rows
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let style = if i == cursor {
+                        theme.highlight()
+                    } else {
+                        theme.text()
+                    };
+                    Row::new(vec![
+                        Cell::from(Span::styled(format!("{:>2}", i + 1), style)),
+                        Cell::from(Span::styled(r.name.clone(), style)),
+                        Cell::from(Span::styled(format!("{}", r.position), style)),
+                        Cell::from(Span::styled(format!("{}", r.age), style)),
+                        Cell::from(Span::styled(format!("{}", r.overall), style)),
+                        Cell::from(Span::styled(format!("${:.1}M", r.asking_m), style)),
+                    ])
+                })
+                .collect();
+            let title = format!(" {} ({}) ", t(lang, T::RosterFreeAgents), rows.len());
+            let table = Table::new(
+                body,
+                [
+                    Constraint::Length(4),
+                    Constraint::Percentage(45),
+                    Constraint::Length(5),
+                    Constraint::Length(5),
+                    Constraint::Length(5),
+                    Constraint::Length(8),
+                ],
+            )
+            .header(header)
+            .block(theme.block(&title));
+            f.render_widget(table, parts[0]);
+        }
+
+        ActionBar::new(&[
+            ("Up/Down", t(lang, T::CommonMove)),
+            ("s", t(lang, T::CommonPick)),
+            ("Tab", t(lang, T::CommonTabs)),
+            ("Esc", t(lang, T::CommonBack)),
+        ])
+        .render(f, parts[1], theme);
+    });
+}
+
 fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
     let _ = t(lang, T::ModalTradeVerdictTitle);
     let (title, lines) = CACHE.with(|c| {
@@ -798,6 +888,11 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
     if CACHE.with(|c| c.borrow().rumor_rows.is_none()) {
         let rows = build_rumor_rows(app, tui.season)?;
         CACHE.with(|c| c.borrow_mut().rumor_rows = Some(rows));
+    }
+
+    if CACHE.with(|c| c.borrow().fa_rows.is_none()) {
+        let rows = build_fa_rows(app)?;
+        CACHE.with(|c| c.borrow_mut().fa_rows = Some(rows));
     }
 
     if CACHE.with(|c| c.borrow().teams.is_none()) {
@@ -1079,6 +1174,40 @@ fn build_rumor_rows(app: &mut AppState, season: SeasonId) -> Result<Vec<RumorRow
     Ok(rumors)
 }
 
+fn build_fa_rows(app: &mut AppState) -> Result<Vec<FaRow>> {
+    let store = app.store()?;
+    let mut rows: Vec<FaRow> = store
+        .list_free_agents()?
+        .into_iter()
+        .map(|p| FaRow {
+            player_id: p.id,
+            name: clean_name(&p.name),
+            position: p.primary_position,
+            age: p.age,
+            overall: p.overall,
+            asking_m: estimate_asking_m(p.overall),
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.overall
+            .cmp(&a.overall)
+            .then_with(|| a.age.cmp(&b.age))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(rows)
+}
+
+fn estimate_asking_m(overall: u8) -> f32 {
+    match overall {
+        90..=u8::MAX => 35.0,
+        85..=89 => 25.0,
+        80..=84 => 15.0,
+        75..=79 => 8.0,
+        70..=74 => 3.0,
+        _ => 1.0,
+    }
+}
+
 fn build_team_options(app: &mut AppState, user_team: TeamId) -> Result<Vec<TeamOption>> {
     let store = app.store()?;
     let teams = store.list_teams()?;
@@ -1153,11 +1282,13 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         KeyCode::Char('2') => set_tab(SubTab::Proposals),
         KeyCode::Char('3') => set_tab(SubTab::Builder),
         KeyCode::Char('4') => set_tab(SubTab::Rumors),
+        KeyCode::Char('5') => set_tab(SubTab::FreeAgents),
         _ => match CACHE.with(|c| c.borrow().tab) {
             SubTab::Inbox => handle_inbox_key(app, tui, key),
             SubTab::Proposals => handle_proposals_key(app, tui, key),
             SubTab::Builder => handle_builder_key(app, tui, key),
             SubTab::Rumors => handle_rumors_key(key),
+            SubTab::FreeAgents => handle_free_agents_key(app, tui, key),
         },
     }
 }
@@ -1172,7 +1303,8 @@ fn next_tab(tab: SubTab) -> SubTab {
         SubTab::Inbox => SubTab::Proposals,
         SubTab::Proposals => SubTab::Builder,
         SubTab::Builder => SubTab::Rumors,
-        SubTab::Rumors => SubTab::Inbox,
+        SubTab::Rumors => SubTab::FreeAgents,
+        SubTab::FreeAgents => SubTab::Inbox,
     }
 }
 
@@ -1250,6 +1382,17 @@ fn handle_rumors_key(key: KeyEvent) -> Result<bool> {
     }
 }
 
+fn handle_free_agents_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Up => move_fa(-1),
+        KeyCode::Down => move_fa(1),
+        KeyCode::PageUp => move_fa(-10),
+        KeyCode::PageDown => move_fa(10),
+        KeyCode::Char('s') => sign_current_free_agent(app, tui),
+        _ => Ok(false),
+    }
+}
+
 fn move_inbox(delta: isize) -> Result<bool> {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
@@ -1273,6 +1416,15 @@ fn move_rumor(delta: isize) -> Result<bool> {
         let mut c = c.borrow_mut();
         let len = c.rumor_rows.as_ref().map(|r| r.len()).unwrap_or(0);
         c.rumor_cursor = moved(c.rumor_cursor, len, delta);
+    });
+    Ok(true)
+}
+
+fn move_fa(delta: isize) -> Result<bool> {
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        let len = c.fa_rows.as_ref().map(|r| r.len()).unwrap_or(0);
+        c.fa_cursor = moved(c.fa_cursor, len, delta);
     });
     Ok(true)
 }
@@ -1637,6 +1789,41 @@ fn respond_to_chain(
     Ok(true)
 }
 
+fn sign_current_free_agent(app: &mut AppState, tui: &mut TuiApp) -> Result<bool> {
+    let Some(row) = current_fa_row() else {
+        tui.last_msg = Some("no free agent selected".into());
+        return Ok(true);
+    };
+
+    let roster_full = app
+        .store()
+        .ok()
+        .and_then(|s| s.roster_for_team(tui.user_team).ok())
+        .map(|r| r.len() >= FA_ROSTER_CAP)
+        .unwrap_or(false);
+    if roster_full {
+        tui.last_msg = Some(format!(
+            "roster full ({}/{}), cut a player first",
+            FA_ROSTER_CAP, FA_ROSTER_CAP
+        ));
+        return Ok(true);
+    }
+
+    let target_name = row.name;
+    let res = with_silenced_io(|| {
+        dispatch(
+            app,
+            Command::Fa(FaArgs {
+                action: FaAction::Sign {
+                    player: target_name.clone(),
+                },
+            }),
+        )
+    });
+    after_fa_mutation(tui, res, &format!("signed {}", target_name));
+    Ok(true)
+}
+
 fn after_trade_mutation(tui: &mut TuiApp, res: Result<()>, success_msg: &str) {
     match res {
         Ok(()) => {
@@ -1649,6 +1836,18 @@ fn after_trade_mutation(tui: &mut TuiApp, res: Result<()>, success_msg: &str) {
             });
         }
         Err(e) => tui.last_msg = Some(format!("trade error: {}", e)),
+    }
+    invalidate();
+    tui.invalidate_caches();
+    crate::tui::screens::home::invalidate();
+    crate::tui::screens::roster::invalidate();
+    crate::tui::screens::rotation::invalidate();
+}
+
+fn after_fa_mutation(tui: &mut TuiApp, res: Result<()>, success_msg: &str) {
+    match res {
+        Ok(()) => tui.last_msg = Some(success_msg.into()),
+        Err(e) => tui.last_msg = Some(format!("free agent error: {}", e)),
     }
     invalidate();
     tui.invalidate_caches();
@@ -1676,6 +1875,17 @@ fn current_chain_id() -> Option<TradeId> {
             .as_ref()
             .and_then(|rows| rows.get(cache.chain_cursor))
             .map(|r| r.id)
+    })
+}
+
+fn current_fa_row() -> Option<FaRow> {
+    CACHE.with(|c| {
+        let cache = c.borrow();
+        cache
+            .fa_rows
+            .as_ref()
+            .and_then(|rows| rows.get(cache.fa_cursor))
+            .cloned()
     })
 }
 
