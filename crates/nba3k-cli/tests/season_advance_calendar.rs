@@ -46,7 +46,11 @@ fn season_advance_writes_calendar_row_for_each_new_year() {
     let save = dir.path().join("advance.db");
     let save_str = save.to_string_lossy().to_string();
 
-    let (_o, _e, c) = run(&["--save", &save_str, "new", "--team", "BOS"]);
+    // M34 — pin `--offline` so this scenario is deterministic and does not
+    // require a network round-trip to ESPN every time the test runs.
+    let (_o, _e, c) = run(&[
+        "--save", &save_str, "new", "--team", "BOS", "--offline",
+    ]);
     assert_eq!(c, 0, "new failed");
 
     let (_o, _e, c) = run(&["--save", &save_str, "sim-to", "season-end"]);

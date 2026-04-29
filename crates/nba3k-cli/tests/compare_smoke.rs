@@ -31,6 +31,7 @@ fn bootstrap(save: &std::path::Path) {
             "new",
             "--team",
             "BOS",
+            "--offline",
         ])
         .status()
         .expect("nba3k new");

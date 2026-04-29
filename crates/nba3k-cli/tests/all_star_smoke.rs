@@ -26,6 +26,8 @@ fn seed_present() -> bool {
 
 fn bootstrap(save: &std::path::Path) {
     let root = workspace_root();
+    // M34 — `new` defaults to live ESPN; tests pin `--offline` for
+    // deterministic, network-free runs.
     let new_status = Command::new(nba3k_bin())
         .current_dir(&root)
         .args([
@@ -34,6 +36,7 @@ fn bootstrap(save: &std::path::Path) {
             "new",
             "--team",
             "BOS",
+            "--offline",
         ])
         .status()
         .expect("nba3k new");

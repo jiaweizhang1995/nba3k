@@ -255,9 +255,5 @@ pub(crate) fn lookup(key: T) -> &'static str {
         T::NewGameSeason => "Season",
         T::NewGameSeed => "Seed",
         T::NewGameConfirm => "Confirm",
-        T::NewGameStartTitle => "Start mode",
-        T::NewGameStartFresh => "Fresh October 2025",
-        T::NewGameStartToday => "Today (live ESPN data)",
-        T::NewGameStartTodayHint => "Pulls today's standings, rosters, and injuries from ESPN. Needs internet.",
     }
 }

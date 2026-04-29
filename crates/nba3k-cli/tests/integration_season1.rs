@@ -44,6 +44,8 @@ fn full_season_scripted() {
     // 1) `new` to bootstrap the save. Run with cwd = workspace root so
     //    the binary's relative `data/seed_2025_26.sqlite` resolves.
     let root = workspace_root();
+    // M34 — `new` defaults to live ESPN. Pin to `--offline` so the integ
+    // test does not depend on internet or current real-world season state.
     let new_status = Command::new(&bin)
         .current_dir(&root)
         .args([
@@ -52,6 +54,7 @@ fn full_season_scripted() {
             "new",
             "--team",
             "BOS",
+            "--offline",
         ])
         .status()
         .expect("nba3k new");

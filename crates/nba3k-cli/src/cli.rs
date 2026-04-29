@@ -318,11 +318,15 @@ pub struct NewArgs {
     /// Deterministic RNG seed.
     #[arg(long, default_value_t = 0)]
     pub seed: u64,
-    /// Build the save from today's real NBA state via ESPN public API.
-    /// Pulls current standings, schedule, rosters, injuries, and season
-    /// stats. Requires internet access to ESPN.
-    #[arg(long)]
+    /// Deprecated. Now the default. Kept for back-compat — has no effect.
+    #[arg(long, hide = true)]
     pub from_today: bool,
+    /// Skip the live ESPN import and build a fresh October 2025 save from
+    /// the bundled seed instead. Use this when offline, when iterating on
+    /// tests, or when you specifically want to replay a season from the
+    /// season opener with synthetic schedule + 0-0 standings.
+    #[arg(long)]
+    pub offline: bool,
 }
 
 #[derive(Parser, Debug, Clone, Copy, Default)]

@@ -290,10 +290,6 @@ pub enum T {
     NewGameSeason,
     NewGameSeed,
     NewGameConfirm,
-    NewGameStartTitle,
-    NewGameStartFresh,
-    NewGameStartToday,
-    NewGameStartTodayHint,
 }
 
 pub fn t(lang: Lang, key: T) -> &'static str {

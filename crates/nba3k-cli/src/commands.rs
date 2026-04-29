@@ -174,14 +174,16 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
         )
     })?;
 
-    if args.from_today {
-        // M32 — live ESPN import. Skips the legacy seed-anchored path and
-        // delegates the whole pipeline to `from_today::build_today_save`.
+    // M34 — live ESPN import is now the default. `--offline` (or the
+    // deprecated `--from-today` no-op) opt-out routes back to the legacy
+    // seed-anchored fresh-October path. Internet failure outside `--offline`
+    // bails loud (see `from_today::preflight`).
+    if !args.offline {
         let today = chrono::Local::now().date_naive();
         let report = crate::from_today::build_today_save(&path, &args.team, mode, today)?;
         app.open_path(path.clone())?;
         println!(
-            "created live save {} (team={} mode={} from-today)\n  teams_loaded={} games_played={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={} news_backfilled={}",
+            "created live save {} (team={} mode={})\n  teams_loaded={} games_played={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={} news_backfilled={}",
             path.display(),
             args.team.to_uppercase(),
             mode,

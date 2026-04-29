@@ -245,9 +245,5 @@ pub(crate) fn lookup(key: T) -> &'static str {
         T::NewGameSeason => "赛季",
         T::NewGameSeed => "种子",
         T::NewGameConfirm => "确认",
-        T::NewGameStartTitle => "起手方式",
-        T::NewGameStartFresh => "10 月开档（默认）",
-        T::NewGameStartToday => "今日实况（ESPN 实时）",
-        T::NewGameStartTodayHint => "从 ESPN 拉取当前的排名、阵容和伤病。需要联网。",
     }
 }
