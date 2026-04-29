@@ -3,6 +3,7 @@
 //! See `crates/nba3k-scrape/README.md` for the full pipeline + Python
 //! `nba_api` install requirement.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -23,13 +24,18 @@ use nba3k_scrape::{
         hoophype::HoopsHypeSource,
         mock_draft::TOP_60,
         nba_api::{self as nba_api, NbaApiStatus},
-        RawPlayerStats,
+        normalize_player_name, RawPlayerStats,
     },
     teams::TEAMS,
 };
 
+const MAX_PER_TEAM: usize = 15;
+
 #[derive(Parser)]
-#[command(name = "nba3k-scrape", about = "Produce seed SQLite from public NBA data sources")]
+#[command(
+    name = "nba3k-scrape",
+    about = "Produce seed SQLite from public NBA data sources"
+)]
 struct Cli {
     /// Season string, e.g. "2025-26" → end-year 2026.
     #[arg(long, default_value = "2025-26")]
@@ -172,6 +178,16 @@ fn run() -> Result<()> {
         team_player_counts.push((team.id, team.abbrev));
     }
 
+    let before_filter = all_players.len();
+    dedup_and_cap(&mut all_players, &mut team_player_offsets);
+    let after_filter = all_players.len();
+    if after_filter != before_filter {
+        eprintln!(
+            "rosters: filtered {} raw rows via duplicate primary-team pass + top-{MAX_PER_TEAM} team cap",
+            before_filter - after_filter
+        );
+    }
+
     // Single league-wide rating pass.
     let rated_all = ratings::rate_all(&all_players);
     let mut rated_by_team: HashMap<u8, Vec<ratings::RatedPlayer>> = HashMap::new();
@@ -192,7 +208,12 @@ fn run() -> Result<()> {
     }
 
     // Stage 2: HoopsHype contracts (optional — best effort).
-    let contracts = match (HoopsHypeSource { fetcher: &fetcher, cache: &cache }.fetch_all()) {
+    let contracts = match (HoopsHypeSource {
+        fetcher: &fetcher,
+        cache: &cache,
+    }
+    .fetch_all())
+    {
         Ok(rows) => {
             eprintln!("hoopshype: parsed {} contract rows", rows.len());
             rows
@@ -227,6 +248,110 @@ fn run() -> Result<()> {
     eprintln!("assertions: OK");
 
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct TeamPlayerCandidate {
+    team_id: u8,
+    player: RawPlayerStats,
+}
+
+/// BBRef team pages include everyone who appeared for that team in the prior
+/// season, including traded-out and short-stint players. Pick each duplicate
+/// player's primary team first, then keep each team's top minutes roster before
+/// league-wide ratings so downstream CBA checks see real 13-15 player teams
+/// instead of historical appearance logs.
+fn dedup_and_cap(
+    all_players: &mut Vec<RawPlayerStats>,
+    team_player_offsets: &mut HashMap<u8, (usize, usize)>,
+) {
+    let mut team_ids: Vec<u8> = team_player_offsets.keys().copied().collect();
+    team_ids.sort_by_key(|id| {
+        team_player_offsets
+            .get(id)
+            .map(|(start, _)| *start)
+            .unwrap_or(0)
+    });
+
+    let mut candidates = Vec::new();
+    for team_id in &team_ids {
+        let Some(&(start, end)) = team_player_offsets.get(team_id) else {
+            continue;
+        };
+        candidates.extend(
+            all_players[start..end]
+                .iter()
+                .filter(|player| player.minutes_per_game > 0.0)
+                .cloned()
+                .map(|player| TeamPlayerCandidate {
+                    team_id: *team_id,
+                    player,
+                }),
+        );
+    }
+
+    let mut best_by_name: HashMap<String, usize> = HashMap::new();
+    for (idx, candidate) in candidates.iter().enumerate() {
+        let key = normalize_player_name(&candidate.player.name);
+        if key.is_empty() {
+            continue;
+        }
+        match best_by_name.get(&key).copied() {
+            Some(current_idx)
+                if duplicate_choice_order(candidate, &candidates[current_idx]).is_lt() =>
+            {
+                best_by_name.insert(key, idx);
+            }
+            None => {
+                best_by_name.insert(key, idx);
+            }
+            _ => {}
+        }
+    }
+
+    all_players.clear();
+    team_player_offsets.clear();
+    for team_id in team_ids {
+        let mut team_rows: Vec<RawPlayerStats> = candidates
+            .iter()
+            .enumerate()
+            .filter(|(idx, candidate)| {
+                candidate.team_id == team_id
+                    && best_by_name
+                        .get(&normalize_player_name(&candidate.player.name))
+                        .is_some_and(|best_idx| *best_idx == *idx)
+            })
+            .map(|(_, candidate)| candidate.player.clone())
+            .collect();
+        team_rows.sort_by(compare_team_cap_order);
+        team_rows.truncate(MAX_PER_TEAM);
+
+        let start = all_players.len();
+        all_players.extend(team_rows);
+        team_player_offsets.insert(team_id, (start, all_players.len()));
+    }
+}
+
+fn compare_team_cap_order(a: &RawPlayerStats, b: &RawPlayerStats) -> Ordering {
+    b.minutes_per_game
+        .total_cmp(&a.minutes_per_game)
+        .then_with(|| b.games.total_cmp(&a.games))
+        .then_with(|| a.name.cmp(&b.name))
+}
+
+fn duplicate_choice_order(a: &TeamPlayerCandidate, b: &TeamPlayerCandidate) -> Ordering {
+    let a_total = a.player.minutes_per_game * a.player.games;
+    let b_total = b.player.minutes_per_game * b.player.games;
+    b_total
+        .total_cmp(&a_total)
+        .then_with(|| {
+            b.player
+                .minutes_per_game
+                .total_cmp(&a.player.minutes_per_game)
+        })
+        .then_with(|| b.player.games.total_cmp(&a.player.games))
+        .then_with(|| a.player.name.cmp(&b.player.name))
+        .then_with(|| a.team_id.cmp(&b.team_id))
 }
 
 /// Synthetic 15-player roster used when the network is unreachable. We
@@ -274,4 +399,92 @@ fn synthetic_roster(abbrev: &str, team_id: u8) -> Vec<RawPlayerStats> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nba3k_core::Position;
+
+    fn raw(name: &str, minutes_per_game: f32, games: f32) -> RawPlayerStats {
+        RawPlayerStats {
+            name: name.to_string(),
+            primary_position: Position::SG,
+            secondary_position: None,
+            age: 25,
+            games,
+            minutes_per_game,
+            pts: 0.0,
+            trb: 0.0,
+            ast: 0.0,
+            stl: 0.0,
+            blk: 0.0,
+            tov: 0.0,
+            fg_pct: 0.0,
+            three_pct: 0.0,
+            ft_pct: 0.0,
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn dedup_and_cap_keeps_top_15_and_drops_zero_minute_rows() {
+        let mut players: Vec<RawPlayerStats> = (1..=16)
+            .map(|n| {
+                raw(
+                    &format!("Team One {}", char::from(b'A' + n as u8 - 1)),
+                    n as f32,
+                    70.0,
+                )
+            })
+            .collect();
+        players.push(raw("Zero Minute", 0.0, 82.0));
+        let mut offsets = HashMap::from([(1, (0, players.len()))]);
+
+        dedup_and_cap(&mut players, &mut offsets);
+
+        assert_eq!(players.len(), 15);
+        assert_eq!(offsets.get(&1), Some(&(0, 15)));
+        assert!(!players.iter().any(|p| p.name == "Zero Minute"));
+        assert!(!players.iter().any(|p| p.name == "Team One A"));
+        assert_eq!(players.first().map(|p| p.name.as_str()), Some("Team One P"));
+    }
+
+    #[test]
+    fn dedup_and_cap_uses_games_as_team_cap_tiebreak() {
+        let mut players = vec![
+            raw("Same MPG Low Games", 10.0, 10.0),
+            raw("Same MPG High Games", 10.0, 70.0),
+            raw("Higher MPG", 12.0, 1.0),
+        ];
+        let mut offsets = HashMap::from([(1, (0, players.len()))]);
+
+        dedup_and_cap(&mut players, &mut offsets);
+
+        let names: Vec<&str> = players.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Higher MPG", "Same MPG High Games", "Same MPG Low Games"]
+        );
+    }
+
+    #[test]
+    fn dedup_and_cap_keeps_duplicate_on_primary_minutes_team_and_rebuilds_offsets() {
+        let mut players = vec![
+            raw("Shared Player", 20.0, 10.0),
+            raw("Team One Unique", 8.0, 70.0),
+            raw("Shared Player", 12.0, 30.0),
+            raw("Team Two Unique", 7.0, 70.0),
+        ];
+        let mut offsets = HashMap::from([(1, (0, 2)), (2, (2, 4))]);
+
+        dedup_and_cap(&mut players, &mut offsets);
+
+        assert_eq!(players.len(), 3);
+        assert_eq!(offsets.get(&1), Some(&(0, 1)));
+        assert_eq!(offsets.get(&2), Some(&(1, 3)));
+        assert_eq!(players[0].name, "Team One Unique");
+        assert_eq!(players[1].name, "Shared Player");
+        assert_eq!(players[2].name, "Team Two Unique");
+    }
 }

@@ -352,6 +352,9 @@ pub enum TradeAction {
         /// Emit JSON instead of text.
         #[arg(long)]
         json: bool,
+        /// Force acceptance through god-mode override.
+        #[arg(long, default_value_t = false)]
+        force: bool,
     },
     /// List active negotiations.
     List(JsonFlag),

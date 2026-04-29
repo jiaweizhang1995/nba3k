@@ -2212,7 +2212,8 @@ fn cmd_trade(app: &mut AppState, action: TradeAction) -> Result<()> {
             send,
             receive,
             json,
-        } => cmd_trade_propose(app, &from, &to, &send, &receive, json),
+            force,
+        } => cmd_trade_propose(app, &from, &to, &send, &receive, json, force),
         TradeAction::List(JsonFlag { json }) => cmd_trade_list(app, json),
         TradeAction::Respond { id, action, json } => {
             cmd_trade_respond(app, TradeId(id), &action, json)
@@ -2278,6 +2279,7 @@ fn cmd_trade_propose(
     send: &[String],
     receive: &[String],
     as_json: bool,
+    force: bool,
 ) -> Result<()> {
     let store = app.store()?;
     let state = store
@@ -2334,7 +2336,7 @@ fn cmd_trade_propose(
         parent: None,
     };
 
-    let god_active = state.mode == GameMode::God || app.force_god;
+    let god_active = state.mode == GameMode::God || app.force_god || force;
 
     // Build the snapshot once and run the engine.
     let snap_owned = build_league_snapshot(app)?;

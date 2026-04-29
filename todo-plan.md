@@ -34,7 +34,7 @@ Drop the percentage-based "estimated acceptance" — replace with natural-langua
 
 ## T32 — Step 1: Team picker screen
 
-**Status**: `[ ]`
+**Status**: `[x]` → codex: implemented team picker, roster preview, letter jump, Enter/Esc flow.
 
 **Goal**: New first step inside the Trades > Builder sub-tab. User picks the target team before any player/asset selection happens. Two-column layout, left team list, right roster preview.
 
@@ -87,7 +87,7 @@ Drop the percentage-based "estimated acceptance" — replace with natural-langua
 
 ## T33 — Step 2: Builder body (master-detail, single-list per side)
 
-**Status**: `[ ]`
+**Status**: `[x]` → codex: implemented two-step compose screen, two-panel player lists, selection controls, M31 pick placeholders.
 
 **Goal**: Replace the cramped 4-column builder with a 2-column master-detail layout. Top bar shows context. Two wide panels for player selection. Bottom verdict bar (T34/T35).
 
@@ -165,7 +165,7 @@ Total width per row: ~37 + 2 ✓ prefix = ~39 cols. Each side gets ~50% of body 
 
 ## T34 — Verdict bar: salary totals + plain-language CBA warnings
 
-**Status**: `[ ]`
+**Status**: `[x]` → codex: implemented salary totals and plain-language warning bar backed by trade CBA validation.
 
 **Goal**: Bottom strip of builder shows current selection state + warnings. Replace the cryptic `CBA: ✓/✗` with full natural-language warnings (Basketball-GM style — image #25).
 
@@ -238,7 +238,7 @@ Total width per row: ~37 + 2 ✓ prefix = ~39 cols. Each side gets ~50% of body 
 
 ## T35 — GM dialog post-submit (natural language, no percentage)
 
-**Status**: `[ ]`
+**Status**: `[x]` → codex: implemented post-submit GM dialog and removed acceptance probability from trade UI surfaces.
 
 **Goal**: After user presses Enter to propose, instead of an "estimated acceptance: 42%" output, show a Basketball-GM-style quoted dialog from the AI GM. No percentage anywhere.
 
@@ -290,7 +290,7 @@ Total width per row: ~37 + 2 ✓ prefix = ~39 cols. Each side gets ~50% of body 
 
 ## T36 — Settings: god mode toggle (persisted)
 
-**Status**: `[ ]`
+**Status**: `[x]` → codex: implemented persisted Settings god-mode toggle.
 
 **Goal**: Add a god-mode toggle to the Settings screen, persisted across sessions like the language setting.
 
@@ -326,7 +326,7 @@ Total width per row: ~37 + 2 ✓ prefix = ~39 cols. Each side gets ~50% of body 
 
 ## T37 — Force Trade button in builder (gated to god mode)
 
-**Status**: `[ ]`
+**Status**: `[x]` → codex: implemented god-mode-gated force trade chip and force propose path.
 
 **Goal**: When god mode is ON, the builder's top bar shows an additional `[F] 强制成交` chip. Pressing F submits the trade with engine override, bypassing all checks.
 
@@ -406,3 +406,238 @@ Total width per row: ~37 + 2 ✓ prefix = ~39 cols. Each side gets ~50% of body 
 - CBA term: replaced with plain-language warnings; never write `CBA` acronym in UI.
 - Acceptance: NO percentage anywhere; natural-language GM dialog post-submit only.
 - god mode: Settings toggle persisted across saves; Force Trade button in builder shown only when god on.
+
+---
+
+# M30 follow-up — T39 / T40 / T41
+
+User-tested release (2026-04-29) — 3 polish items.
+
+## T39 — Step 1 roster preview: unicode-safe columns + `y` suffix on years
+
+**Status**: `[x]` → codex: fixed roster preview unicode-safe columns and year suffix alignment; tests passed.
+
+**Goal**: image #28 — `Luka Dončić` / `Moses Brown` / `Daniel Gafford` rows misalign in the OVR / salary / years columns due to byte-pad on names with diacritics + no right-pad on salary + missing `y` suffix on years.
+
+**Fix**:
+- Use `pad_display(&player.name, 18)` (T14 helper) instead of byte-pad.
+- Salary: `format!("{:>7}", money)` so `$5.3M` aligns with `$27.1M` (7-col right-aligned).
+- Years: `format!("{:>3}", format!("{}y", years))` so `4y` / `3y` align as 2-char + space.
+- Position label: `format!("{:<2}", pos)` so `C` matches `PF` (already done elsewhere).
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/trades.rs` — wherever the Step 1 roster preview row is built (likely `draw_roster_preview` or inline in `draw_pick_team`).
+
+**Acceptance**: image #28 columns line up; OVR / $ / 年限 right-aligned; names with `ć` / `ü` don't shift the row.
+
+**Commit**: `M30-T39: step 1 roster preview column alignment`.
+
+---
+
+## T40 — Step 2 player rows: `y` suffix on years column
+
+**Status**: `[x]` → codex: fixed Step 2 player row unicode-safe name padding and year suffix alignment; tests passed.
+
+**Goal**: image #29 — trailing `2` / `3` / `5` after salary look like random numbers because the format dropped the `y` suffix the spec called for.
+
+**Fix**:
+- Both panels (`我方送出` + `对方接收`): change `format!("{:>3}", years)` to `format!("{:>3}", format!("{}y", years))`.
+- Same for "expiring contract" rows: show `"—"` (em dash) instead of `0y`.
+- While we're here, double-check `pad_display` is used on the name column in Step 2 too (same diacritic concern as Step 1).
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/trades.rs` — Step 2 row formatter.
+
+**Acceptance**:
+- LaVine row reads `Zach LaVine    SF 31 83  $13.9M  —` (no contract year on expiring) or `Zach LaVine    SF 31 83  $13.9M  1y` (1 year left).
+- All years render with `y` suffix; no bare numbers.
+
+**Commit**: `M30-T40: step 2 player years suffix and unicode pad`.
+
+---
+
+## T41 — Verdict bar: ✓ when CBA passes + specific GM reject per CbaError
+
+**Status**: `[x]` → codex: added cap-pass marker and CBA-variant-specific GM reject lines; tests passed.
+
+**Goal**: image #30 shows two issues.
+
+(a) Trade was rejected for **roster size** (19 > 18), but GM said `想法不错, 但工资帽这关过不去` — that's the salary-cap message, not the roster-size reason. The `T::TradesGmRejectCba` template is too coarse — currently catches ALL CBA errors with the same line.
+
+(b) When the salary match / cap rules DO pass, there's no positive signal. User wants a green ✓ next to the salary line so they know they're safe from a cap perspective (even if other warnings exist).
+
+**Fix (a)** — split GM reject template per `CbaError` variant:
+
+| CbaError variant | New i18n key | Template |
+|---|---|---|
+| `SalaryMatch` (over-cap, fails 125% rule) | `T::TradesGmRejectSalaryMatch` | `{TEAM} GM: "工资帽这关过不去, 进薪超出 125% 限制."` |
+| `HardCap` (touches first/second apron) | `T::TradesGmRejectHardCap` | `{TEAM} GM: "我们触线了, 这交易没法做."` |
+| `RosterSize` (13-18 violation) | `T::TradesGmRejectRoster` | `{TEAM} GM: "想法不错, 但交易后阵容人数不合规."` |
+| `NoTradeClause` | reuse `T::TradesGmRejectUntouchable` | (already player-named) |
+| `Other` / unmapped | keep `T::TradesGmRejectCba` as catch-all fallback | `{TEAM} GM: "规则上有问题, 这笔做不成."` |
+
+In `crates/nba3k-cli/src/tui/screens/trades.rs::format_gm_dialog` (or wherever the mapping lives), match on the actual `CbaError` variant returned from `validate(...)` rather than treating "any CBA error" as one bucket.
+
+**Fix (b)** — when CBA `validate(...)` returns Ok (no salary mismatch / hard cap / NTC issues), render a green `✓` glyph after the salary delta line:
+
+```
+送 $28.5M  /  收 $29.9M  /  净 +$1.5M  ✓ 工资帽通过
+```
+
+The ✓ uses `Style::default().fg(Color::Green)` (or `theme.accent_style()` if green isn't the theme accent — pick green explicitly so it reads as "safe").
+
+If CBA fails, NO ✓; the warning panel below explains.
+
+Roster-size and other non-financial warnings still appear in the warning panel as before, even when ✓ is shown for cap.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/trades.rs` — `render_verdict_bar` adds the green ✓ branch + refactor `format_gm_dialog` to be CbaError-aware.
+- `crates/nba3k-core/src/i18n.rs` + `i18n_en.rs` + `i18n_zh.rs` — add `T::TradesGmRejectSalaryMatch`, `T::TradesGmRejectHardCap`, `T::TradesGmRejectRoster`, `T::TradesVerdictCapPass` ("工资帽通过" / "Cap rules OK").
+
+**Acceptance**:
+- Same trade as image #30 (roster 19, $1.5M net) → GM line says `想法不错, 但交易后阵容人数不合规.` (NOT "工资帽").
+- Salary-match violation (over-cap, 125% fail) → GM line says `工资帽这关过不去, 进薪超出 125% 限制.`.
+- Trade where caps pass but roster size violates → green `✓ 工资帽通过` on salary line + roster-size warning below + roster-specific GM line.
+- Clean trade (passes everything) → green `✓ 工资帽通过` on salary line + no warnings + GM accept line after submit.
+
+**Commit**: `M30-T41: verdict cap-pass marker + cba-aware gm reject lines`.
+
+---
+
+## Wave order
+
+T39 / T40 are pure formatting fixes, can do in any order, parallel-safe.
+T41 touches engine-mapping logic + new i18n keys — do after T39/T40 to avoid merge conflicts in trades.rs.
+
+## Resolved decisions (2026-04-29 follow-up)
+
+- T39 alignment via `pad_display` + right-aligned salary (7 cols) + years with `y` suffix (3 cols).
+- T40 same fixes apply to Step 2 row formatter; both side panels.
+- T41 GM reject message must match the actual `CbaError` variant; green `✓` shows when cap rules pass even if other warnings exist.
+
+---
+
+## T42 — Roster-size warning specifies which team violates
+
+**Status**: `[x]` → codex: roster-size warnings now name the offending team abbrev and render one line per violating team.
+
+**Goal**: image #33 — `⚠ 交易后阵容人数不在 13-18 范围. 当前 21.` doesn't tell user which team has the bad count. The `CbaError::RosterSize` variant from `validate(...)` already carries the offending team id (or both if both violate); the i18n template just throws away the team info.
+
+**Fix**:
+- `crates/nba3k-cli/src/tui/screens/trades.rs` warning rendering for roster-size: read team abbrev (`Store::team_abbrev`) of the offending team, plug into the template. If both teams violate (rare but possible), render two lines.
+- `crates/nba3k-core/src/i18n.rs` + tables — change `T::TradesWarnRosterSize` template to take 2 params (team_abbrev, count):
+  - ZH: `⚠ {team} 交易后阵容人数 {count}, 不在 13-18 范围.`
+  - EN: `⚠ {team} would have {count} players post-trade — outside the 13-18 range.`
+
+**Acceptance**:
+- Trade in image #33 → warning reads `⚠ HOU 交易后阵容人数 21, 不在 13-18 范围.` (or whichever team is the violator).
+- If both teams overflow / underflow → 2 warning lines, one per team.
+
+**Commit**: `M30-T42: roster size warning names offending team`.
+
+---
+
+## T43 — Swap panels: target team LEFT, my team RIGHT
+
+**Status**: `[x]` → codex: Step 2 now shows target roster on the left, my roster on the right, with target-first focus order.
+
+**Goal**: User wants the TARGET team's roster on the LEFT panel, MY team on the RIGHT. Currently it's reversed (我方送出 left, 对方接收 right). Reasoning per user: read left-to-right as "from THEM → into MY team".
+
+**Spec**:
+- Step 2 layout becomes:
+  ```
+  ┌─ 对方送出 (HOU) ────────┬─ 我方送出 (CHI) ────────┐
+  │ ─ 球员 ─                │ ─ 球员 ─                │
+  │ ✓ Şengün C 24 87 $29.9M │ ✓ LaVine SF 31 83 $13.9M│
+  │   ...                   │   ...                   │
+  ```
+- Top bar copy stays factual — `目标 HOU · 我方 CHI` order remains semantic; no swap there.
+- Verdict bar copy: keep `送 $X / 收 $Y / 净 ±Z`. "送" still refers to MY team's outgoing salary, "收" still my team's incoming. Numbers don't change, only the panel order swaps.
+- Tab/Shift-Tab focus order: now goes target panel first (left) then my panel (right) — natural left-to-right.
+- All keys (Space select / m mode / etc) preserved on both panels.
+
+**Files**:
+- `crates/nba3k-cli/src/tui/screens/trades.rs` — swap the two `Layout::default().split(...)` calls in Step 2 body draw, swap the focus enum order, swap which side the user-team list / target-team list go into.
+- `crates/nba3k-core/src/i18n.rs` + tables — re-examine `T::TradesSendList` / `T::TradesReceiveList` panel headers:
+  - LEFT panel header was "我方送出"; change to "对方送出 (target sends to us)" — or use existing `T::TradesReceiveList` ("对方接收") inverted to "对方送出" / "{TEAM} sends".
+  - RIGHT panel header was "对方接收"; change to "我方送出" / "我方 sends".
+  - Easiest: rename the two existing keys to reflect new positions, OR keep keys neutral and swap usage at call site. Pick the call-site swap so i18n stays simple.
+
+**Acceptance**:
+- Open Step 2 with target=HOU, mine=CHI → LEFT panel has HOU roster, RIGHT panel has CHI roster.
+- Tab moves focus left → right (target → mine).
+- Selections still work; verdict salary lines still calculate "送" from my team.
+
+**Commit**: `M30-T43: swap trade panels target left mine right`.
+
+---
+
+## Wave order (M30 follow-up part 2)
+
+T42 / T43 independent. Codex picks any order.
+
+## Resolved decisions (2026-04-29 part 2)
+
+- T42 roster-size warning includes offending team abbrev.
+- T43 panels swapped: target LEFT, mine RIGHT. Top bar copy unchanged. Verdict salary semantics unchanged.
+
+---
+
+## T44 — Scraper dedup + per-team cap (root-cause fix for >18 rosters)
+
+**Status**: `[x]` → codex: implemented scraper-side primary-team dedup, top-15 per-team cap, tighter assertions, duplicate-name guard, and unit tests.
+
+**Problem**: Each team in the seed has 20-22 players because BBRef's per-team page lists EVERY player who appeared on the team that season — including mid-season-traded-out players, 10-day signees, and waived players. The scraper concatenates all 30 team pages → duplicates (e.g. Mitchell on both DAL and CLE) + bloated rosters → CBA's 13-18 post-trade roster bound is impossible to satisfy.
+
+**Background context** (from M19.1 memory note):
+> Bumped scrape-assertion bounds (max_players 600→720, max_per_team 20→30) since prior-season pulls duplicate rows for traded players.
+
+That widening was a workaround. T44 fixes the data instead.
+
+**Approach** (one-pass, no extra HTTP calls):
+
+After Stage 1 in `crates/nba3k-scrape/src/main.rs` collects `all_players` (30 team pages concatenated), insert a dedup + cap pass BEFORE rating + insert. Two filters:
+
+1. **Per-team cap** — within each team, keep top 15 by `minutes_per_game` (then `games` desc as tiebreak). Drops 10-day signees and rotation fringe.
+2. **Cross-team dedup** — group all remaining players by normalized name. If a player name appears on 2+ teams, keep only the entry with highest `minutes_per_game * games` (= total minutes that season — that's their "primary team"). The other entries get dropped entirely.
+
+After both filters: each team has ≤ 15 players; each player has exactly one team.
+
+Tighten `data/free_agents_2025_26.toml` curated list (M27 T22) to fill the remaining gap of 30-50 unsigned vets.
+
+**Files**:
+- `crates/nba3k-scrape/src/main.rs`:
+  - After `all_players` is built (line ~170), call new `dedup_and_cap(&mut all_players, &mut team_player_offsets) -> ()`.
+  - Helper iterates teams, sorts each team's slice by `mpg desc, games desc`, truncates to top 15 (configurable const `MAX_PER_TEAM = 15`).
+  - Then groups remaining by normalized name (reuse `names_match` logic from `bbref.rs`); for each multi-team duplicate, retains only the row with max `mpg * games`. Other rows dropped from `all_players`. Recompute `team_player_offsets` to point to the new contiguous slices.
+- `crates/nba3k-scrape/src/assertions.rs`:
+  - Tighten bounds: `max_players: 720 → 480`, `max_per_team: 30 → 18`. Restores the original "real NBA" sanity check.
+- `crates/nba3k-scrape/src/sources/bbref.rs`:
+  - Optional: pre-filter inside `parse_team_page` so per-team page already returns ≤ 18 (avoids carrying 22 then trimming). Probably cleaner to do at main.rs level — keeps bbref.rs raw.
+
+**Edge cases**:
+- A player with 0 mpg (didn't play) — drop entirely. Don't include in seed.
+- Tied tiebreak (rare) — sort by name asc as final tiebreak for determinism.
+- Synthetic roster fallback (offline) — `synthetic_roster` already returns 15. No-op for it.
+
+**Acceptance**:
+- After `cargo run -p nba3k-scrape` regenerates `data/seed_2025_26.sqlite`:
+  - `sqlite3 data/seed_2025_26.sqlite "SELECT team_id, COUNT(*) FROM players WHERE team_id IS NOT NULL GROUP BY team_id;"` shows each team with 13-15 players.
+  - `sqlite3 data/seed_2025_26.sqlite "SELECT name, COUNT(*) FROM players GROUP BY name HAVING COUNT(*) > 1;"` returns 0 rows.
+- Fresh `nba3k new --team BOS --save x.db` → roster size = 14-15.
+- Trade builder: post-trade roster size stays in 13-18 for any reasonable swap.
+- `cargo build --workspace` clean.
+- `cargo test --workspace` ≥ 299 (the dedup logic gets unit tests in main.rs or new module).
+
+**Not in scope**:
+- Migrating existing saves — user explicitly chose pure A. Existing saves keep their bloat; user starts a new save for the fix.
+- Touching trade engine CBA rules — they were always correct; data was wrong.
+
+**Commit**: `M30-T44: scraper dedup + per-team cap to 15`.
+
+---
+
+## Resolved decisions (2026-04-29 part 3)
+
+- T44 fixes roster bloat at SCRAPER level: per-team top-15 by mpg + cross-team dedup keeping max-minutes team. Bounds tightened to 480/18.
+- User starts new save after re-scraping; existing save not migrated (per user choice).

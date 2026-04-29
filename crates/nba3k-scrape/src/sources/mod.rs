@@ -27,11 +27,21 @@ pub struct RawPlayerStats {
     pub usage: Option<f32>,
 }
 
+pub fn normalize_player_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphabetic())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
 /// Map a raw position string ("PG", "SG-SF", "G", "F-C") to a primary +
 /// optional secondary `Position`. Used by both BBRef and nba_api parsers.
 pub fn parse_position(s: &str) -> (Position, Option<Position>) {
     let upper = s.trim().to_uppercase();
-    let parts: Vec<&str> = upper.split(['-', '/', ' ']).filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = upper
+        .split(['-', '/', ' '])
+        .filter(|p| !p.is_empty())
+        .collect();
     let mut codes: Vec<Position> = parts.iter().filter_map(|p| code_to_position(p)).collect();
     if codes.is_empty() {
         codes.push(Position::SF);

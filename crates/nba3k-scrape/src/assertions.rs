@@ -22,10 +22,10 @@ pub struct Bounds {
 impl Default for Bounds {
     fn default() -> Self {
         Self {
-            min_players: 450,
-            max_players: 720,
+            min_players: 390,
+            max_players: 480,
             min_per_team: 13,
-            max_per_team: 30,
+            max_per_team: 18,
             min_prospects: 60,
         }
     }
@@ -94,6 +94,15 @@ pub fn run_all(out: &Path, season: SeasonId, bounds: &Bounds) -> Result<()> {
     )?;
     if dup > 0 {
         bail!("{dup} duplicate player ids in seed");
+    }
+
+    let dup_names: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM (SELECT name FROM players GROUP BY name HAVING COUNT(*) > 1)",
+        [],
+        |r| r.get(0),
+    )?;
+    if dup_names > 0 {
+        bail!("{dup_names} duplicate player names in seed");
     }
 
     // M12-A: every active player must have a contract after the backfill

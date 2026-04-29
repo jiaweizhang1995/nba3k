@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use scraper::{Html, Selector};
 
-use super::{parse_position, RawPlayerStats};
+use super::{normalize_player_name, parse_position, RawPlayerStats};
 use crate::cache::{html_ttl, Cache};
 use crate::politeness::Fetcher;
 
@@ -95,13 +95,7 @@ fn parse_team_page(html: &str) -> Result<Vec<RawPlayerStats>> {
 }
 
 fn names_match(a: &str, b: &str) -> bool {
-    fn norm(s: &str) -> String {
-        s.chars()
-            .filter(|c| c.is_alphabetic())
-            .flat_map(|c| c.to_lowercase())
-            .collect()
-    }
-    norm(a) == norm(b)
+    normalize_player_name(a) == normalize_player_name(b)
 }
 
 fn strip_table_comments(html: &str) -> String {

@@ -38,11 +38,15 @@ impl LanguageChoice {
 #[derive(Copy, Clone, Debug)]
 struct SettingsState {
     cursor: usize,
+    lang_cursor: usize,
 }
 
 impl Default for SettingsState {
     fn default() -> Self {
-        Self { cursor: 0 }
+        Self {
+            cursor: 0,
+            lang_cursor: 0,
+        }
     }
 }
 
@@ -54,15 +58,27 @@ thread_local! {
 
 pub fn reset(current: LanguageChoice) {
     STATE.with(|s| {
-        s.borrow_mut().cursor = index_of(current);
+        let mut st = s.borrow_mut();
+        st.cursor = 0;
+        st.lang_cursor = index_of(current);
     });
 }
 
-pub fn render(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, current: LanguageChoice) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    current: LanguageChoice,
+    god_mode: bool,
+) {
     STATE.with(|s| {
         let mut st = s.borrow_mut();
-        if st.cursor >= LANGUAGES.len() {
-            st.cursor = index_of(current);
+        if st.cursor > 1 {
+            st.cursor = 0;
+        }
+        if st.lang_cursor >= LANGUAGES.len() {
+            st.lang_cursor = index_of(current);
         }
     });
 
@@ -85,40 +101,51 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, current: Lan
 
     STATE.with(|s| {
         let st = s.borrow();
-        let items: Vec<ListItem> = LANGUAGES
-            .iter()
-            .enumerate()
-            .map(|(idx, lang)| {
-                let selected = idx == st.cursor;
-                let active = *lang == current;
-                let style = if selected {
-                    theme.highlight()
-                } else if active {
-                    theme.accent_style()
-                } else {
-                    theme.text()
-                };
-                let marker = if selected {
-                    "> "
-                } else if active {
-                    "* "
-                } else {
-                    "  "
-                };
-                ListItem::new(Line::from(Span::styled(
-                    format!("{}{}", marker, lang.label()),
-                    style,
-                )))
-            })
-            .collect();
-        let picker = List::new(items).block(theme.block(t(lang, T::SettingsLanguage)));
-        f.render_widget(picker, centered(parts[1], 34, 4));
+        let lang_choice = LANGUAGES[st.lang_cursor];
+        let language_style = if st.cursor == 0 {
+            theme.highlight()
+        } else if lang_choice == current {
+            theme.accent_style()
+        } else {
+            theme.text()
+        };
+        let god_style = if st.cursor == 1 {
+            theme.highlight()
+        } else {
+            theme.text()
+        };
+        let items = vec![
+            ListItem::new(Line::from(Span::styled(
+                format!(
+                    "{}{:<12} [{}]",
+                    if st.cursor == 0 { "> " } else { "  " },
+                    t(lang, T::SettingsLanguage),
+                    lang_choice.label()
+                ),
+                language_style,
+            ))),
+            ListItem::new(Line::from(Span::styled(
+                format!(
+                    "{}{:<12} [{}]",
+                    if st.cursor == 1 { "> " } else { "  " },
+                    t(lang, T::SettingsGodMode),
+                    if god_mode {
+                        t(lang, T::SettingsOn)
+                    } else {
+                        t(lang, T::SettingsOff)
+                    }
+                ),
+                god_style,
+            ))),
+        ];
+        let picker = List::new(items).block(theme.block(t(lang, T::SettingsTitle)));
+        f.render_widget(picker, centered(parts[1], 42, 6));
     });
 
     let hint = Line::from(vec![
         Span::styled(" Up/Down ", theme.accent_style()),
         Span::styled(format!("{}   ", t(lang, T::CommonMove)), theme.text()),
-        Span::styled(" Enter ", theme.accent_style()),
+        Span::styled(" Space/Enter ", theme.accent_style()),
         Span::styled(format!("{}   ", t(lang, T::CommonConfirm)), theme.text()),
         Span::styled(" Esc ", theme.accent_style()),
         Span::styled(t(lang, T::CommonBack), theme.text()),
@@ -140,20 +167,51 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         KeyCode::Down => {
             STATE.with(|s| {
                 let mut st = s.borrow_mut();
-                if st.cursor + 1 < LANGUAGES.len() {
+                if st.cursor < 1 {
                     st.cursor += 1;
                 }
             });
             Ok(true)
         }
-        KeyCode::Enter => {
-            let choice = STATE.with(|s| LANGUAGES[s.borrow().cursor]);
-            commit_lang(app, tui, choice);
+        KeyCode::Left | KeyCode::Right => {
+            let commit = STATE.with(|s| {
+                let mut st = s.borrow_mut();
+                if st.cursor == 0 {
+                    st.lang_cursor = 1 - st.lang_cursor;
+                    Some(LANGUAGES[st.lang_cursor])
+                } else {
+                    None
+                }
+            });
+            if let Some(choice) = commit {
+                commit_lang(app, tui, choice);
+            }
+            Ok(true)
+        }
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            let action = STATE.with(|s| {
+                let mut st = s.borrow_mut();
+                if st.cursor == 0 {
+                    st.lang_cursor = 1 - st.lang_cursor;
+                    SettingsAction::Language(LANGUAGES[st.lang_cursor])
+                } else {
+                    SettingsAction::GodMode(!tui.god_mode)
+                }
+            });
+            match action {
+                SettingsAction::Language(choice) => commit_lang(app, tui, choice),
+                SettingsAction::GodMode(enabled) => commit_god_mode(app, tui, enabled),
+            }
             Ok(true)
         }
         KeyCode::Esc => Ok(false),
         _ => Ok(false),
     }
+}
+
+enum SettingsAction {
+    Language(LanguageChoice),
+    GodMode(bool),
 }
 
 fn commit_lang(app: &mut AppState, tui: &mut TuiApp, choice: LanguageChoice) {
@@ -164,6 +222,17 @@ fn commit_lang(app: &mut AppState, tui: &mut TuiApp, choice: LanguageChoice) {
         let _ = store.write_setting("language", value);
     }
     let _ = crate::config::write_lang(value);
+    tui.last_msg = Some(t(tui.lang, T::SettingsSaved).to_string());
+}
+
+fn commit_god_mode(app: &mut AppState, tui: &mut TuiApp, enabled: bool) {
+    tui.god_mode = enabled;
+    app.force_god = enabled;
+    let value = if enabled { "on" } else { "off" };
+    if let Ok(store) = app.store() {
+        let _ = store.write_setting("god_mode", value);
+    }
+    let _ = crate::config::write_god_mode(enabled);
     tui.last_msg = Some(t(tui.lang, T::SettingsSaved).to_string());
 }
 

@@ -42,7 +42,7 @@ pub const TOP_60: &[MockProspect] = &[
     MockProspect { rank: 20, name: "Bennett Stirtz",    age: 22, position: Position::PG, potential: 81 },
     MockProspect { rank: 21, name: "Eric Reibe",        age: 19, position: Position::C,  potential: 81 },
     MockProspect { rank: 22, name: "Nikolas Khamenia",  age: 19, position: Position::SF, potential: 80 },
-    MockProspect { rank: 23, name: "Yves Missi",        age: 21, position: Position::C,  potential: 80 },
+    MockProspect { rank: 23, name: "Moustapha Thiam",   age: 21, position: Position::C,  potential: 80 },
     MockProspect { rank: 24, name: "Tounde Yessoufou",  age: 19, position: Position::SG, potential: 80 },
     MockProspect { rank: 25, name: "Cayden Boozer",     age: 19, position: Position::PG, potential: 80 },
     MockProspect { rank: 26, name: "Brandon McCoy Jr.", age: 19, position: Position::C,  potential: 79 },

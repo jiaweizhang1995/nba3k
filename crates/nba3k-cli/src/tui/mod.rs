@@ -218,6 +218,8 @@ pub struct TuiApp {
     pub theme: Theme,
     /// TUI chrome language. Player names and team abbreviations remain data.
     pub lang: Lang,
+    /// Persisted god-mode toggle for TUI-only override behavior.
+    pub god_mode: bool,
     /// Screen to return to when QuitConfirm is cancelled.
     quit_return: Screen,
 
@@ -253,7 +255,7 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
-    fn new(theme: Theme, save_ctx: Option<SaveCtx>, lang: Lang) -> Self {
+    fn new(theme: Theme, save_ctx: Option<SaveCtx>, lang: Lang, god_mode: bool) -> Self {
         let mut app = Self {
             current: Screen::Launch,
             menu_selected: 0,
@@ -261,6 +263,7 @@ impl TuiApp {
             focus: FocusZone::Content,
             theme,
             lang,
+            god_mode,
             quit_return: Screen::Launch,
             save_ctx: None,
             user_team: TeamId(0),
@@ -426,16 +429,22 @@ pub fn run(app: &mut AppState, tv: bool) -> Result<()> {
     // Best-effort load: if the store can't open or the save has no
     // season_state, fall through with `save_ctx = None` and let the wizard
     // take over instead of aborting.
-    let (save_ctx, lang) = match app.store() {
+    let (save_ctx, lang, god_mode) = match app.store() {
         Ok(_) => {
             let lang = read_lang(app);
+            let god_mode = read_god_mode(app) || app.force_god;
             let save_ctx = SaveCtx::load(app).unwrap_or(None);
-            (save_ctx, lang)
+            (save_ctx, lang, god_mode)
         }
-        Err(_) => (None, read_config_lang()),
+        Err(_) => (
+            None,
+            read_config_lang(),
+            read_config_god_mode() || app.force_god,
+        ),
     };
+    app.force_god = god_mode;
 
-    let mut tui = TuiApp::new(theme, save_ctx, lang);
+    let mut tui = TuiApp::new(theme, save_ctx, lang, god_mode);
     if tui.has_save() {
         with_silenced_io(|| backfill_free_agents_if_empty(app))?;
     }
@@ -485,6 +494,27 @@ fn read_config_lang() -> Lang {
     crate::config::read_lang()
         .and_then(|value| Lang::from_setting(&value))
         .unwrap_or(Lang::En)
+}
+
+fn read_god_mode(app: &mut AppState) -> bool {
+    match app.store() {
+        Ok(store) => store
+            .read_setting("god_mode")
+            .ok()
+            .flatten()
+            .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
+                "on" | "true" | "1" | "yes" => Some(true),
+                "off" | "false" | "0" | "no" => Some(false),
+                _ => None,
+            })
+            .or_else(crate::config::read_god_mode)
+            .unwrap_or(false),
+        Err(_) => read_config_god_mode(),
+    }
+}
+
+fn read_config_god_mode() -> bool {
+    crate::config::read_god_mode().unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -1259,9 +1289,14 @@ fn draw_content(f: &mut Frame, area: Rect, app: &mut AppState, tui: &TuiApp) {
         Screen::Home => screens::home::render(f, inner, &tui.theme, app, tui),
         Screen::Calendar => screens::calendar::render(f, inner, &tui.theme, app, tui),
         Screen::Saves => screens::saves::render(f, inner, &tui.theme, app, tui),
-        Screen::Settings => {
-            screens::settings::render(f, inner, &tui.theme, tui.lang, settings_choice(tui.lang))
-        }
+        Screen::Settings => screens::settings::render(
+            f,
+            inner,
+            &tui.theme,
+            tui.lang,
+            settings_choice(tui.lang),
+            tui.god_mode,
+        ),
         Screen::NewGame => screens::new_game::render(f, inner, &tui.theme, app, tui),
         Screen::Roster => screens::roster::render(f, inner, &tui.theme, app, tui),
         Screen::Rotation => screens::rotation::render(f, inner, &tui.theme, app, tui),
@@ -1583,7 +1618,7 @@ mod tests {
     fn help_key_opens_only_after_screen_declines_it() {
         let key = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
         let mut app = AppState::new(None, false);
-        let mut tui = TuiApp::new(Theme::DEFAULT, None, Lang::En);
+        let mut tui = TuiApp::new(Theme::DEFAULT, None, Lang::En, false);
 
         inner_screen_key(&mut app, &mut tui, key, |_app, _tui, _key| Ok(true)).unwrap();
         assert!(!tui.help_open);
@@ -1595,7 +1630,7 @@ mod tests {
     #[test]
     fn menu_nav_enters_preview_and_enter_or_tab_focuses() {
         let mut app = AppState::new(None, false);
-        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En);
+        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En, false);
 
         menu_key(
             &mut app,
@@ -1640,7 +1675,7 @@ mod tests {
     fn focused_screen_escape_returns_to_preview_mode() {
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let mut app = AppState::new(None, false);
-        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En);
+        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En, false);
         tui.current = Screen::Finance;
         tui.menu_selected = 0;
 
@@ -1653,7 +1688,7 @@ mod tests {
 
     #[test]
     fn focus_zone_matches_sidebar_preview_and_content_rules() {
-        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En);
+        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En, false);
 
         tui.current = Screen::Menu;
         tui.preview_mode = false;
@@ -1681,7 +1716,7 @@ mod tests {
 
     #[test]
     fn sync_focus_updates_public_focus_field() {
-        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En);
+        let mut tui = TuiApp::new(Theme::DEFAULT, Some(test_save_ctx()), Lang::En, false);
         tui.current = Screen::Roster;
         tui.preview_mode = true;
         tui.sync_focus();

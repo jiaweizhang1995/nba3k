@@ -22,6 +22,9 @@ pub(crate) fn lookup(key: T) -> &'static str {
         T::LaunchNoSave => "No save loaded",
         T::SettingsTitle => "Settings",
         T::SettingsLanguage => "Language",
+        T::SettingsGodMode => "God mode",
+        T::SettingsOn => "On",
+        T::SettingsOff => "Off",
         T::SettingsSaved => "Settings saved",
         T::CommonNavigate => "Navigate",
         T::CommonMove => "Move",
@@ -143,6 +146,51 @@ pub(crate) fn lookup(key: T) -> &'static str {
         T::TradesToggleTeamMode => "m toggles 2/3-team",
         T::TradesSwapIncomingTeam => "i swaps incoming team",
         T::TradesInsufficientValue => "insufficient value",
+        T::TradesPickTeamTitle => "Pick Target Team",
+        T::TradesRosterPreview => "Roster Preview",
+        T::TradesPayrollCap => "Payroll / Cap",
+        T::TradesBuilderTitle => "Trade Builder",
+        T::TradesBuilderTopBar => "m 3-team  T change team",
+        T::TradesSendList => "We Send",
+        T::TradesReceiveList => "They Send",
+        T::TradesSectionPlayers => "Players",
+        T::TradesSectionPicks => "Picks",
+        T::TradesPicksDeferred => "Coming in M31",
+        T::TradesTargetTeam => "Target",
+        T::TradesMyTeam => "My Team",
+        T::TradesVerdictTitle => "Submit Preview",
+        T::TradesVerdictSent => "Sent",
+        T::TradesVerdictReceived => "Received",
+        T::TradesVerdictDelta => "Net",
+        T::TradesVerdictPrompt => "Select with Up/Down + Space, Enter to propose",
+        T::TradesWarnSalaryMatch => {
+            "You are over the cap. Incoming salary must fit the salary-matching limit."
+        }
+        T::TradesWarnHardCap => "This trade would push you over a hard cap line.",
+        T::TradesWarnNTC => "has a no-trade clause and cannot be traded.",
+        T::TradesNoteTradeKicker => "has a trade kicker that changes incoming salary.",
+        T::TradesWarnRosterSize => {
+            "⚠ {team} would have {count} players post-trade — outside the 13-18 range."
+        }
+        T::TradesForceTradeChip => "F Force Trade",
+        T::TradesGmAccept => "GM: \"Nice dealing with you.\"",
+        T::TradesGmCounterMild => "GM: \"Close, but you need to add something.\"",
+        T::TradesGmCounterDemand => "GM: \"That is too light. Add more value and we can talk.\"",
+        T::TradesGmRejectInsufficient => "GM: \"Not close. Do not waste our time.\"",
+        T::TradesGmRejectCba => "GM: \"There is a rules problem, so this deal cannot happen.\"",
+        T::TradesGmRejectSalaryMatch => {
+            "GM: \"The cap math does not work. Incoming salary is over the matching limit.\""
+        }
+        T::TradesGmRejectHardCap => "GM: \"We hit a hard cap line. This deal cannot happen.\"",
+        T::TradesGmRejectRoster => {
+            "GM: \"The idea is fine, but the post-trade roster size is not legal.\""
+        }
+        T::TradesGmRejectUntouchable => "GM: \"That player is not available.\"",
+        T::TradesGmRejectBadFaith => {
+            "GM: \"We are not interested in discussing this deal right now.\""
+        }
+        T::TradesGodAcceptDialog => "GM (forced): \"Fine. We accept.\"",
+        T::TradesVerdictCapPass => "Cap rules OK",
         T::DraftTitle => "Draft",
         T::DraftBoard => "Board",
         T::DraftOrder => "Order",
