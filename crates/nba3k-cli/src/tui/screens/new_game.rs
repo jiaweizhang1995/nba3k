@@ -1,6 +1,9 @@
-//! New-game wizard. Five steps (save path → team → mode → season → confirm).
+//! New-game wizard. Four steps (save path → team → mode → confirm).
 //! On confirm, dispatches `Command::New` and transitions back to the
 //! Menu screen with the new save loaded.
+//!
+//! The starting season is implied by the bundled seed (2025-26 league year)
+//! or the live `--from-today` import; the wizard does not ask for it.
 //!
 //! State is kept in a thread-local since per-screen state can't live on the
 //! Wave-0 `TuiApp`. `reset()` re-initializes it for a fresh wizard run; called
@@ -19,9 +22,7 @@ use std::path::PathBuf;
 
 use crate::cli::{Command, NewArgs};
 use crate::state::AppState;
-use crate::tui::widgets::{
-    centered_block, FormWidget, NumberInput, Picker, TextInput, Theme, WidgetEvent,
-};
+use crate::tui::widgets::{centered_block, FormWidget, Picker, TextInput, Theme, WidgetEvent};
 use crate::tui::{Screen, TuiApp};
 use nba3k_core::{t, Lang, Team, T};
 
@@ -37,7 +38,6 @@ enum Step {
     SavePath,
     Team,
     Mode,
-    Season,
     Confirm,
 }
 
@@ -46,7 +46,6 @@ struct WizardState {
     save_path: TextInput,
     team_picker: Picker<Team>,
     mode_picker: Picker<&'static str>,
-    season: NumberInput,
     /// Last error from a failed dispatch (`new` overwrite refuse, invalid input).
     error: Option<String>,
 }
@@ -69,9 +68,6 @@ impl WizardState {
                 MODES.to_vec(),
                 |s: &&'static str| s.to_string(),
             ),
-            season: NumberInput::new(t(lang, T::NewGameSeason))
-                .with_bounds(2024, 2030)
-                .with_initial(2026),
             error: None,
         }
     }
@@ -80,7 +76,6 @@ impl WizardState {
         self.save_path.set_label(t(lang, T::NewGameSavePath));
         self.team_picker.set_title(t(lang, T::NewGameTeam));
         self.mode_picker.set_title(t(lang, T::NewGameMode));
-        self.season.set_label(t(lang, T::NewGameSeason));
     }
 }
 
@@ -194,8 +189,7 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, title: &str
         ("1", t(lang, T::NewGameSavePath), Step::SavePath),
         ("2", t(lang, T::NewGameTeam), Step::Team),
         ("3", t(lang, T::NewGameMode), Step::Mode),
-        ("4", t(lang, T::NewGameSeason), Step::Season),
-        ("5", t(lang, T::NewGameConfirm), Step::Confirm),
+        ("4", t(lang, T::NewGameConfirm), Step::Confirm),
     ];
     let mut spans: Vec<Span> = Vec::new();
     for (i, (n, label, s)) in labels.iter().enumerate() {
@@ -248,27 +242,6 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
         Step::Mode => {
             render_mode_picker(f, area, theme, lang, &st.mode_picker);
         }
-        Step::Season => {
-            let inner = vsplit(area, 3);
-            let lines = vec![
-                Line::from(Span::styled(
-                    t(lang, T::NewGameSeason),
-                    theme.accent_style(),
-                )),
-                Line::from(Span::styled("2024-2030", theme.muted_style())),
-            ];
-            let p = Paragraph::new(lines)
-                .block(theme.block(""))
-                .wrap(Wrap { trim: false });
-            f.render_widget(p, inner.0);
-            render_text_value(
-                f,
-                inner.1,
-                theme,
-                t(lang, T::NewGameSeason),
-                st.season.raw(),
-            );
-        }
         Step::Confirm => {
             let team_label = st
                 .team_picker
@@ -280,11 +253,6 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
                 .selected()
                 .map(|s| (*s).to_string())
                 .unwrap_or_else(|| "standard".into());
-            let season_label = st
-                .season
-                .value()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| st.season.raw().to_string());
             let lines = vec![
                 Line::from(Span::styled(
                     t(lang, T::NewGameConfirm),
@@ -294,7 +262,6 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
                 kv_line(theme, t(lang, T::NewGameSavePath), st.save_path.value()),
                 kv_line(theme, t(lang, T::NewGameTeam), &team_label),
                 kv_line(theme, t(lang, T::NewGameMode), &mode_label),
-                kv_line(theme, t(lang, T::NewGameSeason), &season_label),
                 Line::from(""),
                 Line::from(Span::styled(
                     format!(
@@ -309,15 +276,6 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
             f.render_widget(p, area);
         }
     }
-}
-
-fn render_text_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, value: &str) {
-    let line = Line::from(vec![
-        Span::styled(format!(" {} ", label), theme.accent_style()),
-        Span::styled(value.to_string(), theme.text()),
-        Span::styled("█", theme.text()),
-    ]);
-    f.render_widget(Paragraph::new(line).block(theme.block("")), area);
 }
 
 fn render_team_picker(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, picker: &Picker<Team>) {
@@ -446,7 +404,7 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             match key.code {
                 KeyCode::Enter => return WizardAction::Submit,
                 KeyCode::Esc => {
-                    st.step = Step::Season;
+                    st.step = Step::Mode;
                     return WizardAction::Consumed;
                 }
                 _ => return WizardAction::Consumed,
@@ -457,7 +415,6 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             Step::SavePath => st.save_path.handle_key(key),
             Step::Team => st.team_picker.handle_key(key),
             Step::Mode => st.mode_picker.handle_key(key),
-            Step::Season => st.season.handle_key(key),
             Step::Confirm => unreachable!(),
         };
         match ev {
@@ -526,14 +483,6 @@ fn advance_step(st: &mut WizardState) -> WizardAction {
                 return WizardAction::Consumed;
             }
             st.error = None;
-            st.step = Step::Season;
-        }
-        Step::Season => {
-            if st.season.value().is_none() {
-                st.error = Some("season must be 2024-2030".into());
-                return WizardAction::Consumed;
-            }
-            st.error = None;
             st.step = Step::Confirm;
         }
         Step::Confirm => unreachable!(),
@@ -547,8 +496,7 @@ fn retreat_step(st: &mut WizardState) -> WizardAction {
         Step::SavePath => return WizardAction::ExitToMenu,
         Step::Team => st.step = Step::SavePath,
         Step::Mode => st.step = Step::Team,
-        Step::Season => st.step = Step::Mode,
-        Step::Confirm => st.step = Step::Season,
+        Step::Confirm => st.step = Step::Mode,
     }
     WizardAction::Consumed
 }
@@ -572,13 +520,11 @@ fn submit(app: &mut AppState, tui: &mut TuiApp) -> Result<()> {
             .copied()
             .unwrap_or("standard")
             .to_string();
-        let season = st.season.value().ok_or_else(|| anyhow!("season not set"))? as u16;
         Ok((
             save_path,
             NewArgs {
                 team,
                 mode,
-                season,
                 seed: rand::random::<u64>(),
                 // Live ESPN import is the default starting M34. The TUI
                 // wizard no longer offers an opt-out — users who want a

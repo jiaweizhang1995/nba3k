@@ -238,7 +238,10 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
 
     app.open_path(path.clone())?;
 
-    let season = SeasonId(args.season);
+    // Offline path is anchored to the bundled seed (data/seed_2025_26.sqlite),
+    // which represents SeasonId(2026) = the 2025-26 league year. Live (--from-today)
+    // path doesn't reach here.
+    let season = SeasonId(2026);
 
     {
         let store = app.store()?;
@@ -867,6 +870,25 @@ pub(crate) fn sim_n_days(app: &mut AppState, count: u32, quiet: bool) -> Result<
 
         // PreSeason days: just advance the counter, no games.
         if matches!(state.phase, SeasonPhase::PreSeason) {
+            if state.day >= season_phases::PRESEASON_LAST_DAY && state.mode.enforces_cba() {
+                let snap_owned = build_league_snapshot(app)?;
+                let snapshot = snap_owned.view();
+                if let Some(v) =
+                    nba3k_trade::cba::check_season_start_user_roster(&snapshot, state.user_team)
+                {
+                    let abbrev = snapshot
+                        .team(v.team)
+                        .map(|t| t.abbrev.as_str())
+                        .unwrap_or("???");
+                    bail!(
+                        "regular season start blocked: {} has {} players (limit {}). Cut a player with `fa cut <name>` until you are at {}. AI teams are not checked.",
+                        abbrev,
+                        v.size,
+                        v.limit,
+                        v.limit
+                    );
+                }
+            }
             state.day += 1;
             if state.day > season_phases::PRESEASON_LAST_DAY {
                 state.phase = SeasonPhase::Regular;
@@ -1211,6 +1233,24 @@ fn cup_group_id(conf: Conference, slot: usize) -> &'static str {
         (Conference::West, 1) => "west-B",
         _ => "west-C",
     }
+}
+
+#[allow(dead_code)]
+fn format_season_start_roster_violations(
+    league: &LeagueSnapshot<'_>,
+    violations: &[nba3k_trade::cba::RosterTooLargeAtSeasonStart],
+) -> String {
+    violations
+        .iter()
+        .map(|v| {
+            let abbrev = league
+                .team(v.team)
+                .map(|t| t.abbrev.as_str())
+                .unwrap_or("???");
+            format!("{abbrev} has {} players (limit {})", v.size, v.limit)
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Partition 30 teams into 6 groups of 5. East/West are split first; within
@@ -4532,8 +4572,9 @@ fn run_ai_free_agency(app: &mut AppState, season: SeasonId, user_team: TeamId) -
 }
 
 /// Min roster size AI teams aim for during the FA pass. Below this, teams
-/// keep signing affordable FAs. Charter target is < 16, so we stop at 16.
-const AI_FA_ROSTER_CAP: usize = 16;
+/// keep signing affordable FAs. Stop at 15 so the post-draft FA sweep does
+/// not add an extra training-camp body before the regular-season opener.
+const AI_FA_ROSTER_CAP: usize = 15;
 
 fn cmd_season_summary(app: &mut AppState, as_json: bool) -> Result<()> {
     let state = current_state(app)?;
@@ -4765,9 +4806,11 @@ fn fmt_pct(v: f32) -> String {
     format!(".{:03}", scaled)
 }
 
-/// Roster cap. Mirrors the NBA's hard cap of 15 standard contracts + 3
-/// two-way slots (= 18); refused at this boundary, no soft-warning mode.
-const FA_ROSTER_CAP: usize = 18;
+/// User-facing FA signing roster cap. Offseason/preseason uses the 21-player
+/// training-camp window; regular/playoff phases use the modeled 18-slot total.
+fn fa_roster_cap_for_phase(phase: SeasonPhase) -> usize {
+    nba3k_trade::cba::roster_bounds_for_phase(phase).1 as usize
+}
 /// How many free agents to surface in the default `fa list` view.
 const FA_LIST_TOP_N: usize = 30;
 
@@ -4820,11 +4863,12 @@ fn cmd_fa_sign(app: &mut AppState, query: &str) -> Result<()> {
     let store = app.store()?;
 
     let roster_size = store.roster_for_team(user_team)?.len();
-    if roster_size >= FA_ROSTER_CAP {
+    let roster_cap = fa_roster_cap_for_phase(state.phase);
+    if roster_size >= roster_cap {
         bail!(
             "roster full: {} players already on user team (cap {}). Cut a player first.",
             roster_size,
-            FA_ROSTER_CAP
+            roster_cap
         );
     }
 

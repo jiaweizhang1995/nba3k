@@ -20,7 +20,9 @@
 //!   evaluated independently, both must pass.
 
 use crate::snapshot::LeagueSnapshot;
-use nba3k_core::{Cents, Contract, ContractYear, Player, PlayerId, SeasonId, TeamId, TradeOffer};
+use nba3k_core::{
+    Cents, Contract, ContractYear, Player, PlayerId, SeasonId, SeasonPhase, TeamId, TradeOffer,
+};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CbaViolation {
@@ -66,6 +68,11 @@ impl SalaryTier {
     }
 }
 
+/// Maximum modeled standard roster size at the regular-season opener. The
+/// codebase does not model two-way contracts separately yet, so every rostered
+/// player counts toward this 15-player gate.
+pub const REGULAR_SEASON_ROSTER_MAX: u32 = 15;
+
 /// Threshold above which the non-apron tier flips from 200%+$250K to
 /// 125%+$250K. Per post-2023 CBA: $7.5M outgoing.
 const NON_APRON_TIER_BREAK: Cents = Cents(750_000_000);
@@ -88,7 +95,9 @@ pub fn validate(offer: &TradeOffer, league: &LeagueSnapshot) -> Result<(), CbaVi
     for &team in offer.assets_by_team.keys() {
         check_aggregation_cooldown(team, offer, league)?;
     }
-    // Roster size 13-15 post-trade.
+    // Roster size post-trade. Bounds are phase-aware: offseason/preseason can
+    // carry training-camp bodies, while regular/playoff phases use the current
+    // modeled 18-slot total.
     for &team in offer.assets_by_team.keys() {
         check_roster_size(team, offer, league)?;
     }
@@ -365,15 +374,64 @@ pub fn check_roster_size(
         .map(|(_, s)| s.players_out.len() as i64)
         .sum();
     let post = current_size - outgoing + incoming;
-    // 2025-26 CBA: 15 standard contracts + 3 two-way = 18 total roster spots.
-    // Floor of 13 enforces the league minimum carry rule.
-    if !(13..=18).contains(&post) {
+    let (min, max) = roster_bounds_for_phase(league.current_phase);
+    // 2025-26 CBA: offseason/preseason training-camp window allows 21 total
+    // players; regular-season/playoff windows use 18 total slots in this v1
+    // model. Floor of 13 enforces the league minimum carry rule.
+    if !(min..=max).contains(&post) {
         return Err(CbaViolation::RosterSize {
             team,
             size: post.max(0) as u32,
         });
     }
     Ok(())
+}
+
+pub fn roster_bounds_for_phase(phase: SeasonPhase) -> (i64, i64) {
+    use SeasonPhase::*;
+    match phase {
+        OffSeason | FreeAgency | Draft | PreSeason => (13, 21),
+        Regular | TradeDeadlinePassed | Playoffs => (13, 18),
+    }
+}
+
+/// Per-team violation for the regular-season opener gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RosterTooLargeAtSeasonStart {
+    pub team: TeamId,
+    pub size: u32,
+    pub limit: u32,
+}
+
+/// Returns all teams currently carrying more than the modeled standard-contract
+/// regular-season opener limit. Empty means the season may start.
+pub fn check_season_start_rosters(league: &LeagueSnapshot) -> Vec<RosterTooLargeAtSeasonStart> {
+    league
+        .teams
+        .iter()
+        .filter_map(|team| {
+            let size = league.roster(team.id).len() as u32;
+            (size > REGULAR_SEASON_ROSTER_MAX).then_some(RosterTooLargeAtSeasonStart {
+                team: team.id,
+                size,
+                limit: REGULAR_SEASON_ROSTER_MAX,
+            })
+        })
+        .collect()
+}
+
+/// Season-start gate scoped to the user team. AI teams are intentionally not
+/// checked in this build; no AI auto-cut runs before the regular season.
+pub fn check_season_start_user_roster(
+    league: &LeagueSnapshot,
+    user_team: TeamId,
+) -> Option<RosterTooLargeAtSeasonStart> {
+    let size = league.roster(user_team).len() as u32;
+    (size > REGULAR_SEASON_ROSTER_MAX).then_some(RosterTooLargeAtSeasonStart {
+        team: user_team,
+        size,
+        limit: REGULAR_SEASON_ROSTER_MAX,
+    })
 }
 
 /// v1: hard-cap gate is "post-trade total must not exceed apron_2 if it

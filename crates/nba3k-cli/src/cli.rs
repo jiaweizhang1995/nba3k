@@ -310,9 +310,6 @@ pub struct NewArgs {
     /// Game mode: standard, god, hardcore, sandbox.
     #[arg(long, default_value = "standard")]
     pub mode: String,
-    /// Starting season identifier (year of finals, e.g. 2026 = 2025-26 season).
-    #[arg(long, default_value_t = 2026)]
-    pub season: u16,
     /// Deterministic RNG seed.
     #[arg(long, default_value_t = 0)]
     pub seed: u64,

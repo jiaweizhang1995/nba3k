@@ -64,6 +64,15 @@ Snapshots are **derived state**. They are NOT cached across commands.
 Each command rebuilds from the DB, so commands compose cleanly under
 `--script` (and the integ test exploits this).
 
+Trade-engine CBA roster bounds are phase-aware: offseason, draft, free
+agency, and preseason use the 21-player training-camp cap, while regular,
+trade-deadline-passed, and playoff phases use the modeled 18-slot cap.
+The regular-season opener gate is separate from trade validation and
+blocks `PreSeason` → `Regular` in CBA-enforcing modes if the user team
+has more than 15 modeled standard-contract players. AI teams are not
+gated and may enter the regular season above the cap; they are also not
+auto-cut.
+
 ## Schema is migration-first
 
 Schema lives only as `.sql` files in

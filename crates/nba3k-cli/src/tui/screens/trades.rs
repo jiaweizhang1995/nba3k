@@ -156,8 +156,11 @@ struct PlayerOption {
     years: u32,
 }
 
-// Roster cap mirrors `commands::FA_ROSTER_CAP` (15 std + 3 two-way = 18).
-const FA_ROSTER_CAP: usize = 18;
+// User-facing FA signing cap. Offseason/preseason uses the 21-player
+// training-camp window; regular/playoff phases use the modeled 18-slot total.
+fn fa_roster_cap_for_phase(phase: SeasonPhase) -> usize {
+    cba::roster_bounds_for_phase(phase).1 as usize
+}
 
 #[derive(Default)]
 struct TradesCache {
@@ -2408,16 +2411,23 @@ fn sign_current_free_agent(app: &mut AppState, tui: &mut TuiApp) -> Result<bool>
         return Ok(true);
     };
 
-    let roster_full = app
+    let roster_cap = app
+        .store()
+        .ok()
+        .and_then(|s| s.load_season_state().ok().flatten())
+        .map(|state| fa_roster_cap_for_phase(state.phase))
+        .unwrap_or_else(|| fa_roster_cap_for_phase(SeasonPhase::Regular));
+    let roster_size = app
         .store()
         .ok()
         .and_then(|s| s.roster_for_team(tui.user_team).ok())
-        .map(|r| r.len() >= FA_ROSTER_CAP)
-        .unwrap_or(false);
+        .map(|r| r.len())
+        .unwrap_or(0);
+    let roster_full = roster_size >= roster_cap;
     if roster_full {
         tui.last_msg = Some(format!(
             "roster full ({}/{}), cut a player first",
-            FA_ROSTER_CAP, FA_ROSTER_CAP
+            roster_size, roster_cap
         ));
         return Ok(true);
     }

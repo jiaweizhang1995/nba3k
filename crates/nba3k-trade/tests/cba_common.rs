@@ -111,9 +111,13 @@ impl World {
     }
 
     pub fn snapshot(&self) -> LeagueSnapshot<'_> {
+        self.snapshot_with_phase(SeasonPhase::Regular)
+    }
+
+    pub fn snapshot_with_phase(&self, phase: SeasonPhase) -> LeagueSnapshot<'_> {
         LeagueSnapshot {
             current_season: SEASON,
-            current_phase: SeasonPhase::Regular,
+            current_phase: phase,
             current_date: NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
             league_year: ly(),
             teams: &self.teams,
