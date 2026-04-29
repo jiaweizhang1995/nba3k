@@ -163,8 +163,9 @@ struct PickOption {
     round: u8,
     /// Display label, e.g. "2027 R1 (own)" or "2026 R2 (via DET)".
     label: String,
-    /// Empty when unprotected; otherwise prose / "lottery-protected" / etc.
-    protection: String,
+    /// Star rating 1-5; `None` when upstream data marks the pick as
+    /// "Not Tradable" / "FROZEN".
+    stars: Option<u8>,
 }
 
 // User-facing FA signing cap. Offseason/preseason uses the 21-player
@@ -705,11 +706,11 @@ fn draw_asset_list(
                 theme.text()
             };
             let mark = if is_selected { "✓" } else { " " };
-            let line = if p.protection.is_empty() {
-                format!(" {} {}", mark, p.label)
-            } else {
-                format!(" {} {} [{}]", mark, p.label, short_prot(&p.protection))
+            let stars_label = match p.stars {
+                Some(n) => crate::commands::render_stars(n),
+                None => "🔒 frozen".to_string(),
             };
+            let line = format!(" {} {}  {}", mark, p.label, stars_label);
             lines.push(Line::from(Span::styled(line, style)));
         }
     }
@@ -719,17 +720,6 @@ fn draw_asset_list(
         title.to_string()
     };
     f.render_widget(Paragraph::new(lines).block(theme.block(&title)), area);
-}
-
-/// Compress prose protection labels for the trade-builder cell ([protection]).
-/// Long Spotrac prose gets ellipsis-truncated; structured labels pass through.
-fn short_prot(s: &str) -> String {
-    let s = s.trim();
-    if s.len() <= 28 {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..27])
-    }
 }
 
 #[derive(Default)]
@@ -1485,6 +1475,10 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
 }
 
 fn build_pick_options(app: &mut AppState, team: TeamId) -> Result<Vec<PickOption>> {
+    let state = app
+        .store()?
+        .load_season_state()?
+        .ok_or_else(|| anyhow!("no season_state in save"))?;
     let store = app.store()?;
     let teams = store.list_teams()?;
     let abbrev: HashMap<TeamId, String> = teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
@@ -1506,19 +1500,14 @@ fn build_pick_options(app: &mut AppState, team: TeamId) -> Result<Vec<PickOption
                     .unwrap_or_else(|| format!("T{}", p.original_team.0));
                 format!("via {}", a)
             };
-            let protection = crate::commands::protection_label(&p);
-            let protection = if protection == "unprotected" {
-                String::new()
-            } else {
-                protection
-            };
+            let stars = crate::commands::pick_stars(&p, state.season);
             let label = format!("{} R{} ({})", p.season.0, p.round, via);
             PickOption {
                 id: p.id,
                 season: p.season.0,
                 round: p.round,
                 label,
-                protection,
+                stars,
             }
         })
         .collect())

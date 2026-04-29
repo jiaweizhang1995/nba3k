@@ -2490,6 +2490,69 @@ pub(crate) fn render_pick(pick: &DraftPick, abbrev: &HashMap<TeamId, String>) ->
     }
 }
 
+/// Star rating (1-5) for a draft pick, or `None` if the pick is flagged
+/// "Not Tradable" / "FROZEN PICK" by upstream data (Spotrac prose). Used by
+/// the TUI to render a glanceable value bar without exposing long prose.
+///
+/// Heuristic: round + years-out + structured `Protection` enum + a coarse
+/// scan of any free-text protection prose. Standings are intentionally
+/// ignored so the rating degrades cleanly to offline saves with 0-0
+/// records.
+pub(crate) fn pick_stars(pick: &DraftPick, current_season: SeasonId) -> Option<u8> {
+    if let Some(text) = pick.protection_text.as_ref() {
+        let lower = text.to_lowercase();
+        if lower.contains("not tradable")
+            || lower.contains("frozen pick")
+            || lower.contains("non-tradable")
+        {
+            return None;
+        }
+    }
+    let years_out = (pick.season.0 as i32 - current_season.0 as i32).max(0);
+    let mut s: i32 = match pick.round {
+        1 => 4,
+        _ => 1,
+    };
+    // Year discount for picks deep in the future.
+    s -= match years_out {
+        0 | 1 | 2 => 0,
+        3 | 4 => 1,
+        _ => 2,
+    };
+    // Structured protection penalty.
+    s -= match pick.protections {
+        Protection::Unprotected => 0,
+        Protection::TopNProtected(n) if n <= 3 => 0,
+        Protection::TopNProtected(n) if n <= 10 => 1,
+        Protection::TopNProtected(_) | Protection::LotteryProtected => 2,
+    };
+    // Spotrac prose sometimes flags swap-only or heavily-conditioned picks.
+    if let Some(text) = pick.protection_text.as_ref() {
+        let lower = text.to_lowercase();
+        if lower.contains("least favorable") {
+            s -= 1;
+        }
+        if lower.contains("more favorable") {
+            // Net upside — no penalty, optional small bump capped by clamp.
+            s += 1;
+        }
+    }
+    Some(s.clamp(1, 5) as u8)
+}
+
+/// Render `n` filled + `(5-n)` empty stars, e.g. "★★★★☆".
+pub(crate) fn render_stars(stars: u8) -> String {
+    let n = stars.min(5) as usize;
+    let mut out = String::with_capacity(15);
+    for _ in 0..n {
+        out.push('★');
+    }
+    for _ in n..5 {
+        out.push('☆');
+    }
+    out
+}
+
 pub(crate) fn protection_label(pick: &DraftPick) -> String {
     if let Some(text) = pick
         .protection_text
