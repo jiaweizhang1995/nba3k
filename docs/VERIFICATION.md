@@ -24,9 +24,9 @@ make lint-strict        # clippy with -D warnings, currently fails on
 
 ## Test counts
 
-Baseline as of post-M35 roster bugfix / commit `7973832`:
+Baseline as of M36 pick trading / commit `bd8deb5`:
 
-- `cargo test --workspace` → **329 passed + 2 ignored**, 72 suites, ~13 s wall
+- `cargo test --workspace` → **338 passed + 2 ignored**, 74 suites, ~14 s wall
 
 Each new task either keeps the count or grows it. A drop is a
 regression.

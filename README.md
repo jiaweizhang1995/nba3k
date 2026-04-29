@@ -243,6 +243,12 @@ nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 
 可用 `data/pick_swaps_overrides.toml` 手工覆盖 `(year, original_team, round)` 行。交易命令支持 `--send-picks 2027-R1-BOS` / `--receive-picks 2028-R2-LAL`，并会执行七年规则与 Stepien 规则。
 
+**TUI 表现**：
+
+- **Trades / Builder**：左右两栏球员列表下方各有 Picks 区，光标在球员区走完后会进入 Picks 区，`Space` 选中。每个 pick 旁边有 1-5 星评级（`★★★★☆`），算法看 round + 距今年数 + protection 等级 + Spotrac prose 关键字。Spotrac 标记为 "Not Tradable" / "FROZEN PICK" 的 pick 显示 `🔒 frozen`，**God 模式下** 这个锁失效，所有 pick 都按正常星级显示并可交易（God 模式本来就跳过 CBA 校验）。
+- **Roster** 屏：`1` 我方阵容 / `2` Picks 子页；按 year/round/origin 排序，列出 own 还是 via X，protection 列原样保留 prose 文本。
+- **Draft Order** 屏：交易过的顺位会在 VIA 列显示 `via NYK`，OWNER 列指向当前持有方而不是原球队。
+
 ### 季后赛与赛季奖项
 
 | 命令 | 作用 |

@@ -1,7 +1,7 @@
 # PROGRESS.md — where the project is right now
 
-> Generated at the M35 / `2d7a3cd` mark, refreshed after roster-cap bugfix
-> (`7973832`). Keep this file in sync with `phases/PHASES.md` (the
+> Generated at the M35 / `2d7a3cd` mark, refreshed after M36 pick-trading
+> work (`bd8deb5`). Keep this file in sync with `phases/PHASES.md` (the
 > per-milestone log) on every milestone close.
 
 ## Current state
@@ -9,11 +9,11 @@
 | | |
 |---|---|
 | Current binary | `nba3k` (CLI + REPL + TUI surfaces) |
-| Workspace tests | **329 passed + 2 ignored** across 72 suites |
-| Latest milestone | **M35 — Start From Today snapshot semantics** + post-M35 roster bugfix |
-| Latest commit | `7973832 fix(roster): phase-aware roster bounds + season-start gate; drop --season from new-game` |
-| Schema high-water mark | **V017** (next migration uses V018) |
-| Default `new` behavior | **Live ESPN snapshot** (post-M34); pass `--offline` for the seed-anchored fresh-October path. The wizard no longer asks for a starting season — the bundled seed is anchored to 2025-26. |
+| Workspace tests | **338 passed + 2 ignored** across 74 suites |
+| Latest milestone | **M36 — Draft-pick trading system** (foundation + UI + star rating + god-mode unlock) |
+| Latest commit | `bd8deb5 feat(tui): god mode unlocks "Not Tradable" / "FROZEN" picks in trade builder` |
+| Schema high-water mark | **V018** (next migration uses V019) |
+| Default `new` behavior | **Live ESPN snapshot** (post-M34); pass `--offline` for the seed-anchored fresh-October path. The wizard no longer asks for a starting season — the bundled seed is anchored to 2025-26. Live mode now also overlays Spotrac's future-pick swap data on top of the 420 vanilla pick rows. |
 
 ## What works end-to-end
 
@@ -21,6 +21,11 @@
   advancement, and progression pass.
 - Trade engine with CBA validation, GM personalities, multi-round
   negotiation, 3-team trades.
+- Draft-pick trading (M36): 7-year horizon × 30 teams × 2 rounds, live
+  Spotrac swap overlay (default `new`) or vanilla self-owned
+  (`--offline`). Stepien + seven-year CBA gates. TUI trade builder shows
+  picks beside players with 1-5 star value rating; Roster screen has a
+  Picks sub-tab; Draft order screen shows "via X" for traded slots.
 - Live "Start From Today" — current standings, rosters, injuries, and
   season-to-date player stats imported from ESPN's public JSON API.
 - TUI with 8-menu shell: Home / Roster / Rotation / Trades / Draft /
@@ -41,10 +46,16 @@ and per-milestone docs.
 | **M32–M33** | `--from-today` importer + TUI wizard + season-advance | ✅ |
 | **M34** | Live ESPN start is the default | ✅ |
 | **M35** | Snapshot semantics (match NBA 2K behavior) | ✅ |
+| **M36** | Draft-pick trading: V018 schema, Spotrac scraper, Stepien + 7-year CBA, TUI surfaces, star rating | ✅ |
 
 ## Recent commits (most recent first)
 
 ```
+bd8deb5 feat(tui): god mode unlocks "Not Tradable" / "FROZEN" picks in trade builder
+4131354 feat(tui): replace pick-protection prose with 1-5 star rating in trade builder
+2f5660a feat(tui): pick trading UI surfaces — trade builder, roster Picks tab, draft via X
+9c96ca4 feat(draft): add pick trading foundation
+92a724e docs: roster cap rules, season-start gate, post-bugfix test count
 7973832 fix(roster): phase-aware roster bounds + season-start gate; drop --season from new-game
 3072745 fix(makefile): escape backticks in `make help` output
 9822609 docs: normalize project docs into docs/ + Makefile

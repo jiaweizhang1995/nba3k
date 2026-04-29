@@ -24,6 +24,23 @@ rules, use pick ownership in draft order, and expose picks through the CLI.
   picks are marked, and the trailing pick horizon is topped up on
   `season-advance`.
 - CBA validation blocks picks beyond seven years and Stepien violations.
+- TUI surfaces (commit `2f5660a`):
+  - Trade builder: Picks subcolumn beside Players in both halves; combined
+    cursor walks players first then picks; `Space` toggles selection; chosen
+    picks flow through `TradeAssets.picks_out` to CBA validation.
+  - Roster screen: new Picks sub-tab (`1`/`2` to switch), columns
+    YEAR / RND / VIA / PROTECTION.
+  - Draft Order screen: VIA column + uses `draft_picks.current_owner` so
+    traded slots render as `Pick #5 — DET via NYK`.
+  - Stepien / 7-year CBA error messages no longer leak `TeamId(_)` debug
+    formatting.
+- Star rating (commit `4131354`): trade builder pick rows render `★★★★☆` from
+  a heuristic over round + years-out + structured `Protection` enum + light
+  prose scan ("more/least favorable"). Spotrac-flagged "Not Tradable" /
+  "FROZEN PICK" picks render as `🔒 frozen`.
+- God-mode unlock (commit `bd8deb5`): in god mode the frozen-prose check is
+  skipped and every pick gets normal stars, mirroring how god mode bypasses
+  CBA validation.
 
 ## Verification Log
 
@@ -45,8 +62,11 @@ rules, use pick ownership in draft order, and expose picks through the CLI.
 
 ## Deviations
 
-- The TUI compiles against the new CBA variants, but full pick-selection
-  subcolumns in the trade-builder and a dedicated roster Picks tab remain a
-  follow-up. CLI and backend behavior are implemented.
+- Codex's foundation commit (`9c96ca4`) deferred all TUI surfaces. Those were
+  picked up and shipped in `2f5660a` / `4131354` / `bd8deb5` (this main-agent
+  session). M36 is now end-to-end complete.
 - Spotrac swap-right prose is stored verbatim as protection text; v1 does not
   model higher/lower-of swap mechanics.
+- Star rating ignores live standings on purpose so the rating degrades cleanly
+  to offline 0-0 saves. A future pass could fold in Spotrac-derived "team
+  strength" once we have a reliable signal beyond W-L.
