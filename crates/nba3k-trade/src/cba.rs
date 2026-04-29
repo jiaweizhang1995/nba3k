@@ -46,9 +46,9 @@ pub enum CbaViolation {
     RosterSize { team: TeamId, size: u32 },
     #[error("apron 2 forbids cash and aggregation")]
     Apron2Restriction { team: TeamId },
-    #[error("seven-year rule: team {team:?} cannot trade a {year} pick")]
+    #[error("seven-year rule: cannot trade a {year} pick (more than 7 years out)")]
     PickTooFarOut { team: TeamId, year: u16 },
-    #[error("stepien rule: team {team:?} would lack a 1st in {year1} and {year2}")]
+    #[error("stepien rule: would leave a team without a 1st-round pick in {year1} and {year2} (consecutive)")]
     StepienViolation {
         team: TeamId,
         year1: u16,

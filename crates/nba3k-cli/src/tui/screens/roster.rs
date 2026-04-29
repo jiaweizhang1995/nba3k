@@ -36,7 +36,8 @@ use crate::tui::widgets::{
 };
 use crate::tui::{with_silenced_io, TuiApp};
 use nba3k_core::{
-    t, Cents, ContractYear, Lang, Player, PlayerId, PlayerRole, Position, SeasonId, TeamId, T,
+    t, Cents, ContractYear, DraftPick, Lang, Player, PlayerId, PlayerRole, Position, SeasonId,
+    TeamId, T,
 };
 use nba3k_season::career::{career_totals, SeasonAvgRow};
 
@@ -91,10 +92,30 @@ struct CareerLine {
     apg: f32,
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+enum SubTab {
+    #[default]
+    MyRoster,
+    Picks,
+}
+
+#[derive(Clone, Debug)]
+struct PickRow {
+    season: u16,
+    round: u8,
+    via: String,        // "own" or "via XYZ"
+    protection: String, // "" if unprotected
+    is_swap: bool,
+}
+
 #[derive(Default)]
 struct RosterCache {
+    /// Active sub-tab.
+    tab: SubTab,
     /// Cached ordered roster rows for the active sort.
     rows: Option<Vec<RosterRow>>,
+    /// Cached owned-picks rows.
+    picks_rows: Option<Vec<PickRow>>,
     /// Memoized detail data, keyed by player id.
     details: HashMap<PlayerId, DetailData>,
 
@@ -102,6 +123,8 @@ struct RosterCache {
     sort: SortKey,
     /// Cursor on My Roster tab.
     roster_cursor: usize,
+    /// Cursor on Picks tab.
+    picks_cursor: usize,
     /// Active modal — stacked on top of the table.
     modal: Modal,
 }
@@ -163,8 +186,9 @@ pub fn invalidate() {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         c.rows = None;
+        c.picks_rows = None;
         c.details.clear();
-        // Preserve cursor + sort + open modal — only data is stale.
+        // Preserve cursor + sort + tab + open modal — only data is stale.
     });
 }
 
@@ -186,7 +210,24 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         return;
     }
 
-    draw_roster_tab(f, area, theme, tui.lang);
+    let tab = CACHE.with(|c| c.borrow().tab);
+    let parts = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+    draw_tab_strip(f, parts[0], theme, tui.lang, tab);
+    match tab {
+        SubTab::MyRoster => draw_roster_tab(f, parts[1], theme, tui.lang),
+        SubTab::Picks => {
+            if let Err(e) = ensure_picks_cache(app, tui) {
+                let p = Paragraph::new(format!("Picks unavailable: {}", e))
+                    .block(theme.block(t(tui.lang, T::RosterTitle)));
+                f.render_widget(p, parts[1]);
+            } else {
+                draw_picks_tab(f, parts[1], theme, tui.lang);
+            }
+        }
+    }
 
     // Modal overlay (after tab body so it draws on top).
     let need_modal = CACHE.with(|c| !matches!(c.borrow().modal, Modal::None));
@@ -197,6 +238,93 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
         f.render_widget(Clear, rect);
         draw_modal(f, rect, theme, app, tui.lang);
     }
+}
+
+fn draw_tab_strip(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, tab: SubTab) {
+    let style = |t| {
+        if tab == t {
+            theme.highlight()
+        } else {
+            theme.muted_style()
+        }
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            format!(" 1. {} ", t(lang, T::RosterMyRoster)),
+            style(SubTab::MyRoster),
+        ),
+        Span::styled("   ", theme.text()),
+        Span::styled(" 2. Picks ", style(SubTab::Picks)),
+    ]);
+    f.render_widget(
+        Paragraph::new(line).block(theme.block(t(lang, T::RosterTitle))),
+        area,
+    );
+}
+
+fn draw_picks_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
+    CACHE.with(|c| {
+        let cache = c.borrow();
+        let rows = cache.picks_rows.as_deref().unwrap_or(&[]);
+        let cursor = cache.picks_cursor.min(rows.len().saturating_sub(1));
+
+        let parts = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(3)])
+            .split(area);
+
+        let header = Row::new(vec![
+            Cell::from(Span::styled("YEAR", theme.accent_style())),
+            Cell::from(Span::styled("RND", theme.accent_style())),
+            Cell::from(Span::styled("VIA", theme.accent_style())),
+            Cell::from(Span::styled("PROTECTION", theme.accent_style())),
+        ]);
+
+        let body: Vec<Row> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let style = if i == cursor {
+                    theme.highlight()
+                } else {
+                    theme.text()
+                };
+                let via_label = if r.is_swap {
+                    format!("{} (swap)", r.via)
+                } else {
+                    r.via.clone()
+                };
+                Row::new(vec![
+                    Cell::from(Span::styled(format!("{}", r.season), style)),
+                    Cell::from(Span::styled(format!("R{}", r.round), style)),
+                    Cell::from(Span::styled(via_label, style)),
+                    Cell::from(Span::styled(r.protection.clone(), style)),
+                ])
+            })
+            .collect();
+
+        let title = format!(" Picks ({}) ", rows.len());
+        let table = Table::new(
+            body,
+            [
+                Constraint::Length(6),
+                Constraint::Length(4),
+                Constraint::Length(14),
+                Constraint::Min(20),
+            ],
+        )
+        .header(header)
+        .block(theme.block(&title));
+        f.render_widget(table, parts[0]);
+
+        let hints = [
+            ("1", t(lang, T::RosterMyRoster)),
+            ("2", "Picks"),
+            ("Up/Dn", t(lang, T::CommonNavigate)),
+            ("Esc", t(lang, T::CommonBack)),
+        ];
+        ActionBar::new(&hints).render(f, parts[1], theme);
+    });
 }
 
 fn draw_roster_tab(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
@@ -652,6 +780,58 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn ensure_picks_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
+    let need = CACHE.with(|c| c.borrow().picks_rows.is_none());
+    if need {
+        let rows = build_picks_rows(app, tui)?;
+        CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.picks_rows = Some(rows);
+        });
+    }
+    Ok(())
+}
+
+fn build_picks_rows(app: &mut AppState, tui: &TuiApp) -> Result<Vec<PickRow>> {
+    let store = app.store()?;
+    let teams = store.list_teams()?;
+    let abbrev: HashMap<TeamId, String> = teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
+    let mut picks: Vec<DraftPick> = store
+        .all_picks()?
+        .into_iter()
+        .filter(|p| p.current_owner == tui.user_team && !p.resolved)
+        .collect();
+    picks.sort_by_key(|p| (p.season.0, p.round, p.original_team.0));
+    let rows = picks
+        .into_iter()
+        .map(|p| {
+            let via = if p.original_team == p.current_owner {
+                "own".to_string()
+            } else {
+                let label = abbrev
+                    .get(&p.original_team)
+                    .cloned()
+                    .unwrap_or_else(|| format!("T{}", p.original_team.0));
+                format!("via {}", label)
+            };
+            let protection = crate::commands::protection_label(&p);
+            let protection = if protection == "unprotected" {
+                String::new()
+            } else {
+                protection
+            };
+            PickRow {
+                season: p.season.0,
+                round: p.round,
+                via,
+                protection,
+                is_swap: false,
+            }
+        })
+        .collect();
+    Ok(rows)
 }
 
 fn build_roster_rows(app: &mut AppState, tui: &TuiApp) -> Result<Vec<RosterRow>> {
@@ -1250,6 +1430,22 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
 }
 
 fn roster_tab_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result<bool> {
+    // Tab-switch shortcuts work from either tab.
+    match key.code {
+        KeyCode::Char('1') => {
+            CACHE.with(|c| c.borrow_mut().tab = SubTab::MyRoster);
+            return Ok(true);
+        }
+        KeyCode::Char('2') => {
+            CACHE.with(|c| c.borrow_mut().tab = SubTab::Picks);
+            return Ok(true);
+        }
+        _ => {}
+    }
+    let tab = CACHE.with(|c| c.borrow().tab);
+    if tab == SubTab::Picks {
+        return picks_tab_key(key);
+    }
     match key.code {
         KeyCode::Up => {
             CACHE.with(|c| {
@@ -1410,6 +1606,46 @@ fn train_picker(lang: Lang) -> Picker<&'static str> {
         vec!["shoot", "inside", "def", "reb", "ath", "handle"],
         |s| (*s).to_string(),
     )
+}
+
+fn picks_tab_key(key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Up => {
+            CACHE.with(|c| {
+                let mut c = c.borrow_mut();
+                if c.picks_cursor > 0 {
+                    c.picks_cursor -= 1;
+                }
+            });
+            Ok(true)
+        }
+        KeyCode::Down => {
+            CACHE.with(|c| {
+                let mut c = c.borrow_mut();
+                let len = c.picks_rows.as_ref().map(|r| r.len()).unwrap_or(0);
+                if c.picks_cursor + 1 < len {
+                    c.picks_cursor += 1;
+                }
+            });
+            Ok(true)
+        }
+        KeyCode::PageUp => {
+            CACHE.with(|c| {
+                let mut c = c.borrow_mut();
+                c.picks_cursor = c.picks_cursor.saturating_sub(10);
+            });
+            Ok(true)
+        }
+        KeyCode::PageDown => {
+            CACHE.with(|c| {
+                let mut c = c.borrow_mut();
+                let len = c.picks_rows.as_ref().map(|r| r.len()).unwrap_or(0);
+                c.picks_cursor = (c.picks_cursor + 10).min(len.saturating_sub(1));
+            });
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
 }
 
 fn role_picker(lang: Lang) -> Picker<&'static str> {

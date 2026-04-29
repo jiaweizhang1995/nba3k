@@ -62,9 +62,15 @@ struct ProspectRow {
 #[derive(Clone, Debug)]
 struct OrderRow {
     pick: usize,
+    /// Team that actually picks (current_owner of the pick row, if traded; else
+    /// original team). Used for "is this my slot" highlighting.
     team_id: TeamId,
     abbrev: String,
     full_name: String,
+    /// Original team whose record produced this slot. Differs from `team_id`
+    /// when the pick has been traded.
+    original_team_id: TeamId,
+    original_abbrev: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -304,6 +310,7 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
             Cell::from(Span::styled("PICK", theme.accent_style())),
             Cell::from(Span::styled("TEAM", theme.accent_style())),
             Cell::from(Span::styled("FRANCHISE", theme.accent_style())),
+            Cell::from(Span::styled("VIA", theme.accent_style())),
             Cell::from(Span::styled("OWNER", theme.accent_style())),
         ]);
 
@@ -318,10 +325,16 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                 } else {
                     theme.text()
                 };
+                let via = if r.team_id != r.original_team_id {
+                    format!("via {}", r.original_abbrev)
+                } else {
+                    String::new()
+                };
                 Row::new(vec![
                     Cell::from(format!("{:>2}", r.pick)),
                     Cell::from(r.abbrev.clone()),
                     Cell::from(r.full_name.clone()),
+                    Cell::from(via),
                     Cell::from(if is_user { "*" } else { "" }),
                 ])
                 .style(style)
@@ -334,6 +347,7 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
                 Constraint::Length(6),
                 Constraint::Length(8),
                 Constraint::Min(18),
+                Constraint::Length(10),
                 Constraint::Length(8),
             ],
         )
@@ -591,21 +605,46 @@ fn load_draft_data(app: &mut AppState, tui: &TuiApp) -> Result<DraftData> {
         .into_iter()
         .map(|t| (t.id, (t.abbrev.clone(), t.full_name())))
         .collect();
+    // Pick-ownership map for the current draft season, round 1 (the order
+    // screen only displays round 1). Look up by original team to find the
+    // current_owner of that team's slot.
+    let state = app
+        .store()?
+        .load_season_state()?
+        .ok_or_else(|| anyhow!("no season state in save"))?;
+    let mut owner_by_original: HashMap<TeamId, TeamId> = HashMap::new();
+    for p in app.store()?.all_picks()? {
+        if p.season == state.season && p.round == 1 {
+            owner_by_original.insert(p.original_team, p.current_owner);
+        }
+    }
     let order = order_ids
         .into_iter()
         .enumerate()
-        .map(|(i, team_id)| {
-            let (abbrev, full_name) = names.get(&team_id).cloned().unwrap_or_else(|| {
+        .map(|(i, original_id)| {
+            let (original_abbrev, _) = names.get(&original_id).cloned().unwrap_or_else(|| {
                 (
-                    format!("T{}", team_id.0),
+                    format!("T{}", original_id.0),
+                    t(tui.lang, T::DraftUnknownTeam).to_string(),
+                )
+            });
+            let owner_id = owner_by_original
+                .get(&original_id)
+                .copied()
+                .unwrap_or(original_id);
+            let (abbrev, full_name) = names.get(&owner_id).cloned().unwrap_or_else(|| {
+                (
+                    format!("T{}", owner_id.0),
                     t(tui.lang, T::DraftUnknownTeam).to_string(),
                 )
             });
             OrderRow {
                 pick: i + 1,
-                team_id,
+                team_id: owner_id,
                 abbrev,
                 full_name,
+                original_team_id: original_id,
+                original_abbrev,
             }
         })
         .collect::<Vec<_>>();

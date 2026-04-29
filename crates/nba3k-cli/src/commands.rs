@@ -2469,7 +2469,7 @@ fn cmd_picks(
     Ok(())
 }
 
-fn render_pick(pick: &DraftPick, abbrev: &HashMap<TeamId, String>) -> String {
+pub(crate) fn render_pick(pick: &DraftPick, abbrev: &HashMap<TeamId, String>) -> String {
     let original = abbrev
         .get(&pick.original_team)
         .cloned()
@@ -2490,7 +2490,7 @@ fn render_pick(pick: &DraftPick, abbrev: &HashMap<TeamId, String>) -> String {
     }
 }
 
-fn protection_label(pick: &DraftPick) -> String {
+pub(crate) fn protection_label(pick: &DraftPick) -> String {
     if let Some(text) = pick
         .protection_text
         .as_ref()
