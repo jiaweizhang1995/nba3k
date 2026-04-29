@@ -318,6 +318,11 @@ pub struct NewArgs {
     /// Deterministic RNG seed.
     #[arg(long, default_value_t = 0)]
     pub seed: u64,
+    /// Build the save from today's real NBA state via ESPN public API.
+    /// Pulls current standings, schedule, rosters, injuries, and season
+    /// stats. Requires internet access to ESPN.
+    #[arg(long)]
+    pub from_today: bool,
 }
 
 #[derive(Parser, Debug, Clone, Copy, Default)]

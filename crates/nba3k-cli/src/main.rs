@@ -4,6 +4,7 @@ use std::io::{self, IsTerminal};
 mod cli;
 mod commands;
 mod config;
+mod from_today;
 mod repl;
 mod state;
 mod tui;

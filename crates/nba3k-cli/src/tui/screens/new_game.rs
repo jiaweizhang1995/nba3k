@@ -36,9 +36,16 @@ const MODES: &[&str] = &["standard", "god", "hardcore", "sandbox"];
 enum Step {
     SavePath,
     Team,
+    Start,
     Mode,
     Season,
     Confirm,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum StartMode {
+    Fresh,
+    Today,
 }
 
 struct WizardState {
@@ -47,6 +54,8 @@ struct WizardState {
     team_picker: Picker<Team>,
     mode_picker: Picker<&'static str>,
     season: NumberInput,
+    /// M33 — pick fresh October open vs live ESPN today's-state import.
+    start_mode: StartMode,
     /// Last error from a failed dispatch (`new` overwrite refuse, invalid input).
     error: Option<String>,
 }
@@ -72,6 +81,7 @@ impl WizardState {
             season: NumberInput::new(t(lang, T::NewGameSeason))
                 .with_bounds(2024, 2030)
                 .with_initial(2026),
+            start_mode: StartMode::Fresh,
             error: None,
         }
     }
@@ -193,9 +203,10 @@ fn draw_header(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, title: &str
     let labels = [
         ("1", t(lang, T::NewGameSavePath), Step::SavePath),
         ("2", t(lang, T::NewGameTeam), Step::Team),
-        ("3", t(lang, T::NewGameMode), Step::Mode),
-        ("4", t(lang, T::NewGameSeason), Step::Season),
-        ("5", t(lang, T::NewGameConfirm), Step::Confirm),
+        ("3", t(lang, T::NewGameStartTitle), Step::Start),
+        ("4", t(lang, T::NewGameMode), Step::Mode),
+        ("5", t(lang, T::NewGameSeason), Step::Season),
+        ("6", t(lang, T::NewGameConfirm), Step::Confirm),
     ];
     let mut spans: Vec<Span> = Vec::new();
     for (i, (n, label, s)) in labels.iter().enumerate() {
@@ -245,6 +256,9 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
             }
             render_team_picker(f, area, theme, lang, &st.team_picker);
         }
+        Step::Start => {
+            render_start_picker(f, area, theme, lang, st.start_mode);
+        }
         Step::Mode => {
             render_mode_picker(f, area, theme, lang, &st.mode_picker);
         }
@@ -285,6 +299,10 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
                 .value()
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| st.season.raw().to_string());
+            let start_label = match st.start_mode {
+                StartMode::Fresh => t(lang, T::NewGameStartFresh),
+                StartMode::Today => t(lang, T::NewGameStartToday),
+            };
             let lines = vec![
                 Line::from(Span::styled(
                     t(lang, T::NewGameConfirm),
@@ -293,6 +311,7 @@ fn draw_body(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, st: &WizardSt
                 Line::from(""),
                 kv_line(theme, t(lang, T::NewGameSavePath), st.save_path.value()),
                 kv_line(theme, t(lang, T::NewGameTeam), &team_label),
+                kv_line(theme, t(lang, T::NewGameStartTitle), start_label),
                 kv_line(theme, t(lang, T::NewGameMode), &mode_label),
                 kv_line(theme, t(lang, T::NewGameSeason), &season_label),
                 Line::from(""),
@@ -318,6 +337,40 @@ fn render_text_value(f: &mut Frame, area: Rect, theme: &Theme, label: &str, valu
         Span::styled("█", theme.text()),
     ]);
     f.render_widget(Paragraph::new(line).block(theme.block("")), area);
+}
+
+fn render_start_picker(
+    f: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    lang: Lang,
+    selected: StartMode,
+) {
+    let items = vec![
+        (StartMode::Fresh, t(lang, T::NewGameStartFresh)),
+        (StartMode::Today, t(lang, T::NewGameStartToday)),
+    ];
+    let title = format!(" {} (↑↓) ", t(lang, T::NewGameStartTitle));
+    let lines: Vec<ListItem> = items
+        .iter()
+        .map(|(mode, label)| {
+            let style = if *mode == selected {
+                theme.highlight()
+            } else {
+                theme.text()
+            };
+            ListItem::new(Line::from(Span::styled(label.to_string(), style)))
+        })
+        .collect();
+    let inner = vsplit(area, 5);
+    f.render_widget(List::new(lines).block(theme.block(&title)), inner.0);
+    let hint = Paragraph::new(Line::from(Span::styled(
+        t(lang, T::NewGameStartTodayHint),
+        theme.muted_style(),
+    )))
+    .block(theme.block(""))
+    .wrap(Wrap { trim: false });
+    f.render_widget(hint, inner.1);
 }
 
 fn render_team_picker(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang, picker: &Picker<Team>) {
@@ -452,10 +505,26 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
                 _ => return WizardAction::Consumed,
             }
         }
+        // The Start step is a 2-option toggle, not a Picker — handle it inline.
+        if st.step == Step::Start {
+            match key.code {
+                KeyCode::Up | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('k') => {
+                    st.start_mode = match st.start_mode {
+                        StartMode::Fresh => StartMode::Today,
+                        StartMode::Today => StartMode::Fresh,
+                    };
+                    return WizardAction::Consumed;
+                }
+                KeyCode::Enter => return advance_step(&mut st),
+                KeyCode::Esc => return retreat_step(&mut st),
+                _ => return WizardAction::Consumed,
+            }
+        }
         // Other steps delegate to the active widget; on Submitted move forward.
         let ev = match st.step {
             Step::SavePath => st.save_path.handle_key(key),
             Step::Team => st.team_picker.handle_key(key),
+            Step::Start => unreachable!(),
             Step::Mode => st.mode_picker.handle_key(key),
             Step::Season => st.season.handle_key(key),
             Step::Confirm => unreachable!(),
@@ -518,6 +587,10 @@ fn advance_step(st: &mut WizardState) -> WizardAction {
                 return WizardAction::Consumed;
             }
             st.error = None;
+            st.step = Step::Start;
+        }
+        Step::Start => {
+            st.error = None;
             st.step = Step::Mode;
         }
         Step::Mode => {
@@ -546,7 +619,8 @@ fn retreat_step(st: &mut WizardState) -> WizardAction {
     match st.step {
         Step::SavePath => return WizardAction::ExitToMenu,
         Step::Team => st.step = Step::SavePath,
-        Step::Mode => st.step = Step::Team,
+        Step::Start => st.step = Step::Team,
+        Step::Mode => st.step = Step::Start,
         Step::Season => st.step = Step::Mode,
         Step::Confirm => st.step = Step::Season,
     }
@@ -573,6 +647,7 @@ fn submit(app: &mut AppState, tui: &mut TuiApp) -> Result<()> {
             .unwrap_or("standard")
             .to_string();
         let season = st.season.value().ok_or_else(|| anyhow!("season not set"))? as u16;
+        let from_today = matches!(st.start_mode, StartMode::Today);
         Ok((
             save_path,
             NewArgs {
@@ -580,6 +655,7 @@ fn submit(app: &mut AppState, tui: &mut TuiApp) -> Result<()> {
                 mode,
                 season,
                 seed: rand::random::<u64>(),
+                from_today,
             },
         ))
     })?;

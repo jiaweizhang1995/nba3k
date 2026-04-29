@@ -1,4 +1,4 @@
-# todo-plan.md — M30 Trade builder redesign (codex CLI execution doc)
+# todo-plan.md — "Start From Today" v2 (ESPN public JSON, Rust-native) — codex CLI execution doc
 
 **Maintainer**: main agent (Claude). Codex picks tasks, flips status, asks main agent if scope shifts.
 
@@ -8,636 +8,454 @@
 **Release**: `PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo build --release --bin nba3k`
 **Run**: `./target/debug/nba3k tui` / `./target/release/nba3k tui`
 
-**Phase tracker**: `phases/PHASES.md`
+**Phase tracker**: `phases/PHASES.md`. New phases land as M31 / M32 / M33.
+
+**Approved plan reference**: `~/.claude/plans/nba-2k-start-from-polished-flask.md` (v1 strategy; v2 supersedes the data source choice — ESPN replaces `nba_api`).
 
 **Status legend**: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked (write reason)
 
-**Locked invariants** (do not break):
-- TUI mutations always route through `crate::commands::dispatch(app, Command)` wrapped in `crate::tui::with_silenced_io(|| ...)`.
-- CLI/REPL command surface stays untouched.
-- Player names + team abbreviations + team full names stay English (data, not chrome).
-- Tests must pass before marking task done. Baseline: 299 unit + 1 integ.
-- i18n: every new UI string goes through `t(tui.lang, T::...)`. Add new T keys when needed; keep `i18n.rs` + `i18n_en.rs` + `i18n_zh.rs` in sync.
+---
+
+## Why this is v2 (do not relitigate)
+
+v1 of this plan (codex executed, then reverted) used Python `nba_api` shellout for the live state pull. Three independent failures killed it:
+
+1. `stats.nba.com` is Cloudflare-protected. nba_api's HTTP calls hit `Connection reset by peer` from Mac client networks roughly half the time. The importer had no retry path.
+2. `LeagueStandings` from nba_api does NOT expose a `TeamAbbreviation` column — only `TeamID` + `TeamCity` + `TeamName`. The scraper script filtered on the missing field and silently emitted `[]` for 30 teams.
+3. `nba_api` has no league-wide injury endpoint and no clean transactions endpoint. v1 punted with empty-stub Python files. That blocks the whole importer because the Doncic-in-LAL acceptance bar fails without transactions.
+
+**ESPN's public JSON API solves all three at once and removes the Python dependency entirely.**
+
+Live tests (run 2026-04-29 from this machine):
+
+| Need | ESPN endpoint | Verified |
+|---|---|---|
+| 30 team abbrev↔team_id map | `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams` | 200, 30 teams |
+| Standings (W-L, conf rank, streak) | `https://site.web.api.espn.com/apis/v2/sports/basketball/nba/standings?season=2026` | 200, 30 teams, full per-team stats |
+| Daily scoreboard + final scores + records | `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=YYYYMMDD` | 200, 9 events for 2026-01-28, "LAL @ CLE 99-129 Final" |
+| **Current roster + injuries inline** | `https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{id}/roster` | 200, **Doncic on LAL with INJ:Out**, Reaves "Out" |
+| All-player season stats | `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?season=2026&seasontype=2&limit=600` | 200, 304 players with ppg/rpg/usage in 1.8 MB |
+| News (Trade type) | `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/news?limit=50&type=Trade` | 200, 22 KB |
+
+Total ≈ 224 HTTP calls for one save (1 + 1 + ≈190 daily scoreboards + 30 rosters + 1 + 1). ESPN does not enforce a 3s rate limit; 100ms spacing is fine, parallelism allowed.
+
+**Key wins over nba_api**:
+- No Python dependency. `reqwest` is already in `[workspace.dependencies]`.
+- No Cloudflare blocks. ESPN serves directly.
+- Roster + injuries come from one endpoint per team, not two flaky ones.
+- Field names (`abbreviation`, `displayName`, `injuries[].status`) are stable across years.
+- One call returns the entire 304-player season-stats leaderboard.
+
+Trade-off: full schedule needs ≈190 daily scoreboard calls instead of one bulk game-log call. ESPN tolerates parallelism and the calls are 5-50 KB each, so total wall time on a 10-worker pool is well under a minute.
 
 ---
 
 ## Goal
 
-Replace the current cramped 4-pane trade builder (team list / our roster / their roster / submit, image #24) with a 2-step UI:
+Add `nba3k --save x.db new --team BOS --from-today` (and the matching TUI wizard step) so a fresh save lands on **today's real-world NBA state**: today's date, today's W-L, today's rosters (post-trades / signings / injuries), the season's already-played games as `played=1` schedule rows + minimal box scores, season-to-date player aggregates, and the real remaining schedule. **No Python dependency.** `pip install nba_api` is no longer required for `--from-today`. The existing `nba_api` shellout used by the seed-build path stays untouched (USG/TS augmentation only).
 
-1. **Step 1 — Team picker**: left = 30-team list, right = preview of that team's roster (read-only). Enter selects target. Esc returns to Trades menu.
-2. **Step 2 — Builder**: master-detail layout. Top bar (target team / our team / 切 3 队 / 改队 / 强制成交). Two wide panels (我方送出 / 对方送出), each is a single scrollable list with section dividers (球员 first; 选秀权 deferred to M31). Bottom verdict bar showing salary totals + plain-language CBA warnings + post-submit GM dialog.
+**Three-mode entry**:
 
-Drop the percentage-based "estimated acceptance" — replace with natural-language GM responses (Basketball-GM style). Only show CBA / cap warnings when the trade actually violates a rule, in plain language (no `CBA ✓/✗` shorthand).
+```
+nba3k --save x.db new --team BOS                  # unchanged: fresh Oct 2025, day 0, RNG schedule
+nba3k --save x.db new --team BOS --from-today     # new: live ESPN import, day≈190, real schedule + rosters + injuries
+nba3k --save x.db tui                             # new wizard step: [Fresh October 2025] / [Today (live ESPN data)]
+```
+
+**Locked invariants** (do not break):
+- Existing `nba3k --save x.db new --team BOS` flow stays byte-identical when `--from-today` is NOT passed. All current saves and tests keep working.
+- `Store::open` runs refinery automatically; new migrations are `.sql` files only — never edit a committed migration, only add V016, V017, ... in order.
+- TUI mutations route through `crate::commands::dispatch(app, Command)` wrapped in `crate::tui::with_silenced_io(|| ...)`.
+- All writes go through `nba3k-store`. No new persistence path.
+- Tests must pass before marking task done. Baseline: 303 passed + 1 ignored (workspace, post-M30). Each task either keeps the count the same or grows it.
+- i18n: every new TUI string routes through `t(tui.lang, T::...)`. Add T keys to `i18n.rs` + `i18n_en.rs` + `i18n_zh.rs` together.
+- Workspace-pinned deps only. New deps go to root `Cargo.toml` `[workspace.dependencies]` then `workspace = true`.
+- `--from-today` is offline-fail-loud: when ESPN is unreachable the importer aborts with a clear message, removes the half-written file, and exits 1. No partial save.
+- Determinism rule: when `--from-today` is used, the imported current real season cannot reuse a fixed RNG seed for past games (results come from real data, not sim). For year+1 onward the seeded sim path resumes.
 
 ---
 
-## T32 — Step 1: Team picker screen
+## M31 — Calendar decoupling + ESPN fetch layer
 
-**Status**: `[x]` → codex: implemented team picker, roster preview, letter jump, Enter/Esc flow.
+Goal: parameterize the date constants and add a Rust-native ESPN client. **No user-visible change.** Old `new` path stays identical.
 
-**Goal**: New first step inside the Trades > Builder sub-tab. User picks the target team before any player/asset selection happens. Two-column layout, left team list, right roster preview.
+### T1 — Migration V016: `season_calendar` table
 
-**Layout**:
+**Status**: `[x]`
 
+**Goal**: Single per-season calendar row that drives schedule + phase math.
+
+**Schema** (`crates/nba3k-store/migrations/V016__season_calendar.sql`):
+```sql
+CREATE TABLE season_calendar (
+    season_year     INTEGER PRIMARY KEY,        -- end-year, e.g. 2026 for 2025-26
+    start_date      TEXT NOT NULL,              -- ISO YYYY-MM-DD, regular-season opening night
+    end_date        TEXT NOT NULL,              -- ISO YYYY-MM-DD, last regular-season game
+    trade_deadline  TEXT NOT NULL,              -- ISO YYYY-MM-DD
+    all_star_day    INTEGER NOT NULL DEFAULT 41,
+    cup_group_day   INTEGER NOT NULL DEFAULT 30,
+    cup_qf_day      INTEGER NOT NULL DEFAULT 45,
+    cup_sf_day      INTEGER NOT NULL DEFAULT 53,
+    cup_final_day   INTEGER NOT NULL DEFAULT 55
+);
+INSERT INTO season_calendar (season_year, start_date, end_date, trade_deadline)
+VALUES (2026, '2025-10-21', '2026-04-12', '2026-02-05');
 ```
-┌─ 选目标队 ─────────────────────────────────────────────────────┐
-│ ATL Atlanta Hawks  │  Atlanta Hawks (40-32, $138M)            │
-│ BOS Boston Celtics │  ────────────────────────────────────    │
-│ ...                │  PG  Trae Young     85 OVR  $40M 3y     │
-│ DAL Dallas Mavs    │  SG  Jalen Johnson  82 OVR  $5M  4y     │
-│ ...                │  SF  De'Andre Hunter 80 OVR $19M 4y     │
-│ (highlight = ATL)  │  PF  Onyeka Okongwu 78 OVR  $14M 2y     │
-│                    │  C   Clint Capela   74 OVR  $7M  1y     │
-│                    │  ...  (top 12 by OVR)                    │
-│                    │  ────────────────────────────────────    │
-│                    │  Payroll: $138.2M · Cap: $154.6M          │
-└────────────────────────────────────────────────────────────────┘
-↑↓ 队伍 · Enter 选定 · A-Z 字母跳转 · Esc 返回交易菜单
-```
-
-- Left column ~24 cols (3-letter abbrev + truncated full name).
-- Right column gets the rest. Roster preview shows top 12 by OVR with: position / name / OVR / salary / contract years.
-- Letter-key jump: pressing a letter (e.g. `B`) jumps cursor to first team whose abbrev starts with that letter (BOS / BRK).
-- Enter advances to Step 2 (T33), passing the chosen team.
-- Esc returns to Trades menu.
 
 **Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs`:
-  - Refactor builder state machine into a 2-step enum: `BuilderStep::PickTeam` / `BuilderStep::Compose { target: TeamId }`.
-  - New `draw_pick_team(...)` + `handle_pick_team_key(...)`. The existing `draw_builder` becomes step 2 (T33).
-  - On Trades > Builder tab activation, default to PickTeam step.
-- `crates/nba3k-core/src/i18n.rs` + tables — add `T::TradesPickTeamTitle`, `T::TradesRosterPreview`, `T::TradesPayrollCap`.
+- New: `crates/nba3k-store/migrations/V016__season_calendar.sql`
+- `crates/nba3k-core/src/season.rs`: `pub struct SeasonCalendar { pub season_year: u16, pub start_date: NaiveDate, pub end_date: NaiveDate, pub trade_deadline: NaiveDate, pub all_star_day: u32, pub cup_group_day: u32, pub cup_qf_day: u32, pub cup_sf_day: u32, pub cup_final_day: u32 }` plus a `default_for(season_year)` constructor returning the 2025-26 hardcoded values.
+- `crates/nba3k-store/src/store.rs`: `get_season_calendar(season: SeasonId) -> Result<Option<SeasonCalendar>>` and `upsert_season_calendar(&SeasonCalendar)`.
 
 **Acceptance**:
-- Trades > Builder opens to team picker (NOT directly to the player select view).
-- Right pane shows real top-12 roster + payroll/cap of highlighted team.
-- Letter jump works (`A` → ATL, `B` → BOS, etc.).
-- Enter on highlighted team transitions to Step 2 with that team locked as target.
-- Esc returns to Trades menu.
+- New saves auto-have a 2026 row after `cmd_new` (it runs `Store::open` which runs migrations).
+- Existing saves (e.g. user's old `.db` files) auto-receive the row on next open via refinery.
+
+**Verification**: `cargo test -p nba3k-store -- season_calendar` round-trips a struct.
+
+---
+
+### T2 — Parameterize `Schedule::generate` and `phases::*`
+
+**Status**: `[x]`
+
+**Goal**: Drop the load-bearing `SEASON_START` / `SEASON_END` / trade-deadline constants. Caller passes dates / `SeasonCalendar`.
+
+**Files**:
+- `crates/nba3k-season/src/schedule.rs`: keep `pub const SEASON_START` / `SEASON_END` as fallback defaults. Add `Schedule::generate_with_dates(season: SeasonId, seed: u64, teams: ..., start: NaiveDate, end: NaiveDate) -> Self`. The existing `Schedule::generate(season, seed, teams)` becomes a thin wrapper that calls the new function with the const defaults — old callers stay green.
+- `crates/nba3k-season/src/phases.rs`: keep the legacy `is_after_trade_deadline(date)` / `is_trade_deadline_day(date)` for back-compat. Add `pub fn is_after_trade_deadline_for(date: NaiveDate, cal: &SeasonCalendar) -> bool` and `pub fn is_trade_deadline_day_for(date: NaiveDate, cal: &SeasonCalendar) -> bool` and a `pub fn trade_deadline(cal: &SeasonCalendar) -> NaiveDate` accessor.
+- `crates/nba3k-cli/src/commands.rs`: add `fn season_calendar_or_default(store: &Store, season: SeasonId) -> SeasonCalendar` near the existing `ALL_STAR_DAY` / `CUP_*_DAY` constants. The const stay as fallback only. Every call site in `commands.rs` (schedule generation, sim-day all-star/cup triggers, phase advancement, trade-deadline checks) routes through this helper.
+- `crates/nba3k-cli/src/commands.rs` `generate_and_store_schedule`: load the calendar then pass `cal.start_date, cal.end_date` into `Schedule::generate_with_dates`.
+
+**Acceptance**:
+- All existing tests pass with defaults wired through the new helper.
+- A new test in `crates/nba3k-season/tests/schedule_tests.rs` constructs a custom calendar (e.g. start=2025-10-15, end=2026-04-20) and asserts `Schedule::generate_with_dates` produces 1230 games inside that window.
 
 **Verification**:
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299.
-- Manual: Trades > Builder → see team picker → arrow → Enter → step 2 opens.
-
-**Commit**: `M30-T32: trade builder step 1 team picker`.
+- `cargo test --workspace` (≥ 303 passed + 1 ignored).
+- `cargo run --bin nba3k -- --save /tmp/oldnew.db new --team BOS` works exactly as before; `sqlite3 /tmp/oldnew.db 'SELECT MIN(date), MAX(date), COUNT(*) FROM schedule;'` returns `2025-10-21 | 2026-04-12 | 1230`.
 
 ---
 
-## T33 — Step 2: Builder body (master-detail, single-list per side)
+### T3 — New `nba3k-scrape::sources::espn` module
 
-**Status**: `[x]` → codex: implemented two-step compose screen, two-panel player lists, selection controls, M31 pick placeholders.
+**Status**: `[x]`
 
-**Goal**: Replace the cramped 4-column builder with a 2-column master-detail layout. Top bar shows context. Two wide panels for player selection. Bottom verdict bar (T34/T35).
-
-**Layout**:
-
-```
-┌─ 交易构建 — 目标 ATL · 我方 CHI ────────────────────────────┐
-│ [m 切 3 队]  [T 改队]  [F 强制成交 — 仅 god 模式]              │
-├─ 我方送出 (✓3 / 18) ────────┬─ 对方接收 (✓2 / 17) ───────────┤
-│ ─ 球员 ─                    │ ─ 球员 ─                       │
-│ ✓ LaVine    PG 28 87 $43M 2y│ ✓ Young     PG 26 85 $40M 3y  │
-│ ✓ White     SG 24 78 $12M 1y│ ✓ Johnson   SF 22 79 $5M  4y  │
-│ ✓ Vučević   C  35 75 $20M 1y│   Hunter    SF 26 80 $19M 4y  │
-│   Giddey    PG 23 80 $11M 1y│   Okongwu   PF 24 78 $14M 2y  │
-│   ...                       │   ...                         │
-│ ─ 选秀权 (M31 待加) ─        │ ─ 选秀权 (M31 待加) ─          │
-├─ verdict (T34 / T35) ───────┴────────────────────────────────┤
-│ 送 $75M / 收 $45M / 净 +$30M 进                                │
-│ (warnings + GM dialog 在此)                                  │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Per-side single-list**:
-- One scrollable list with section divider rows. ↑↓ navigates **across** sections (no special key to jump). Space toggles select on focused row. Divider rows are not selectable; cursor skips them.
-- Sections:
-  - `─ 球员 ─` — all team players sortable by OVR desc (then id asc). All visible (scroll if > 15).
-  - `─ 选秀权 (M31 待加) ─` — placeholder section, empty list, "暂未支持" italic muted text. Wired in M31. Section header still rendered so users see it's coming.
-- Selected rows show ✓ prefix, unselected `  `. Selected rows highlight in `theme.highlight()`.
-
-**Player row format** (6 columns, NO role column per user):
-- Name (16 chars, `pad_display` unicode-aware truncation if longer)
-- Position (2 chars, `{:<2}`)
-- Age (2 chars, `{:>2}`)
-- OVR (2 chars, `{:>2}`)
-- Salary (7 chars, `{:>7}` — e.g. `$43.5M`)
-- Contract years (3 chars, `{:>3}` — e.g. `2y` or `—` for expiring)
-
-Total width per row: ~37 + 2 ✓ prefix = ~39 cols. Each side gets ~50% of body = 40 cols on 80-col terminal. Fits.
-
-**Top bar buttons**:
-- `m` toggle 2-team / 3-team mode (existing; preserved).
-- `T` open Step 1 team picker overlay (re-pick target without losing current selections).
-- `F` force-submit (god mode only — see T37; hidden when god mode off).
-
-**Multi-side navigation**:
-- `Tab` / `Shift-Tab` switches focus between 我方送出 (left) and 对方接收 (right) panels.
-- `i` cycles incoming team in 3-team mode (existing; preserved).
+**Goal**: Pure-Rust ESPN client. Six fetchers + parse pairs. Reuses existing `Cache` (JSON, 7-day TTL) and adds an ESPN-specific politeness gate (100ms / req, ≥ 3 parallel connections OK).
 
 **Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — replace existing `draw_builder` and key handlers with the new 2-pane layout. Drop the team-picker column + the right-side "提交" status panel (status moves to bottom verdict bar in T34/T35).
-- `crates/nba3k-core/src/i18n.rs` + tables — add:
-  - `T::TradesBuilderTitle`, `T::TradesBuilderTopBar`
-  - `T::TradesSendList`, `T::TradesReceiveList`
-  - `T::TradesSectionPlayers`, `T::TradesSectionPicks`, `T::TradesPicksDeferred` ("M31 待加 — 暂未支持" / "Coming in M31").
+- New: `crates/nba3k-scrape/src/sources/espn.rs`
+- `crates/nba3k-scrape/src/sources/mod.rs`: add `pub mod espn;`
+- `crates/nba3k-scrape/src/lib.rs`: re-export the public types from `espn`
 
-**Esc behavior** (per user):
-- Esc once → return to Step 1 team picker (T32) with current selections preserved (so user re-picks team but doesn't lose progress).
-- Esc again from Step 1 → return to Trades menu / sub-tab strip.
+**API** (each `fetch_*` returns `Ok(Some(bytes))` on cache hit or live success, `Ok(None)` if ESPN responds 4xx/5xx, `Err(e)` on transport failure; `parse_*` is pure):
+
+```rust
+// Tiny POD types, all serde::Deserialize
+pub struct EspnTeam { pub id: u32, pub abbrev: String, pub display_name: String }
+pub struct EspnStandingRow { pub abbrev: String, pub conf: String, pub w: u16, pub l: u16, pub conf_rank: u16, pub div: String, pub div_rank: u16, pub streak: i32, pub last10: String }
+pub struct EspnGameRow { pub date: NaiveDate, pub home_abbrev: String, pub away_abbrev: String, pub home_pts: Option<u16>, pub away_pts: Option<u16>, pub completed: bool, pub home_record: Option<String>, pub away_record: Option<String> }
+pub struct EspnRosterEntry { pub espn_id: u64, pub display_name: String, pub jersey: Option<String>, pub position: Option<String>, pub age: Option<u8>, pub height_in: Option<u16>, pub weight_lb: Option<u16>, pub injury_status: Option<String> /* "Out"/"Day-To-Day"/etc. */, pub injury_detail: Option<String> }
+pub struct EspnPlayerSeasonStat { pub espn_id: u64, pub display_name: String, pub team_abbrev: String, pub gp: u16, pub mpg: f32, pub ppg: f32, pub rpg: f32, pub apg: f32, pub spg: f32, pub bpg: f32, pub fg_pct: f32, pub three_pct: f32, pub ft_pct: f32, pub ts_pct: f32, pub usage: f32 }
+pub struct EspnNewsItem { pub published: chrono::DateTime<chrono::Utc>, pub headline: String, pub link: String, pub categories: Vec<String> }
+
+pub fn fetch_teams(cache: &Cache) -> Result<Option<Vec<u8>>>;
+pub fn parse_teams(bytes: &[u8]) -> Result<Vec<EspnTeam>>;
+
+pub fn fetch_standings(cache: &Cache, season_year: u16) -> Result<Option<Vec<u8>>>;
+pub fn parse_standings(bytes: &[u8]) -> Result<Vec<EspnStandingRow>>;
+
+pub fn fetch_scoreboard(cache: &Cache, date: NaiveDate) -> Result<Option<Vec<u8>>>;
+pub fn parse_scoreboard(bytes: &[u8]) -> Result<Vec<EspnGameRow>>;
+
+pub fn fetch_roster(cache: &Cache, espn_team_id: u32) -> Result<Option<Vec<u8>>>;
+pub fn parse_roster(bytes: &[u8]) -> Result<(String /* abbrev */, Vec<EspnRosterEntry>)>;
+
+pub fn fetch_player_stats(cache: &Cache, season_year: u16) -> Result<Option<Vec<u8>>>;
+pub fn parse_player_stats(bytes: &[u8]) -> Result<Vec<EspnPlayerSeasonStat>>;
+
+pub fn fetch_news_trades(cache: &Cache, limit: u32) -> Result<Option<Vec<u8>>>;
+pub fn parse_news_trades(bytes: &[u8]) -> Result<Vec<EspnNewsItem>>;
+```
+
+**URLs** (hardcoded constants at the top of `espn.rs`):
+```
+https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams
+https://site.web.api.espn.com/apis/v2/sports/basketball/nba/standings?season={year}
+https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={YYYYMMDD}
+https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{id}/roster
+https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?season={year}&seasontype=2&limit=600
+https://site.api.espn.com/apis/site/v2/sports/basketball/nba/news?limit={limit}&type=Trade
+```
+
+**Cache keys** (under `data/cache/espn/`):
+- `teams.json`
+- `standings_{year}.json`
+- `scoreboard_{YYYYMMDD}.json` (one per game day)
+- `roster_{espn_team_id}.json`
+- `player_stats_{year}.json`
+- `news_trades.json`
+
+**Politeness**:
+- `espn` source uses a 100 ms per-request gate (separate from the 3s BBRef gate). Add a second instance of the existing `politeness::PerSourceGate` keyed by `"espn"` if the current implementation supports per-source keys; otherwise add a small `EspnGate` next to the BBRef one.
+- Cache TTL: 12 hours for standings / scoreboard / roster / player_stats; 1 hour for news. Use `cache::ttl_seconds(...)` shape that already exists; add new helpers if needed.
+- Retry: 3 attempts on transport error / 5xx with backoff `[300ms, 800ms, 2s]`. **Do not retry 404** — that's a real "no game on this date" answer for scoreboards.
 
 **Acceptance**:
-- After T32 selects ATL, builder opens with target locked to ATL.
-- Each side scrollable, single-list with section dividers.
-- Player rows show 6 columns aligned.
-- Tab cycles focus left ↔ right pane (with focus border per existing T11 logic).
-- m / T / F top-bar keys work; F only visible when god mode on (T37).
-- Esc once → back to Step 1; Esc twice → back to Trades menu.
+- For each `parse_*`, a fixture-driven test in `crates/nba3k-scrape/tests/espn_parse.rs` reads a checked-in JSON file from `crates/nba3k-scrape/tests/fixtures/espn/<endpoint>.json` (recorded once, ≤ 200 KB each) and asserts the parsed counts and a couple of well-known field values (e.g. `parse_roster` of LAL fixture contains a row with `display_name == "Luka Doncic"` and `injury_status == Some("Out")`).
+- No live network in tests — all fixture-driven.
+
+**Verification**: `cargo test -p nba3k-scrape -- espn`.
+
+---
+
+### T4 — Phase doc M31 + PHASES.md row
+
+**Status**: `[x]`
+
+**Files**:
+- New: `phases/M31-calendar-and-espn.md` (goals, sub-tasks T1–T3, acceptance, verification command).
+- Update: `phases/PHASES.md` add an M31 row, status `In progress` while codex works it, `Done` when all three sub-tasks are `[x]` and verification passes.
+
+**Verification**: `cargo test --workspace` final green; old `new --team BOS` byte-identical.
+
+---
+
+## M32 — Live importer + `--from-today` flag
+
+Goal: brand-new save written from live ESPN data; the only user-visible delta is the `--from-today` flag.
+
+### T5 — Migration V017: `player_season_stats`
+
+**Status**: `[x]`
+
+**Schema** (`crates/nba3k-store/migrations/V017__player_season_stats.sql`):
+```sql
+CREATE TABLE player_season_stats (
+    player_id   INTEGER NOT NULL,
+    season_year INTEGER NOT NULL,
+    gp          INTEGER NOT NULL DEFAULT 0,
+    mpg         REAL    NOT NULL DEFAULT 0,
+    ppg         REAL    NOT NULL DEFAULT 0,
+    rpg         REAL    NOT NULL DEFAULT 0,
+    apg         REAL    NOT NULL DEFAULT 0,
+    spg         REAL    NOT NULL DEFAULT 0,
+    bpg         REAL    NOT NULL DEFAULT 0,
+    fg_pct      REAL    NOT NULL DEFAULT 0,
+    three_pct   REAL    NOT NULL DEFAULT 0,
+    ft_pct      REAL    NOT NULL DEFAULT 0,
+    ts_pct      REAL    NOT NULL DEFAULT 0,
+    usage       REAL    NOT NULL DEFAULT 0,
+    PRIMARY KEY (player_id, season_year),
+    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_pss_season ON player_season_stats(season_year);
+```
+
+**Files**:
+- New: `crates/nba3k-store/migrations/V017__player_season_stats.sql`.
+- `crates/nba3k-store/src/store.rs`: `upsert_player_season_stats(&PlayerSeasonStats)`, `list_player_season_stats(season) -> Vec<PlayerSeasonStats>`, `get_player_season_stats(player_id, season) -> Option<...>`.
+- `crates/nba3k-core/src/player.rs`: `pub struct PlayerSeasonStats { ... }`.
+- `crates/nba3k-cli/src/commands.rs` `records --scope season`: when a row exists in `player_season_stats`, prefer it over the on-the-fly aggregate from box scores.
+
+**Acceptance**: round-trip test inserts 5 rows, lists them, fetches one.
+
+**Verification**: `cargo test -p nba3k-store -- player_season_stats`.
+
+---
+
+### T6 — Importer module `nba3k-scrape::from_today`
+
+**Status**: `[x]`
+
+**Goal**: One entry point that takes a `(out_path, user_team, mode, today)` and produces a fully-loaded save from live ESPN data. **No Python.** **No `nba_api`.** All HTTP via `reqwest` (already a workspace dep).
+
+**Signature**:
+```rust
+pub struct TodayReport {
+    pub teams_loaded: u32,
+    pub games_played: u32,
+    pub games_unplayed: u32,
+    pub players_with_stats: u32,
+    pub injuries_marked: u32,
+    pub roster_moves_applied: u32,        // players whose team_id changed vs seed
+    pub news_backfilled: u32,
+}
+
+pub fn build_today_save(
+    out: &Path,
+    user_team_abbrev: &str,
+    mode: GameMode,
+    today: NaiveDate,
+) -> Result<TodayReport>;
+```
+
+**Flow** (in order):
+
+1. **Pre-flight**: HEAD `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams` with a 5 s timeout. On failure, bail with: `"--from-today requires internet access to ESPN. Reach https://site.api.espn.com/ failed: <error>"`. Importer must NOT leave a partial file — wrap the rest in a closure and `fs::remove_file(out)` on `Err`.
+2. **Seed copy + wal/shm cleanup**: factor the existing `cmd_new` block into `commands::new_helpers::copy_seed_to(out)` and call it. Same as legacy.
+3. **Open store**: `Store::open(out)` runs migrations (V016 + V017 are now in place).
+4. **Fetch teams**: `espn::fetch_teams` → build `BTreeMap<abbrev → espn_team_id>`. Persist nothing yet — the seed already has team rows; we just need the ID map for later roster calls.
+5. **Resolve season window**: parse the first ISO date in the upcoming `scoreboard` window. Call `fetch_scoreboard(today)`; from `leagues[0].season.{startDate, endDate}` derive `season_calendar.start_date` / `end_date`. Compute `season_year = today.year() + (1 if today.month() >= 9 else 0)`. Upsert the calendar row.
+6. **Fetch standings**: `fetch_standings(season_year)` → `parse_standings`. Replace `standings` table (`UPDATE standings SET wins=?, losses=? WHERE team_id=? AND season=?`) for all 30 teams.
+7. **Fetch scoreboards day-by-day** from `start_date` to `end_date`:
+    - **Parallelism**: chunk dates into batches of 10, spawn `std::thread::scope` workers, each calls `fetch_scoreboard` (politeness gate already serializes per-source).
+    - For each game row: insert `schedule (season, date, home_id, away_id, played)` with `played = completed`. If `completed`, also insert into `games` with a minimal `box_score_json = {"home_pts": N, "away_pts": M, "minimal": true}`.
+    - **Truncate first**: `DELETE FROM schedule WHERE season=?; DELETE FROM games WHERE season=?;` — we replace, do not merge.
+8. **Fetch player season stats**: `fetch_player_stats(season_year)` → `parse_player_stats`. For each row, look up the player by exact-name match against `players.name`; on collision, prefer the player whose current team matches `team_abbrev`. Insert into `player_season_stats`. Log unmatched names with `tracing::warn!` and continue — never panic.
+9. **Apply current rosters (overrides 2024-25 seed)**: parallel `fetch_roster` for all 30 ESPN team IDs. For each roster entry:
+    - Resolve `players` row by exact-name match. If not found, INSERT a new player row with sane defaults (overall = 60, position parsed from ESPN, age from `dateOfBirth` if present, contract = league-min stub).
+    - If the player's current `team_id` differs from the ESPN team, UPDATE it. Increment `roster_moves_applied`.
+    - If `injury_status` is `Some("Out")` / `"Day-To-Day"` / `"Out For Season"`, set `players.injury_json` via the existing `Player.injury` schema. Mapping: `"Out"` → 30 games; `"Day-To-Day"` / `"GTD"` → 1; `"Out For Season"` → games_remaining = unplayed_count_in_schedule.
+10. **News backfill**: `fetch_news_trades(50)` → keep items with `published >= today - 30d`, insert into `news` with `kind = "TRADE"`. Cap at 50 entries.
+11. **SeasonState**: `day = (today - calendar.start_date).num_days() as u32`. `phase = if today >= calendar.end_date { SeasonPhase::Playoffs } else if today >= calendar.trade_deadline { SeasonPhase::TradeDeadlinePassed } else { SeasonPhase::Regular }`. `user_team = lookup(abbrev)`. `mode = mode`. `rng_seed = entropy seed`.
+12. **All-Star roster**: if `day >= calendar.all_star_day` and `all_star` is empty for this season, call existing `compute_all_star`. Cup intentionally NOT backfilled (known gap — see M33 docs).
+13. **Helpers reused** (do not reimplement): `assign_initial_roles`, `populate_default_starters`, `seed_free_agents` from `nba3k-cli::commands` (export them via `commands::new_helpers`).
+14. **Return** `TodayReport` with the counters.
+
+**Files**:
+- New: `crates/nba3k-scrape/src/from_today.rs` (the entry function + private helpers).
+- `crates/nba3k-scrape/src/lib.rs`: `pub mod from_today; pub use from_today::{build_today_save, TodayReport};`.
+- `crates/nba3k-cli/src/commands.rs`: extract the seed copy / wal cleanup / role+starter+FA setup blocks from `cmd_new` into a new pub(crate) module `crate::commands::new_helpers` so both the legacy path and the importer call them. **No behavior change** to legacy.
+- New: `crates/nba3k-cli/src/commands/new_helpers.rs` (or co-located inside `commands.rs` as a sub-module — codex's call).
+
+**Acceptance**:
+- `build_today_save("/tmp/today.db", "BOS", GameMode::Standard, today)` with internet → opens via `cmd_status --json` and reports `{phase: "Regular"|"TradeDeadlinePassed"|"Playoffs", day: ≥150, season: 2026, user_team: "BOS"}`.
+- `roster --team LAL` shows **Luka Doncic and LeBron James together** (current real reality on 2026-04-29).
+- `standings` matches ESPN within 1 game per team (exact match preferred; ±1 acceptable due to scrape lag).
+- `records --scope season --stat ppg` returns a top-5 close to real-life leaders (Shai Gilgeous-Alexander, Jokić, Doncic, etc.).
+
+**Verification** (run by main agent after codex finishes; codex itself runs only the tests):
+```bash
+cargo run --release --bin nba3k -- --save /tmp/today.db new --team BOS --from-today
+./target/release/nba3k --save /tmp/today.db status --json
+./target/release/nba3k --save /tmp/today.db standings
+./target/release/nba3k --save /tmp/today.db roster --team LAL
+./target/release/nba3k --save /tmp/today.db records --scope season --stat ppg
+```
+
+Codex-side test: a unit test in `crates/nba3k-scrape/tests/from_today_offline.rs` that runs the full importer flow against checked-in fixture files (the same files from T3's `tests/fixtures/espn/`) bypassing the `fetch_*` HTTP layer via a `for_test_with_bytes(...)` ctor. Asserts:
+- `roster_moves_applied >= 1` (Doncic moved off PHX — wait, Doncic was traded to LAL in February 2025; in any reasonable seed-vs-now diff there will be at least one move).
+- `injuries_marked >= 1`.
+- `players_with_stats >= 200`.
+- `games_played >= 1000` (current season is far advanced).
+
+---
+
+### T7 — Wire `--from-today` into `cmd_new`
+
+**Status**: `[x]`
+
+**Files**:
+- `crates/nba3k-cli/src/cli.rs`: in `NewArgs` add
+  ```rust
+  /// Build the save from today's real NBA state via ESPN public API.
+  #[arg(long)]
+  pub from_today: bool,
+  ```
+- `crates/nba3k-cli/src/commands.rs:160` `cmd_new`: if `args.from_today`, branch to `nba3k_scrape::build_today_save(...)` with `today = chrono::Local::now().date_naive()`. Skip the legacy seed-copy + `Schedule::generate` blocks (they're already moved to `new_helpers` per T6). After import, call `app.open_path(path)` and persist `meta.user_team`.
+- New workspace dep: `crates/nba3k-cli/Cargo.toml` adds `nba3k-scrape = { workspace = true }` (only used at top-level).
+
+**Acceptance**:
+- `nba3k --save x.db new --team BOS` (no flag) → byte-identical legacy behavior.
+- `nba3k --save x.db new --team BOS --from-today` (with internet) → live save written.
+- `--from-today` with no internet → `Error: --from-today requires internet access to ESPN. ...`, exit code 1, no `.db` left behind.
 
 **Verification**:
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299.
-
-**Commit**: `M30-T33: trade builder step 2 master-detail`.
-
----
-
-## T34 — Verdict bar: salary totals + plain-language CBA warnings
-
-**Status**: `[x]` → codex: implemented salary totals and plain-language warning bar backed by trade CBA validation.
-
-**Goal**: Bottom strip of builder shows current selection state + warnings. Replace the cryptic `CBA: ✓/✗` with full natural-language warnings (Basketball-GM style — image #25).
-
-**Bar contents** (always visible at bottom of step 2):
-
-```
-─ 提交预览 ────────────────────────────────────────────────────
-送 $75M (3 球员)  /  收 $45M (2 球员)  /  净 +$30M 进
-[警告条 — 见下]
-[Enter 提交 · c 清除选择 · Esc 回选队]
+```bash
+cargo run --bin nba3k -- --save /tmp/old.db new --team BOS                # legacy path
+cargo run --bin nba3k -- --save /tmp/new.db new --team BOS --from-today   # live path
 ```
 
-**Salary line**: always 3 numbers — sent, received, delta. Update on every Space toggle.
+---
 
-**Warning conditions** — show in red panel only when violated. Plain language:
+### T8 — Phase doc M32 + PHASES.md row
 
-- **CHI 在工资帽以上**:
-  ```
-  ⚠ 你已超过工资帽. 进薪 ≤ 送薪 × 125%.
-  当前 进/送 = {actual}%, 超出 {diff}%.
-  需削减进薪约 ${diff}M.
-  ```
-- **CHI 在硬帽线以上**:
-  ```
-  ⚠ 你已触及第一/第二档奢侈线 (硬帽). 该交易会让你超出.
-  净进薪 ${X}M 超出剩余空间 ${Y}M.
-  ```
-- **球员 NTC (no-trade clause)**:
-  ```
-  ⚠ {Player} 持有不可交易条款, 无法被送出.
-  ```
-- **球员有 trade kicker**:
-  ```
-  ℹ {Player} 有交易激励金, 该交易会触发 ${kicker}M 加薪 (按余年比例).
-  ```
-- **roster size 违规** (低于 13 或高于 18 含 two-way):
-  ```
-  ⚠ 交易后阵容人数 {N}, 不在 13-18 范围.
-  ```
-
-通过时不显示 — 让 verdict bar 干净.
+**Status**: `[x]`
 
 **Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — `render_verdict_bar(...)`. Reads from `nba3k_trade::cba::validate(...)` and translates each `CbaError` variant into the human paragraph.
-- `crates/nba3k-core/src/i18n.rs` + tables — one localized template per warning type:
-  - `T::TradesWarnSalaryMatch` — params: actual %, diff $M
-  - `T::TradesWarnHardCap` — params: net $M, remaining $M
-  - `T::TradesWarnNTC` — param: player name (untranslated)
-  - `T::TradesNoteTradeKicker` — param: kicker $M
-  - `T::TradesWarnRosterSize` — param: count
-  - `T::TradesVerdictSent`, `T::TradesVerdictReceived`, `T::TradesVerdictDelta`
-  - `T::TradesVerdictPrompt` — "选 ↑↓ Space, 满意后按 Enter 提交"
-
-**Drop**:
-- Old `T::TradesInsufficientValue` fixed phrase — replaced with engine-driven dialog in T35.
-
-**Acceptance**:
-- Add a player to send → salary line updates instantly.
-- Force a salary mismatch → red warning explains the % rule and how much to fix.
-- Add a player with NTC → warning shows their name.
-- Trades that pass CBA show no warnings (clean bar).
-
-**Verification**:
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299.
-
-**Commit**: `M30-T34: trade verdict salary + plain-language CBA warnings`.
+- New: `phases/M32-from-today-importer.md`.
+- Update: `phases/PHASES.md` row M32.
 
 ---
 
-## T35 — GM dialog post-submit (natural language, no percentage)
+## M33 — TUI wizard + season-advance + docs
 
-**Status**: `[x]` → codex: implemented post-submit GM dialog and removed acceptance probability from trade UI surfaces.
+### T9 — TUI new-game wizard "Start Today" step
 
-**Goal**: After user presses Enter to propose, instead of an "estimated acceptance: 42%" output, show a Basketball-GM-style quoted dialog from the AI GM. No percentage anywhere.
+**Status**: `[x]`
 
-**Mapping** (post-submit only — pre-submit shows nothing about acceptance):
-
-| Engine outcome | GM dialog template |
-|---|---|
-| Accept | `{TEAM} GM: "成交, 合作愉快."` / `Nice dealing with you.` |
-| Counter (high quality) | `{TEAM} GM: "差不多, 但我这边觉得你还得加 {player}."` (use engine's actual counter chain) |
-| Counter (low quality) | `{TEAM} GM: "你给的太轻了, 至少得加上 {player} + {player2} 我才考虑."` |
-| Reject (insufficient value) | `{TEAM} GM: "差远了, 别浪费时间."` / `Close, but not quite good enough.` |
-| Reject (CBA violation) | `{TEAM} GM: "想法不错, 但工资帽这关过不去."` |
-| Reject (untouchable / NTC) | `{TEAM} GM: "{player} 不在交易考虑范围内."` |
-| Reject (badFaith / OutOfRoundCap) | `{TEAM} GM: "我们暂时不想再谈这笔."` |
-
-**Where rendered**:
-- Inside the verdict bar (T34). Pre-submit: only salary + CBA warnings. Post-submit: GM dialog appended below as a quoted blockquote (theme.accent_style for the quote, theme.text for the GM name prefix).
-- Dialog stays visible until next selection change (which re-clears it back to "preview" mode). Counter-offer also auto-loads the AI's counter into the right pane so user sees what the AI proposed.
+**Goal**: New step before `mode_picker` lets the user choose `Fresh October 2025` (default) or `Today (live ESPN data)`. When `Today` is chosen, the season field is locked to the current real season and `from_today=true` flows into the `New` Command sent through `commands::dispatch`.
 
 **Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — bind to existing `commands::dispatch(Command::Trade(Propose...))` path, capture the verdict, format the GM dialog. Pull engine outcome via existing `negotiate::step` / `evaluate::evaluate` return types.
-- `crates/nba3k-core/src/i18n.rs` + tables — one key per template above:
-  - `T::TradesGmAccept` (param: team abbrev)
-  - `T::TradesGmCounterMild` (params: team, counter player names)
-  - `T::TradesGmCounterDemand`
-  - `T::TradesGmRejectInsufficient`
-  - `T::TradesGmRejectCba`
-  - `T::TradesGmRejectUntouchable` (param: player name)
-  - `T::TradesGmRejectBadFaith`
-
-**Drop**:
-- Any `format!("{} %", probability * 100.0)` style strings.
+- `crates/nba3k-cli/src/tui/screens/new_game.rs`: introduce `enum StartMode { Fresh, Today }` step. Render it after `team_picker`, before `mode_picker`. On confirm, the dispatched `Command::New(NewArgs { from_today: matches!(start_mode, StartMode::Today), ... })` reflects the choice.
+- `crates/nba3k-core/src/i18n.rs` + `i18n_en.rs` + `i18n_zh.rs`: new keys `T::NewGameStartTitle`, `T::NewGameStartFresh`, `T::NewGameStartToday`, `T::NewGameStartTodayHint` (hint text mentions "needs internet to ESPN").
 
 **Acceptance**:
-- Submit a fair trade → GM line `ATL GM: "成交, 合作愉快."` AND backend trade applies (players move).
-- Submit a lopsided trade → GM line `ATL GM: "差远了, 别浪费时间."`.
-- Submit a CBA-violating trade → engine validation kicks in BEFORE the GM speaks; verdict bar shows the CBA warning (T34) and GM line `想法不错, 但工资帽这关过不去.`
-- Counter chain → AI's counter players auto-populate the right pane; user can iterate Space + Enter again.
-- Nowhere does any percentage show.
+- TUI new-save flow shows the new step.
+- Selecting `Today (live ESPN data)` and confirming triggers the live import (visible: `nba3k status --json` after exit shows `phase: Regular`/`TradeDeadlinePassed`/`Playoffs`, `day > 0`).
+- Selecting `Fresh October 2025` keeps existing behavior.
 
-**Verification**:
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299.
-- Manual: 4 distinct trade submissions matching 4 different outcome categories.
-
-**Commit**: `M30-T35: trade gm dialog natural language`.
+**Verification**: `./target/release/nba3k tui` manual walkthrough; documented in M33 phase doc.
 
 ---
 
-## T36 — Settings: god mode toggle (persisted)
+### T10 — `season-advance` writes a fresh `season_calendar` row for year+1
 
-**Status**: `[x]` → codex: implemented persisted Settings god-mode toggle.
+**Status**: `[x]`
 
-**Goal**: Add a god-mode toggle to the Settings screen, persisted across sessions like the language setting.
-
-**Spec**:
-- New picker row in Settings screen below the existing language picker:
-  ```
-  god 模式  [关] / [开]
-  ```
-  Or two rows. Tab/↑↓ navigates between rows; Space or Enter toggles the value of the focused row.
-- Persistence: `nba3k_store::Store::write_setting("god_mode", "on" | "off")`. Read at TUI launch (same path as language). Fallback to file-based config when no save.
-- New `tui.god_mode: bool` field on `TuiApp`.
-- When toggled mid-session, set `app.force_god` (existing flag from M3) so trade engine bypasses CBA + always accepts. Persist to settings.
+**Goal**: When the seeded sim path advances to the next season, write next year's calendar entry so subsequent calls keep working without falling back to const defaults.
 
 **Files**:
-- `crates/nba3k-cli/src/tui/screens/settings.rs` — extend the picker UI with a second row (or two-section layout).
-- `crates/nba3k-cli/src/tui/mod.rs` — `TuiApp` adds `pub god_mode: bool`. `run()` reads from store/config. Toggle handler updates `app.force_god`.
-- `crates/nba3k-cli/src/config.rs` — add `read_god_mode()` / `write_god_mode(bool)` paralleling existing `read_lang` / `write_lang`.
-- `crates/nba3k-store/src/store.rs` — `read_setting("god_mode")` already exists; just a new key.
-- `crates/nba3k-core/src/i18n.rs` + tables — `T::SettingsGodMode`, `T::SettingsOn`, `T::SettingsOff`.
+- `crates/nba3k-cli/src/commands.rs` `season_advance` handler: after bumping `SeasonState.season`, compute via a private helper `next_calendar_from_previous(prev: &SeasonCalendar) -> SeasonCalendar`:
+  - `next_start = prev_start + Duration::days(365)` rounded forward to the next Tuesday.
+  - `next_end = next_start + Duration::days(174)`.
+  - `next_trade_deadline = next_start + Duration::days(107)`.
+  - All-star / cup day offsets: copy from previous.
+  - Persist via `store.upsert_season_calendar(&next_cal)`.
+- The `Schedule::generate_with_dates` call inside `season_advance` reads the row that was just written.
 
 **Acceptance**:
-- Settings screen → second row "god 模式" → toggle → instant effect.
-- Quit + relaunch → toggle state preserved.
-- When god mode on, trade engine accepts everything (existing M3 behavior).
+- A new test `crates/nba3k-cli/tests/season_advance_calendar.rs` advances 2025-26 → 2026-27 → 2027-28 and asserts three rows exist in `season_calendar` and `Schedule::generate_with_dates` was called with each year's window.
 
-**Verification**:
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299.
-
-**Commit**: `M30-T36: settings god mode toggle`.
+**Verification**: `cargo test -p nba3k-cli -- season_advance_calendar`.
 
 ---
 
-## T37 — Force Trade button in builder (gated to god mode)
+### T11 — README + known gaps + M33 phase doc
 
-**Status**: `[x]` → codex: implemented god-mode-gated force trade chip and force propose path.
-
-**Goal**: When god mode is ON, the builder's top bar shows an additional `[F] 强制成交` chip. Pressing F submits the trade with engine override, bypassing all checks.
-
-**Spec**:
-- Top-bar render in T33 — if `tui.god_mode == true`, append `[F] 强制成交` (or `[F] Force Trade`) chip. Otherwise hide the chip entirely.
-- `F` keypress (only when god mode):
-  - Equivalent to Enter but with `force = true` flag passed through dispatch.
-  - Calls `commands::dispatch(Command::Trade(Propose { ..., force: true }))`. Extend `TradeAction::Propose` with optional `force: bool` field (defaults false). Negotiate / evaluate already short-circuits when force is true.
-- After force submit, GM dialog still shows but message becomes:
-  ```
-  {TEAM} GM (被迫): "好吧, 这交易我们接受."
-  ```
+**Status**: `[x]`
 
 **Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — top-bar render + F handler.
-- `crates/nba3k-cli/src/cli.rs` — extend `TradeAction::Propose` with `force: bool` if not present.
-- `crates/nba3k-cli/src/commands.rs` — propagate `force` to engine.
-- `crates/nba3k-core/src/i18n.rs` + tables — `T::TradesForceTradeChip`, `T::TradesGodAcceptDialog`.
+- `README.md`: add a "Start from Today" section under "三种交互方式" or "快速开始" — usage, requirement (internet only — no Python), and the known gaps:
+  - No Cup backfill (current-year Cup history is skipped).
+  - News backfill is the last 30 days of trade-typed items only.
+  - Already-played games are imported as final scores only — no per-player box-score detail for past games.
+  - Player matching is exact-name; misspellings or junior/senior collisions log a warning and skip.
+  - Once the regular season ends in real life, the importer puts the save into `Playoffs` phase, but **playoff bracket backfill is not implemented** — the user can still run `playoffs sim` to generate one.
+- New: `phases/M33-tui-and-polish.md`.
+- Update: `phases/PHASES.md` row M33.
 
-**Acceptance**:
-- god mode off → no F chip; F key does nothing in builder.
-- god mode on → F chip visible; F key force-submits any trade regardless of CBA / value.
-- Force-submit always results in Accept verdict + players move.
-
-**Verification**:
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299.
-
-**Commit**: `M30-T37: force trade button in builder`.
+**Verification**: `cargo test --workspace` final green; manual run of the e2e block from T6 passes.
 
 ---
 
-## T38 — (Deferred to M31) Draft picks in trade
+## Things codex must NOT do
 
-**Status**: `[!]` deferred — record only.
+- **Do not introduce a Python dependency.** No `nba_api`. No `pip install`. The existing `crates/nba3k-scrape/src/sources/nba_api.rs` (USG/TS augmentation for the seed-build) stays untouched, but no new Python scripts and no new `nba_api` calls.
+- **Do not create a `crates/nba3k-scrape/py/` directory.** Delete it if it appears.
+- **Do not edit committed migrations.** Always add new V### files.
+- **Do not silently downgrade an empty fetch to success.** If ESPN returns an unexpected empty payload (e.g. 0-team standings), bail loudly — that's a parse bug, not a real state.
+- **Do not parallelize beyond 10 concurrent ESPN requests.** Be polite.
+- **Do not disable the legacy `cmd_new` path.** Both paths must coexist.
 
-**Goal**: Allow draft picks (V005 `draft_picks` table) to be sent/received in a trade. Currently the trade engine has scaffolding for picks (M3 `assets_by_team` includes pick IDs) but the TUI builder doesn't expose them.
+## Open questions for main agent (codex pings here if hit)
 
-**Why deferred**:
-- Need to verify `evaluate::evaluate` + `cba::validate` + `apply_accepted_trade` all handle picks end-to-end. Some paths may be stubbed.
-- TUI work is straightforward (T33 already reserves a `─ 选秀权 ─` section per side); just needs the data + key wiring.
-- Splitting M30 keeps it shippable now.
+- ESPN occasionally returns `{}` for a scoreboard date with no games (off-day). That is a 200 OK + valid empty response, NOT a failure. `parse_scoreboard` must return `Ok(vec![])` and the importer must move on.
+- ESPN player names occasionally include suffixes (`"LeBron James Jr."` is hypothetical, but `"Wendell Carter Jr."` is real). Match strategy: exact `display_name` first, then case-insensitive, then strip `Jr.` / `Sr.` / `III` and retry. Document the policy inline.
+- If ESPN returns a player on a team that does not exist in the seed, INSERT a stub player rather than dropping the row. Mark `tracing::warn!`.
+- Time zone: ESPN dates are in UTC. `chrono::Local::now().date_naive()` is local. For "today" we accept a 1-day fudge — if ESPN says a game is on `2026-04-29 03:00Z`, treat it as `2026-04-29` (date part only).
 
-**M31 scope** (for later):
-- Audit pick-handling in `nba3k-trade` library.
-- Wire `─ 选秀权 ─` section in T33 layout: read user/target team's owned future picks from `Store::picks_for_team(team_id)`, render rows like `2027 1st  (CHI 自有)` or `2028 2nd  (经 NYK)`.
-- Update salary/value totals to factor pick value.
-- Add `T::TradesPickFirstRound`, `T::TradesPickSecondRound`, `T::TradesPickProtected`, etc.
-- New tests covering pick swaps end-to-end.
+## Definition of Done
 
-**Reminder for main agent**: when M30 ships, open M31 with this scope. Don't lose the section-divider stub in T33.
-
----
-
-## Coordination protocol
-
-- Wave order suggested:
-  1. **T36** Settings god mode toggle (foundation; doesn't touch builder).
-  2. **T32** Step 1 team picker.
-  3. **T33** Step 2 builder body (largest piece; depends on T32 having selected a target).
-  4. **T34** Verdict bar warnings.
-  5. **T35** GM dialog.
-  6. **T37** Force Trade button (depends on T36 + T33).
-- Codex flips `[ ]` → `[~]` → `[x]` per task with `→ codex: ...` notes.
-- Commit format: `M30-T<N>: <one-line summary>`.
-- Blocked: `[!]` + reason.
-- New T enum keys synced across all 3 i18n tables.
-- Player names + team abbrevs + team full names stay English (data, not chrome).
-
-## Resolved decisions (2026-04-29)
-
-- Step 1 picker: left team list / right roster preview.
-- Step 2 builder: master-detail; top bar / two side panels / bottom verdict bar.
-- Player row 6 columns: name(16) pos(2) age(2) OVR(2) salary(7) years(3). NO role column.
-- Picks: separate section divider in each side panel; M30 shows section header with "M31 待加" placeholder, M31 wires the data + UI.
-- Esc behavior: Esc once → Step 1 (re-pick team); Esc twice → Trades menu.
-- CBA term: replaced with plain-language warnings; never write `CBA` acronym in UI.
-- Acceptance: NO percentage anywhere; natural-language GM dialog post-submit only.
-- god mode: Settings toggle persisted across saves; Force Trade button in builder shown only when god on.
-
----
-
-# M30 follow-up — T39 / T40 / T41
-
-User-tested release (2026-04-29) — 3 polish items.
-
-## T39 — Step 1 roster preview: unicode-safe columns + `y` suffix on years
-
-**Status**: `[x]` → codex: fixed roster preview unicode-safe columns and year suffix alignment; tests passed.
-
-**Goal**: image #28 — `Luka Dončić` / `Moses Brown` / `Daniel Gafford` rows misalign in the OVR / salary / years columns due to byte-pad on names with diacritics + no right-pad on salary + missing `y` suffix on years.
-
-**Fix**:
-- Use `pad_display(&player.name, 18)` (T14 helper) instead of byte-pad.
-- Salary: `format!("{:>7}", money)` so `$5.3M` aligns with `$27.1M` (7-col right-aligned).
-- Years: `format!("{:>3}", format!("{}y", years))` so `4y` / `3y` align as 2-char + space.
-- Position label: `format!("{:<2}", pos)` so `C` matches `PF` (already done elsewhere).
-
-**Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — wherever the Step 1 roster preview row is built (likely `draw_roster_preview` or inline in `draw_pick_team`).
-
-**Acceptance**: image #28 columns line up; OVR / $ / 年限 right-aligned; names with `ć` / `ü` don't shift the row.
-
-**Commit**: `M30-T39: step 1 roster preview column alignment`.
-
----
-
-## T40 — Step 2 player rows: `y` suffix on years column
-
-**Status**: `[x]` → codex: fixed Step 2 player row unicode-safe name padding and year suffix alignment; tests passed.
-
-**Goal**: image #29 — trailing `2` / `3` / `5` after salary look like random numbers because the format dropped the `y` suffix the spec called for.
-
-**Fix**:
-- Both panels (`我方送出` + `对方接收`): change `format!("{:>3}", years)` to `format!("{:>3}", format!("{}y", years))`.
-- Same for "expiring contract" rows: show `"—"` (em dash) instead of `0y`.
-- While we're here, double-check `pad_display` is used on the name column in Step 2 too (same diacritic concern as Step 1).
-
-**Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — Step 2 row formatter.
-
-**Acceptance**:
-- LaVine row reads `Zach LaVine    SF 31 83  $13.9M  —` (no contract year on expiring) or `Zach LaVine    SF 31 83  $13.9M  1y` (1 year left).
-- All years render with `y` suffix; no bare numbers.
-
-**Commit**: `M30-T40: step 2 player years suffix and unicode pad`.
-
----
-
-## T41 — Verdict bar: ✓ when CBA passes + specific GM reject per CbaError
-
-**Status**: `[x]` → codex: added cap-pass marker and CBA-variant-specific GM reject lines; tests passed.
-
-**Goal**: image #30 shows two issues.
-
-(a) Trade was rejected for **roster size** (19 > 18), but GM said `想法不错, 但工资帽这关过不去` — that's the salary-cap message, not the roster-size reason. The `T::TradesGmRejectCba` template is too coarse — currently catches ALL CBA errors with the same line.
-
-(b) When the salary match / cap rules DO pass, there's no positive signal. User wants a green ✓ next to the salary line so they know they're safe from a cap perspective (even if other warnings exist).
-
-**Fix (a)** — split GM reject template per `CbaError` variant:
-
-| CbaError variant | New i18n key | Template |
-|---|---|---|
-| `SalaryMatch` (over-cap, fails 125% rule) | `T::TradesGmRejectSalaryMatch` | `{TEAM} GM: "工资帽这关过不去, 进薪超出 125% 限制."` |
-| `HardCap` (touches first/second apron) | `T::TradesGmRejectHardCap` | `{TEAM} GM: "我们触线了, 这交易没法做."` |
-| `RosterSize` (13-18 violation) | `T::TradesGmRejectRoster` | `{TEAM} GM: "想法不错, 但交易后阵容人数不合规."` |
-| `NoTradeClause` | reuse `T::TradesGmRejectUntouchable` | (already player-named) |
-| `Other` / unmapped | keep `T::TradesGmRejectCba` as catch-all fallback | `{TEAM} GM: "规则上有问题, 这笔做不成."` |
-
-In `crates/nba3k-cli/src/tui/screens/trades.rs::format_gm_dialog` (or wherever the mapping lives), match on the actual `CbaError` variant returned from `validate(...)` rather than treating "any CBA error" as one bucket.
-
-**Fix (b)** — when CBA `validate(...)` returns Ok (no salary mismatch / hard cap / NTC issues), render a green `✓` glyph after the salary delta line:
-
-```
-送 $28.5M  /  收 $29.9M  /  净 +$1.5M  ✓ 工资帽通过
-```
-
-The ✓ uses `Style::default().fg(Color::Green)` (or `theme.accent_style()` if green isn't the theme accent — pick green explicitly so it reads as "safe").
-
-If CBA fails, NO ✓; the warning panel below explains.
-
-Roster-size and other non-financial warnings still appear in the warning panel as before, even when ✓ is shown for cap.
-
-**Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — `render_verdict_bar` adds the green ✓ branch + refactor `format_gm_dialog` to be CbaError-aware.
-- `crates/nba3k-core/src/i18n.rs` + `i18n_en.rs` + `i18n_zh.rs` — add `T::TradesGmRejectSalaryMatch`, `T::TradesGmRejectHardCap`, `T::TradesGmRejectRoster`, `T::TradesVerdictCapPass` ("工资帽通过" / "Cap rules OK").
-
-**Acceptance**:
-- Same trade as image #30 (roster 19, $1.5M net) → GM line says `想法不错, 但交易后阵容人数不合规.` (NOT "工资帽").
-- Salary-match violation (over-cap, 125% fail) → GM line says `工资帽这关过不去, 进薪超出 125% 限制.`.
-- Trade where caps pass but roster size violates → green `✓ 工资帽通过` on salary line + roster-size warning below + roster-specific GM line.
-- Clean trade (passes everything) → green `✓ 工资帽通过` on salary line + no warnings + GM accept line after submit.
-
-**Commit**: `M30-T41: verdict cap-pass marker + cba-aware gm reject lines`.
-
----
-
-## Wave order
-
-T39 / T40 are pure formatting fixes, can do in any order, parallel-safe.
-T41 touches engine-mapping logic + new i18n keys — do after T39/T40 to avoid merge conflicts in trades.rs.
-
-## Resolved decisions (2026-04-29 follow-up)
-
-- T39 alignment via `pad_display` + right-aligned salary (7 cols) + years with `y` suffix (3 cols).
-- T40 same fixes apply to Step 2 row formatter; both side panels.
-- T41 GM reject message must match the actual `CbaError` variant; green `✓` shows when cap rules pass even if other warnings exist.
-
----
-
-## T42 — Roster-size warning specifies which team violates
-
-**Status**: `[x]` → codex: roster-size warnings now name the offending team abbrev and render one line per violating team.
-
-**Goal**: image #33 — `⚠ 交易后阵容人数不在 13-18 范围. 当前 21.` doesn't tell user which team has the bad count. The `CbaError::RosterSize` variant from `validate(...)` already carries the offending team id (or both if both violate); the i18n template just throws away the team info.
-
-**Fix**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` warning rendering for roster-size: read team abbrev (`Store::team_abbrev`) of the offending team, plug into the template. If both teams violate (rare but possible), render two lines.
-- `crates/nba3k-core/src/i18n.rs` + tables — change `T::TradesWarnRosterSize` template to take 2 params (team_abbrev, count):
-  - ZH: `⚠ {team} 交易后阵容人数 {count}, 不在 13-18 范围.`
-  - EN: `⚠ {team} would have {count} players post-trade — outside the 13-18 range.`
-
-**Acceptance**:
-- Trade in image #33 → warning reads `⚠ HOU 交易后阵容人数 21, 不在 13-18 范围.` (or whichever team is the violator).
-- If both teams overflow / underflow → 2 warning lines, one per team.
-
-**Commit**: `M30-T42: roster size warning names offending team`.
-
----
-
-## T43 — Swap panels: target team LEFT, my team RIGHT
-
-**Status**: `[x]` → codex: Step 2 now shows target roster on the left, my roster on the right, with target-first focus order.
-
-**Goal**: User wants the TARGET team's roster on the LEFT panel, MY team on the RIGHT. Currently it's reversed (我方送出 left, 对方接收 right). Reasoning per user: read left-to-right as "from THEM → into MY team".
-
-**Spec**:
-- Step 2 layout becomes:
-  ```
-  ┌─ 对方送出 (HOU) ────────┬─ 我方送出 (CHI) ────────┐
-  │ ─ 球员 ─                │ ─ 球员 ─                │
-  │ ✓ Şengün C 24 87 $29.9M │ ✓ LaVine SF 31 83 $13.9M│
-  │   ...                   │   ...                   │
-  ```
-- Top bar copy stays factual — `目标 HOU · 我方 CHI` order remains semantic; no swap there.
-- Verdict bar copy: keep `送 $X / 收 $Y / 净 ±Z`. "送" still refers to MY team's outgoing salary, "收" still my team's incoming. Numbers don't change, only the panel order swaps.
-- Tab/Shift-Tab focus order: now goes target panel first (left) then my panel (right) — natural left-to-right.
-- All keys (Space select / m mode / etc) preserved on both panels.
-
-**Files**:
-- `crates/nba3k-cli/src/tui/screens/trades.rs` — swap the two `Layout::default().split(...)` calls in Step 2 body draw, swap the focus enum order, swap which side the user-team list / target-team list go into.
-- `crates/nba3k-core/src/i18n.rs` + tables — re-examine `T::TradesSendList` / `T::TradesReceiveList` panel headers:
-  - LEFT panel header was "我方送出"; change to "对方送出 (target sends to us)" — or use existing `T::TradesReceiveList` ("对方接收") inverted to "对方送出" / "{TEAM} sends".
-  - RIGHT panel header was "对方接收"; change to "我方送出" / "我方 sends".
-  - Easiest: rename the two existing keys to reflect new positions, OR keep keys neutral and swap usage at call site. Pick the call-site swap so i18n stays simple.
-
-**Acceptance**:
-- Open Step 2 with target=HOU, mine=CHI → LEFT panel has HOU roster, RIGHT panel has CHI roster.
-- Tab moves focus left → right (target → mine).
-- Selections still work; verdict salary lines still calculate "送" from my team.
-
-**Commit**: `M30-T43: swap trade panels target left mine right`.
-
----
-
-## Wave order (M30 follow-up part 2)
-
-T42 / T43 independent. Codex picks any order.
-
-## Resolved decisions (2026-04-29 part 2)
-
-- T42 roster-size warning includes offending team abbrev.
-- T43 panels swapped: target LEFT, mine RIGHT. Top bar copy unchanged. Verdict salary semantics unchanged.
-
----
-
-## T44 — Scraper dedup + per-team cap (root-cause fix for >18 rosters)
-
-**Status**: `[x]` → codex: implemented scraper-side primary-team dedup, top-15 per-team cap, tighter assertions, duplicate-name guard, and unit tests.
-
-**Problem**: Each team in the seed has 20-22 players because BBRef's per-team page lists EVERY player who appeared on the team that season — including mid-season-traded-out players, 10-day signees, and waived players. The scraper concatenates all 30 team pages → duplicates (e.g. Mitchell on both DAL and CLE) + bloated rosters → CBA's 13-18 post-trade roster bound is impossible to satisfy.
-
-**Background context** (from M19.1 memory note):
-> Bumped scrape-assertion bounds (max_players 600→720, max_per_team 20→30) since prior-season pulls duplicate rows for traded players.
-
-That widening was a workaround. T44 fixes the data instead.
-
-**Approach** (one-pass, no extra HTTP calls):
-
-After Stage 1 in `crates/nba3k-scrape/src/main.rs` collects `all_players` (30 team pages concatenated), insert a dedup + cap pass BEFORE rating + insert. Two filters:
-
-1. **Per-team cap** — within each team, keep top 15 by `minutes_per_game` (then `games` desc as tiebreak). Drops 10-day signees and rotation fringe.
-2. **Cross-team dedup** — group all remaining players by normalized name. If a player name appears on 2+ teams, keep only the entry with highest `minutes_per_game * games` (= total minutes that season — that's their "primary team"). The other entries get dropped entirely.
-
-After both filters: each team has ≤ 15 players; each player has exactly one team.
-
-Tighten `data/free_agents_2025_26.toml` curated list (M27 T22) to fill the remaining gap of 30-50 unsigned vets.
-
-**Files**:
-- `crates/nba3k-scrape/src/main.rs`:
-  - After `all_players` is built (line ~170), call new `dedup_and_cap(&mut all_players, &mut team_player_offsets) -> ()`.
-  - Helper iterates teams, sorts each team's slice by `mpg desc, games desc`, truncates to top 15 (configurable const `MAX_PER_TEAM = 15`).
-  - Then groups remaining by normalized name (reuse `names_match` logic from `bbref.rs`); for each multi-team duplicate, retains only the row with max `mpg * games`. Other rows dropped from `all_players`. Recompute `team_player_offsets` to point to the new contiguous slices.
-- `crates/nba3k-scrape/src/assertions.rs`:
-  - Tighten bounds: `max_players: 720 → 480`, `max_per_team: 30 → 18`. Restores the original "real NBA" sanity check.
-- `crates/nba3k-scrape/src/sources/bbref.rs`:
-  - Optional: pre-filter inside `parse_team_page` so per-team page already returns ≤ 18 (avoids carrying 22 then trimming). Probably cleaner to do at main.rs level — keeps bbref.rs raw.
-
-**Edge cases**:
-- A player with 0 mpg (didn't play) — drop entirely. Don't include in seed.
-- Tied tiebreak (rare) — sort by name asc as final tiebreak for determinism.
-- Synthetic roster fallback (offline) — `synthetic_roster` already returns 15. No-op for it.
-
-**Acceptance**:
-- After `cargo run -p nba3k-scrape` regenerates `data/seed_2025_26.sqlite`:
-  - `sqlite3 data/seed_2025_26.sqlite "SELECT team_id, COUNT(*) FROM players WHERE team_id IS NOT NULL GROUP BY team_id;"` shows each team with 13-15 players.
-  - `sqlite3 data/seed_2025_26.sqlite "SELECT name, COUNT(*) FROM players GROUP BY name HAVING COUNT(*) > 1;"` returns 0 rows.
-- Fresh `nba3k new --team BOS --save x.db` → roster size = 14-15.
-- Trade builder: post-trade roster size stays in 13-18 for any reasonable swap.
-- `cargo build --workspace` clean.
-- `cargo test --workspace` ≥ 299 (the dedup logic gets unit tests in main.rs or new module).
-
-**Not in scope**:
-- Migrating existing saves — user explicitly chose pure A. Existing saves keep their bloat; user starts a new save for the fix.
-- Touching trade engine CBA rules — they were always correct; data was wrong.
-
-**Commit**: `M30-T44: scraper dedup + per-team cap to 15`.
-
----
-
-## Resolved decisions (2026-04-29 part 3)
-
-- T44 fixes roster bloat at SCRAPER level: per-team top-15 by mpg + cross-team dedup keeping max-minutes team. Bounds tightened to 480/18.
-- User starts new save after re-scraping; existing save not migrated (per user choice).
+All eleven tasks `[x]`. `cargo test --workspace` green (≥ 303 passed + 1 ignored, with new tests added by T2/T3/T5/T6/T10). The e2e block from T6's verification executes end-to-end with internet access. PHASES.md shows M31, M32, M33 all `Done` with their Bash verification commands recorded.

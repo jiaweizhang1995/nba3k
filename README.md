@@ -25,9 +25,14 @@ cargo build --release
 
 ### 3. 创建第一份存档并开局
 
+两种起手方式：
+
 ```bash
-# 用波士顿凯尔特人开 2025-26 赛季新档
+# 经典：从 2025-10-21 开始打整个赛季（默认）
 ./target/release/nba3k --save my.db new --team BOS
+
+# 从今日实况开档（M32）：拉取 ESPN 真实排名 / 阵容 / 伤病 / 已打比赛
+./target/release/nba3k --save my.db new --team BOS --from-today
 
 # 看一眼初始状态
 ./target/release/nba3k --save my.db status
@@ -36,11 +41,26 @@ cargo build --release
 ./target/release/nba3k --save my.db
 ```
 
-也可以直接进 TUI 仪表盘：
+也可以直接进 TUI 仪表盘（新游戏向导内含「起手方式」选项）：
 
 ```bash
 ./target/release/nba3k --save my.db tui
 ```
+
+#### `--from-today` 起手（NBA 2K MyNBA "Today's Game" 风格）
+
+用 ESPN 公开 JSON 接口实时建档：30 队当前 W-L、已打比赛比分、当前阵容（含赛季内的交易/签约）、当前伤病、本季 PPG/RPG 累计、剩余真实赛程。**纯 Rust，不依赖 Python / nba_api**。首跑联网约 30-60 秒（依赖 ESPN 响应），缓存命中后秒级；缓存写到 `data/cache/espn/`，TTL 6-12 小时。
+
+`--from-today` 已知短板（写到 `phases/M33-tui-and-polish.md` 跟踪）：
+
+- **没有 Cup 回填**：选秀进档时杯赛阶段已结束，`cup` 命令为空。
+- **News 只回填 30 天交易类**：完整赛季 news 不回灌（避免刷爆 ESPN）。
+- **过去比赛只有最终比分**：没有 per-player 单场 box score；`recap`-类命令在历史比赛上为空。M31 的 `player_season_stats` 表填补了 PPG/RPG 排行榜需求。
+- **球员名 exact 匹配**：少数后缀变体（Jr/Sr/III）做了 strip 重试；G-League / two-way 球员若 seed 没有则跳过 + 打 warn。
+- **`records --scope season`** 当前还从 box-score 聚合，对 `--from-today` 的存档为空。后续打补丁让它优先读 `player_season_stats`。
+- **赛季已结束**：当 ESPN 显示常规赛全部完成（如 4 月底），`phase` 落到 `Playoffs`。季后赛对阵 bracket 不自动回填；`playoffs sim` 仍可手动跑出冠军。
+
+需要联网到 `https://site.api.espn.com/`。脱网会立刻报错并清掉半成品文件。
 
 ### 4. 删除存档
 

@@ -16,6 +16,9 @@ nba3k-sim = { workspace = true }
 nba3k-trade = { workspace = true }
 nba3k-models = { workspace = true }
 nba3k-season = { workspace = true }
+nba3k-scrape = { workspace = true }
+rusqlite = { workspace = true }
+reqwest = { workspace = true }
 clap = { workspace = true }
 rustyline = { workspace = true }
 shlex = { workspace = true }

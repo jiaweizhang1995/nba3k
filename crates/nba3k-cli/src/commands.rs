@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Default seed DB shipped by `nba3k-scrape`. CLI `new` looks here unless overridden.
-const DEFAULT_SEED_PATH: &str = "data/seed_2025_26.sqlite";
+pub(crate) const DEFAULT_SEED_PATH: &str = "data/seed_2025_26.sqlite";
 const FREE_AGENT_SEED: &str = include_str!("../../../data/free_agents_2025_26.toml");
 const FREE_AGENT_ID_BASE: u32 = 900_000;
 
@@ -167,6 +167,35 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
         bail!("refusing to overwrite existing save at {}", path.display());
     }
 
+    let mode = GameMode::parse(&args.mode).ok_or_else(|| {
+        anyhow!(
+            "unknown mode '{}': use standard|god|hardcore|sandbox",
+            args.mode
+        )
+    })?;
+
+    if args.from_today {
+        // M32 — live ESPN import. Skips the legacy seed-anchored path and
+        // delegates the whole pipeline to `from_today::build_today_save`.
+        let today = chrono::Local::now().date_naive();
+        let report = crate::from_today::build_today_save(&path, &args.team, mode, today)?;
+        app.open_path(path.clone())?;
+        println!(
+            "created live save {} (team={} mode={} from-today)\n  teams_loaded={} games_played={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={} news_backfilled={}",
+            path.display(),
+            args.team.to_uppercase(),
+            mode,
+            report.teams_loaded,
+            report.games_played,
+            report.games_unplayed,
+            report.players_with_stats,
+            report.injuries_marked,
+            report.roster_moves_applied,
+            report.news_backfilled,
+        );
+        return Ok(());
+    }
+
     // Stale SQLite sidecars from a previous run will be replayed onto the new
     // file's pages and corrupt it. Wipe `-wal` and `-shm` before copying the
     // seed so SQLite opens cleanly.
@@ -208,13 +237,6 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
     };
 
     app.open_path(path.clone())?;
-
-    let mode = GameMode::parse(&args.mode).ok_or_else(|| {
-        anyhow!(
-            "unknown mode '{}': use standard|god|hardcore|sandbox",
-            args.mode
-        )
-    })?;
 
     let season = SeasonId(args.season);
 
@@ -501,10 +523,14 @@ fn generate_and_store_schedule(app: &mut AppState, season: SeasonId, seed: u64) 
     if teams.len() != 30 {
         bail!("schedule generator needs 30 teams; found {}", teams.len());
     }
+    // Read the per-save calendar (M31). Falls back to the V016 default
+    // (2025-26 dates) when no row exists yet.
+    let cal = season_calendar_or_default(app.store()?, season)?;
     // Offset game_ids by season so multi-season saves don't collide with
     // prior years' schedule rows on the unique `game_id` index.
     let id_offset: u64 = (season.0 as u64) * 10_000;
-    let schedule = Schedule::generate(season, seed, &teams);
+    let schedule =
+        Schedule::generate_with_dates(season, seed, &teams, cal.start_date, cal.end_date);
     let rows: Vec<_> = schedule
         .games
         .iter()
@@ -512,6 +538,47 @@ fn generate_and_store_schedule(app: &mut AppState, season: SeasonId, seed: u64) 
         .collect();
     app.store()?.bulk_insert_schedule(&rows)?;
     Ok(())
+}
+
+/// Read the per-season calendar from the store; if missing, return a
+/// `SeasonCalendar::default_for(season)` fallback. Lets call sites stay
+/// decoupled from whether the row was already seeded by V016.
+pub(crate) fn season_calendar_or_default(
+    store: &nba3k_store::Store,
+    season: SeasonId,
+) -> Result<SeasonCalendar> {
+    Ok(store
+        .get_season_calendar(season)?
+        .unwrap_or_else(|| SeasonCalendar::default_for(season.0 as u16)))
+}
+
+/// Compute the next year's calendar from the previous one. Used by
+/// `season-advance` to seed `season_calendar` for the new year before
+/// generating its schedule. Approximate but stable: shift +365 days,
+/// snap to the next Tuesday, then derive end = +174 days, deadline =
+/// +107 days.
+pub(crate) fn next_calendar_from_previous(
+    prev: &SeasonCalendar,
+    new_season_year: u16,
+) -> SeasonCalendar {
+    use chrono::{Datelike, Weekday};
+    let mut start = prev.start_date + chrono::Duration::days(365);
+    while start.weekday() != Weekday::Tue {
+        start += chrono::Duration::days(1);
+    }
+    let end = start + chrono::Duration::days(174);
+    let deadline = start + chrono::Duration::days(107);
+    SeasonCalendar {
+        season_year: new_season_year,
+        start_date: start,
+        end_date: end,
+        trade_deadline: deadline,
+        all_star_day: prev.all_star_day,
+        cup_group_day: prev.cup_group_day,
+        cup_qf_day: prev.cup_qf_day,
+        cup_sf_day: prev.cup_sf_day,
+        cup_final_day: prev.cup_final_day,
+    }
 }
 
 fn init_standings(app: &mut AppState, season: SeasonId) -> Result<()> {
@@ -846,9 +913,14 @@ pub(crate) fn sim_n_days(app: &mut AppState, count: u32, quiet: bool) -> Result<
             games_played += 1;
         }
 
+        // Per-save calendar drives the trade-deadline date.
+        let cal = season_calendar_or_default(app.store()?, state.season)?;
+
         // Trade deadline crossing — kick off the AI volume spike on the
         // deadline day before flipping to TradeDeadlinePassed.
-        if state.phase == SeasonPhase::Regular && season_phases::is_trade_deadline_day(date) {
+        if state.phase == SeasonPhase::Regular
+            && season_phases::is_trade_deadline_day_for(date, &cal)
+        {
             let deadline_seed = state
                 .rng_seed
                 .wrapping_add(state.day as u64)
@@ -867,7 +939,9 @@ pub(crate) fn sim_n_days(app: &mut AppState, count: u32, quiet: bool) -> Result<
             run_ai_inbox_offers(app, state.season, state.day, state.user_team, offer_seed)?;
         }
 
-        if state.phase == SeasonPhase::Regular && season_phases::is_after_trade_deadline(date) {
+        if state.phase == SeasonPhase::Regular
+            && season_phases::is_after_trade_deadline_for(date, &cal)
+        {
             state.phase = SeasonPhase::TradeDeadlinePassed;
         }
 
@@ -4333,6 +4407,12 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
         rng_seed: state.rng_seed.wrapping_add(1),
     };
     app.store()?.save_season_state(&new_state)?;
+    // M33 — write the new season's calendar row before regenerating
+    // schedule so `Schedule::generate_with_dates` reads real per-year
+    // dates instead of falling back to the const default.
+    let prev_cal = season_calendar_or_default(app.store()?, state.season)?;
+    let next_cal = next_calendar_from_previous(&prev_cal, next_season.0 as u16);
+    app.store()?.upsert_season_calendar(&next_cal)?;
     // Drop the OLD season's schedule rows (history stays in `games`),
     // then generate fresh games for the new year.
     app.store()?.clear_schedule_for_season(state.season)?;
@@ -5255,6 +5335,36 @@ mod tests {
         Conference, Division, GMArchetype, GMPersonality, Player, PlayerId, Position, Ratings, Team,
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn next_calendar_from_previous_shifts_year_and_keeps_offsets() {
+        use chrono::Datelike;
+        // Anchor: 2025-26 = Tuesday Oct 21 → ends Apr 12 → deadline Feb 5.
+        let prev = SeasonCalendar::default_for(2026);
+        let next = next_calendar_from_previous(&prev, 2027);
+        assert_eq!(next.season_year, 2027);
+        // Start lands on a Tuesday on/after the +365 day shift.
+        assert_eq!(
+            next.start_date.weekday(),
+            chrono::Weekday::Tue,
+            "start should snap forward to a Tuesday"
+        );
+        // 174-day window between start and end matches the legacy default.
+        assert_eq!(
+            next.end_date.signed_duration_since(next.start_date).num_days(),
+            174
+        );
+        // Deadline sits 107 days into the season (matches Feb 5 in 2025-26).
+        assert_eq!(
+            next.trade_deadline
+                .signed_duration_since(next.start_date)
+                .num_days(),
+            107
+        );
+        // Cup / all-star day offsets carry forward unchanged.
+        assert_eq!(next.all_star_day, prev.all_star_day);
+        assert_eq!(next.cup_final_day, prev.cup_final_day);
+    }
 
     /// Constructs a minimal AppState backed by a fresh temp DB for unit-style
     /// runs of `run_ai_free_agency`. Returns the dir-guard so the temp file
