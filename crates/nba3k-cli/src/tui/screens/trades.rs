@@ -1454,27 +1454,27 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
     }
 
     if CACHE.with(|c| c.borrow().user_picks.is_none()) {
-        let picks = build_pick_options(app, tui.user_team)?;
+        let picks = build_pick_options(app, tui.user_team, tui.god_mode)?;
         CACHE.with(|c| c.borrow_mut().user_picks = Some(picks));
     }
     if CACHE.with(|c| c.borrow().target_picks.is_none()) {
         let target = CACHE.with(|c| c.borrow().target_team);
         if let Some(team) = target {
-            let picks = build_pick_options(app, team)?;
+            let picks = build_pick_options(app, team, tui.god_mode)?;
             CACHE.with(|c| c.borrow_mut().target_picks = Some(picks));
         }
     }
     if CACHE.with(|c| c.borrow().third_picks.is_none()) {
         let third = CACHE.with(|c| c.borrow().third_team);
         if let Some(team) = third {
-            let picks = build_pick_options(app, team)?;
+            let picks = build_pick_options(app, team, tui.god_mode)?;
             CACHE.with(|c| c.borrow_mut().third_picks = Some(picks));
         }
     }
     Ok(())
 }
 
-fn build_pick_options(app: &mut AppState, team: TeamId) -> Result<Vec<PickOption>> {
+fn build_pick_options(app: &mut AppState, team: TeamId, god_mode: bool) -> Result<Vec<PickOption>> {
     let state = app
         .store()?
         .load_season_state()?
@@ -1500,7 +1500,7 @@ fn build_pick_options(app: &mut AppState, team: TeamId) -> Result<Vec<PickOption
                     .unwrap_or_else(|| format!("T{}", p.original_team.0));
                 format!("via {}", a)
             };
-            let stars = crate::commands::pick_stars(&p, state.season);
+            let stars = crate::commands::pick_stars(&p, state.season, god_mode);
             let label = format!("{} R{} ({})", p.season.0, p.round, via);
             PickOption {
                 id: p.id,

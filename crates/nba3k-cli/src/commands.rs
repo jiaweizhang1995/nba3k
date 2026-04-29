@@ -2498,14 +2498,20 @@ pub(crate) fn render_pick(pick: &DraftPick, abbrev: &HashMap<TeamId, String>) ->
 /// scan of any free-text protection prose. Standings are intentionally
 /// ignored so the rating degrades cleanly to offline saves with 0-0
 /// records.
-pub(crate) fn pick_stars(pick: &DraftPick, current_season: SeasonId) -> Option<u8> {
-    if let Some(text) = pick.protection_text.as_ref() {
-        let lower = text.to_lowercase();
-        if lower.contains("not tradable")
-            || lower.contains("frozen pick")
-            || lower.contains("non-tradable")
-        {
-            return None;
+///
+/// `god_mode` callers bypass the "Not Tradable" / "FROZEN" gate — in god
+/// mode every asset is tradable, mirroring the CBA-bypass behavior of the
+/// validator.
+pub(crate) fn pick_stars(pick: &DraftPick, current_season: SeasonId, god_mode: bool) -> Option<u8> {
+    if !god_mode {
+        if let Some(text) = pick.protection_text.as_ref() {
+            let lower = text.to_lowercase();
+            if lower.contains("not tradable")
+                || lower.contains("frozen pick")
+                || lower.contains("non-tradable")
+            {
+                return None;
+            }
         }
     }
     let years_out = (pick.season.0 as i32 - current_season.0 as i32).max(0);
