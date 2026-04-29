@@ -12,8 +12,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{Datelike, Duration, NaiveDate};
 use nba3k_core::{
-    GameId, GameMode, InjurySeverity, InjuryStatus, PlayerId, PlayerSeasonStats, SeasonCalendar,
-    SeasonId, SeasonPhase, SeasonState, TeamId,
+    GameMode, InjurySeverity, InjuryStatus, PlayerId, PlayerSeasonStats, SeasonCalendar, SeasonId,
+    SeasonPhase, SeasonState, TeamId,
 };
 use nba3k_scrape::cache::Cache;
 use nba3k_scrape::sources::espn;
@@ -25,24 +25,30 @@ use std::time::Duration as StdDuration;
 #[derive(Debug, Default, Clone)]
 pub struct TodayReport {
     pub teams_loaded: u32,
-    pub games_played: u32,
     pub games_unplayed: u32,
     pub players_with_stats: u32,
     pub injuries_marked: u32,
     pub roster_moves_applied: u32,
-    pub news_backfilled: u32,
 }
 
 /// Build a fresh save populated from today's real-world NBA state.
+///
+/// Matches NBA 2K MyNBA "Start Today" semantics — a snapshot, not a
+/// historical replay. We import the *starting point* (current standings,
+/// rosters, injuries, season-to-date stats, future schedule) and let the
+/// user simulate forward from there. We do NOT backfill past played
+/// games or trade-news history; those live in real-life and the user
+/// already lived them.
 ///
 /// Steps:
 /// 1. Pre-flight HEAD ESPN (5 s timeout) — bail loud on no network.
 /// 2. Copy seed → out.
 /// 3. Open store (refinery runs V016/V017).
-/// 4. ESPN: teams + standings + per-day scoreboards + per-team rosters +
-///    league-wide player stats + trade news.
+/// 4. ESPN: teams + standings + per-day scoreboards (today..end_date only)
+///    + per-team rosters + league-wide player stats.
 /// 5. Map abbrev → TeamId via seed; resolve season window from V016 default.
-/// 6. Replace standings, schedule, rosters, injuries, season stats, news.
+/// 6. Replace standings + future schedule + rosters + injuries + season
+///    stats. Past games and trade-news feed are intentionally not imported.
 /// 7. Write SeasonState (phase derived from today vs calendar).
 /// 8. Run the same starter / role / FA seed pass `cmd_new` does.
 pub fn build_today_save(
@@ -185,72 +191,54 @@ fn run_import(
         }
     }
 
-    // (5) Schedule: replace per-season rows. Past games carry minimal
-    // box scores so `record_game` produces final scores in the games
-    // table. Future games stay in `schedule` with played=0.
+    // (5) Future schedule. Matches NBA 2K's "Start Today" snapshot model —
+    // we only import games dated *today onwards*. Past games are left out
+    // entirely: real-life standings already capture them, and the user
+    // already lived them. We clear the seed-anchored schedule for this
+    // season then insert only the remaining real-world dates.
     store.clear_schedule_for_season(season)?;
     let mut schedule_rows: Vec<(u64, SeasonId, NaiveDate, TeamId, TeamId)> = Vec::new();
-    let mut completed_games: Vec<(u64, NaiveDate, TeamId, TeamId, u16, u16)> = Vec::new();
     let id_offset: u64 = (season.0 as u64) * 10_000;
     let mut game_seq: u64 = 0;
 
-    let mut date = cal.start_date;
+    let mut date = today;
     while date <= cal.end_date {
         if let Some(b) = espn::fetch_scoreboard(&cache, date)? {
             let games = espn::parse_scoreboard(&b)?;
             for g in games {
+                // ESPN tags games by UTC; a West-coast night game can flip
+                // to the next calendar day. Skip anything that resolves to
+                // a date earlier than today so we don't re-import the
+                // game that just ended.
+                if g.date < today {
+                    continue;
+                }
                 let home_id = team_map.get(&g.home_abbrev).map(|(t, _)| *t);
                 let away_id = team_map.get(&g.away_abbrev).map(|(t, _)| *t);
                 let (Some(home), Some(away)) = (home_id, away_id) else {
                     continue;
                 };
+                // Skip games already marked completed (a game on `today`
+                // that already finished by the time we ran). Sim engine
+                // will pick up the next unplayed entry.
+                if g.completed {
+                    continue;
+                }
                 let game_id = id_offset + game_seq;
                 game_seq += 1;
                 schedule_rows.push((game_id, season, g.date, home, away));
-                if g.completed {
-                    if let (Some(hp), Some(ap)) = (g.home_pts, g.away_pts) {
-                        completed_games.push((game_id, g.date, home, away, hp, ap));
-                    }
-                }
             }
         }
         date += Duration::days(1);
     }
-    if schedule_rows.is_empty() {
-        bail!("ESPN scoreboard loop produced zero games — schema may have changed");
+    // An empty schedule is fine if the regular season is over — phase will
+    // resolve to Playoffs (or beyond) and the user can drive `playoffs sim`.
+    if !schedule_rows.is_empty() {
+        store
+            .bulk_insert_schedule(&schedule_rows)
+            .context("bulk insert schedule")?;
     }
-    store
-        .bulk_insert_schedule(&schedule_rows)
-        .context("bulk insert schedule")?;
-
-    // Mark completed games as played=1 and write a minimal `games` row
-    // (final score only — per-player box scores for past games are not
-    // imported; downstream code tolerates empty PlayerLine vecs).
-    let played_count = completed_games.len() as u32;
-    for (gid, gd, home, away, hp, ap) in &completed_games {
-        store.conn().execute(
-            "UPDATE schedule SET played = 1 WHERE game_id = ?1",
-            rusqlite::params![*gid as i64],
-        )?;
-        let result = nba3k_core::GameResult {
-            id: GameId(*gid),
-            season,
-            date: *gd,
-            home: *home,
-            away: *away,
-            home_score: *hp,
-            away_score: *ap,
-            box_score: nba3k_core::BoxScore {
-                home_lines: vec![],
-                away_lines: vec![],
-            },
-            overtime_periods: 0,
-            is_playoffs: false,
-        };
-        store.record_game(&result)?;
-    }
-    report.games_played = played_count;
-    report.games_unplayed = (schedule_rows.len() as u32).saturating_sub(played_count);
+    report.games_unplayed = schedule_rows.len() as u32;
 
     // (6) Player season stats: name-match against existing players. Build
     // a lower-cased name index once. Unmatched names are warned but not
@@ -326,24 +314,10 @@ fn run_import(
     report.roster_moves_applied = roster_moves;
     report.injuries_marked = injuries_marked;
 
-    // (8) News (trade type), capped at 30-day window.
-    if let Some(nb) = espn::fetch_news_trades(&cache, 50)? {
-        let items = espn::parse_news_trades(&nb)?;
-        let cutoff = today - Duration::days(30);
-        let day_index = today.signed_duration_since(cal.start_date).num_days() as u32;
-        let mut count = 0_u32;
-        for it in items {
-            if it.published.naive_utc().date() < cutoff {
-                continue;
-            }
-            store.record_news(season, day_index, "trade", &it.headline, Some(&it.link))?;
-            count += 1;
-            if count >= 50 {
-                break;
-            }
-        }
-        report.news_backfilled = count;
-    }
+    // (8) News feed: deliberately not backfilled. Real-life trade/signing
+    // news is something the player already lived; importing it would just
+    // spam the GM inbox at game-start. Sim from today onward will populate
+    // the news feed organically.
 
     // (9) SeasonState. Phase derived from today vs the calendar.
     let user_team_id = store

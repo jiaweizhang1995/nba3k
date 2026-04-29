@@ -183,17 +183,15 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
         let report = crate::from_today::build_today_save(&path, &args.team, mode, today)?;
         app.open_path(path.clone())?;
         println!(
-            "created live save {} (team={} mode={})\n  teams_loaded={} games_played={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={} news_backfilled={}",
+            "created live save {} (team={} mode={})\n  teams_loaded={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={}",
             path.display(),
             args.team.to_uppercase(),
             mode,
             report.teams_loaded,
-            report.games_played,
             report.games_unplayed,
             report.players_with_stats,
             report.injuries_marked,
             report.roster_moves_applied,
-            report.news_backfilled,
         );
         return Ok(());
     }
