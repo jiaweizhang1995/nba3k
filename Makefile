@@ -24,7 +24,7 @@ help:
 	@echo "  clean-cache     remove data/cache/espn/ (force re-fetch)"
 	@echo ""
 	@echo "  new             create $(EXAMPLE_SAVE) via live ESPN import (default)"
-	@echo "  live            same as `new` (alias)"
+	@echo "  live            same as 'new' (alias)"
 	@echo "  tui             open $(EXAMPLE_SAVE) in TUI"
 	@echo "  scripted-season replay tests/scripts/season1.txt against a fresh save"
 	@echo "  seed            rebuild data/seed_2025_26.sqlite (slow, ~3 min)"
