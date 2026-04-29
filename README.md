@@ -223,7 +223,7 @@ nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 | `extend <player> --salary 25 --years 4` | 自队球员续约谈判（士气影响接受率）|
 | `fa list` | 自由球员市场 |
 | `fa sign <name>` | 签自由球员 |
-| `fa cut <name>` | 裁人 |
+| `fa cut <name>` | 裁人。新赛季开赛前如果你的大名单超过 15 人，sim-day 会被拦下，必须先 `fa cut` 到 15 才能开赛 |
 | `coach show/fire/pool` | 主教练查看 / 解雇 / 候选池 |
 
 ### 选秀
@@ -284,6 +284,24 @@ nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 - **god**：跳过 CBA 校验、AI 强制接受、可手动改评分 / 合同 / 抽彩票。
 - **hardcore**：限制更严的 standard（保留位）。
 - **sandbox**：跳过校验但保留 AI 拒绝（保留位）。
+
+## 大名单规则
+
+NBA 2025-26 CBA 把大名单分成两个窗口；`nba3k` 按当前赛季阶段分别生效：
+
+| 阶段 | 大名单上限（每队） | 备注 |
+|------|--------------------|------|
+| OffSeason / FreeAgency / Draft / PreSeason | **21** | 训练营窗口，模拟 NBA 训练营+常规合同+双向合同+Exhibit 10 名额（本档暂不区分双向合同，统一计 21）|
+| Regular / TradeDeadlinePassed / Playoffs | **18** | 15 标准 + 3 双向；交易后名单必须落在 13-18 |
+
+**新赛季开赛门**：从 PreSeason 翻 Regular 时，如果你的大名单超过 **15 人**，`sim-day` 会被拦下：
+
+```
+regular season start blocked: BOS has 16 players (limit 15).
+Cut a player with `fa cut <name>` until you are at 15. AI teams are not checked.
+```
+
+用 `fa cut <name>` 减到 15 即可开赛。AI 队不在这个门里——他们可以带着 16 人进入常规赛，本档不做 AI 自动裁员（`--god` / `sandbox` 跳过校验）。
 
 ## 数据来源
 

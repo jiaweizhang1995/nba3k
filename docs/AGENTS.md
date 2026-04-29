@@ -47,7 +47,7 @@ These are non-negotiable. The repo will reject changes that break them.
 
 ## How to commit
 
-- Tests must pass before marking a task done. Baseline (post-M35): **321 unit + 2 ignored** across the workspace. Each task either holds or grows the count.
+- Tests must pass before marking a task done. Baseline (post-M35 + roster bugfix): **329 unit + 2 ignored** across the workspace. Each task either holds or grows the count.
 - Use `git commit` not `git commit --amend` unless the user explicitly asked. Co-author trailer is in CLAUDE.md.
 - Do NOT push to remote unless the user asks.
 

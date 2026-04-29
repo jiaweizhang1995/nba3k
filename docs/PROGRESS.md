@@ -1,18 +1,19 @@
 # PROGRESS.md — where the project is right now
 
-> Generated at the M35 / `2d7a3cd` mark. Keep this file in sync with
-> `phases/PHASES.md` (the per-milestone log) on every milestone close.
+> Generated at the M35 / `2d7a3cd` mark, refreshed after roster-cap bugfix
+> (`7973832`). Keep this file in sync with `phases/PHASES.md` (the
+> per-milestone log) on every milestone close.
 
 ## Current state
 
 | | |
 |---|---|
 | Current binary | `nba3k` (CLI + REPL + TUI surfaces) |
-| Workspace tests | **321 passed + 2 ignored** across 72 suites |
-| Latest milestone | **M35 — Start From Today snapshot semantics** |
-| Latest commit | `6abff80 fix(tui): align center-position rows in trade builder` |
+| Workspace tests | **329 passed + 2 ignored** across 72 suites |
+| Latest milestone | **M35 — Start From Today snapshot semantics** + post-M35 roster bugfix |
+| Latest commit | `7973832 fix(roster): phase-aware roster bounds + season-start gate; drop --season from new-game` |
 | Schema high-water mark | **V017** (next migration uses V018) |
-| Default `new` behavior | **Live ESPN snapshot** (post-M34); pass `--offline` for the seed-anchored fresh-October path |
+| Default `new` behavior | **Live ESPN snapshot** (post-M34); pass `--offline` for the seed-anchored fresh-October path. The wizard no longer asks for a starting season — the bundled seed is anchored to 2025-26. |
 
 ## What works end-to-end
 
@@ -44,6 +45,10 @@ and per-milestone docs.
 ## Recent commits (most recent first)
 
 ```
+7973832 fix(roster): phase-aware roster bounds + season-start gate; drop --season from new-game
+3072745 fix(makefile): escape backticks in `make help` output
+9822609 docs: normalize project docs into docs/ + Makefile
+82aa1f7 chore: workspace rustfmt + fix clippy logic-bug in cmd_sim_pause
 6abff80 fix(tui): align center-position rows in trade builder
 2d7a3cd M35: snapshot semantics for --from-today (match NBA 2K behavior)
 01db555 M34: live ESPN start is the default
