@@ -29,6 +29,7 @@ pub struct TodayReport {
     pub players_with_stats: u32,
     pub injuries_marked: u32,
     pub roster_moves_applied: u32,
+    pub picks_loaded: u32,
 }
 
 /// Build a fresh save populated from today's real-world NBA state.
@@ -352,6 +353,7 @@ fn run_import(
         crate::commands::assign_initial_roles(&store, team.id)?;
     }
     crate::commands::seed_free_agents(&mut store)?;
+    report.picks_loaded = crate::commands::seed_live_or_default_picks(&store, season)?;
 
     Ok(report)
 }

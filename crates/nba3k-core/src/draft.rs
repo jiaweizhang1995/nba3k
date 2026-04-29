@@ -10,6 +10,13 @@ pub enum Protection {
     Unprotected,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectionHistoryEntry {
+    pub season: SeasonId,
+    pub original_team_record: String,
+    pub action: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DraftPick {
     pub id: DraftPickId,
@@ -18,6 +25,9 @@ pub struct DraftPick {
     pub season: SeasonId,
     pub round: u8,
     pub protections: Protection,
+    pub protection_text: Option<String>,
+    pub resolved: bool,
+    pub protection_history: Vec<ProtectionHistoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

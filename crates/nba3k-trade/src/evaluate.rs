@@ -19,9 +19,9 @@
 
 use crate::snapshot::LeagueSnapshot;
 use crate::valuation::value_side;
-use nba3k_core::{
-    Cents, Coach, GMTraits, PlayerRole, RejectReason, TeamId, TradeEvaluation, TradeOffer, Verdict,
-};
+use nba3k_core::{Cents, GMTraits, RejectReason, TeamId, TradeEvaluation, TradeOffer, Verdict};
+#[cfg(test)]
+use nba3k_core::{Coach, PlayerRole};
 use rand::RngCore;
 use rand_distr::{Distribution, Normal};
 
@@ -204,6 +204,7 @@ fn sum_sides(
 /// Resolve the evaluator's base GM traits from their team. Falls back to
 /// neutral defaults if the team is missing from the snapshot (shouldn't
 /// happen in practice but keeps evaluation total).
+#[allow(dead_code)]
 fn evaluator_traits(evaluator: TeamId, league: &LeagueSnapshot) -> GMTraits {
     league
         .team(evaluator)
@@ -256,6 +257,8 @@ fn short_violation(v: &crate::cba::CbaViolation) -> String {
         AggregationCooldown { .. } => "aggregation cooldown".into(),
         RosterSize { .. } => "roster size".into(),
         Apron2Restriction { .. } => "apron 2 restrictions".into(),
+        PickTooFarOut { .. } => "seven-year rule".into(),
+        StepienViolation { .. } => "stepien rule".into(),
     }
 }
 

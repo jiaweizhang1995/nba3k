@@ -13,7 +13,9 @@
 //! curves below are the seed.
 
 use crate::snapshot::LeagueSnapshot;
-use nba3k_core::{Cents, DraftPick, GMTraits, Player, PlayerRole, SeasonId, TeamId};
+#[cfg(test)]
+use nba3k_core::PlayerRole;
+use nba3k_core::{Cents, DraftPick, GMTraits, Player, SeasonId, TeamId};
 
 /// Convert dollars (whole) to `Cents`.
 fn dollars(d: i64) -> Cents {

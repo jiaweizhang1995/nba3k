@@ -772,6 +772,8 @@ fn cba_cap_rules_passed(violation: &CbaViolation) -> bool {
             | CbaViolation::HardCapTrigger { .. }
             | CbaViolation::NoTradeClause(_)
             | CbaViolation::Apron2Restriction { .. }
+            | CbaViolation::PickTooFarOut { .. }
+            | CbaViolation::StepienViolation { .. }
     )
 }
 
@@ -832,6 +834,12 @@ fn cba_warning_to_text(
         CbaViolation::Apron2Restriction { .. } => t(lang, T::TradesWarnSalaryMatch).to_string(),
         CbaViolation::CashLimitExceeded { .. } => t(lang, T::TradesWarnSalaryMatch).to_string(),
         CbaViolation::AggregationCooldown { .. } => t(lang, T::TradesWarnSalaryMatch).to_string(),
+        CbaViolation::PickTooFarOut { year, .. } => {
+            format!("⚠ seven-year rule blocks the {year} pick.")
+        }
+        CbaViolation::StepienViolation { year1, year2, .. } => {
+            format!("⚠ Stepien rule: consecutive missing 1sts in {year1} and {year2}.")
+        }
     }
 }
 
@@ -859,7 +867,9 @@ fn violation_team(violation: &CbaViolation) -> TeamId {
         | CbaViolation::CashLimitExceeded { team, .. }
         | CbaViolation::AggregationCooldown { team, .. }
         | CbaViolation::RosterSize { team, .. }
-        | CbaViolation::Apron2Restriction { team } => *team,
+        | CbaViolation::Apron2Restriction { team }
+        | CbaViolation::PickTooFarOut { team, .. }
+        | CbaViolation::StepienViolation { team, .. } => *team,
         CbaViolation::NoTradeClause(_) => TeamId(0),
     }
 }
@@ -2129,6 +2139,8 @@ fn submit_builder(app: &mut AppState, tui: &mut TuiApp, force: bool) -> Result<b
                     to: target.abbrev.clone(),
                     send,
                     receive: first_send,
+                    send_picks: Vec::new(),
+                    receive_picks: Vec::new(),
                     json: false,
                     force,
                 },
@@ -2304,6 +2316,9 @@ fn cba_gm_reject_dialog(
             )
         }
         CbaViolation::CashLimitExceeded { .. } | CbaViolation::AggregationCooldown { .. } => {
+            format!("{} {}", target_abbrev, t(lang, T::TradesGmRejectCba))
+        }
+        CbaViolation::PickTooFarOut { .. } | CbaViolation::StepienViolation { .. } => {
             format!("{} {}", target_abbrev, t(lang, T::TradesGmRejectCba))
         }
     }

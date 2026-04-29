@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use nba3k_core::GameMode;
 use nba3k_store::Store;
 use std::path::PathBuf;
 
@@ -44,13 +43,5 @@ impl AppState {
         let s = Store::open(&path)?;
         self.store = Some(s);
         Ok(())
-    }
-
-    pub fn effective_mode(&self, on_save: GameMode) -> GameMode {
-        if self.force_god {
-            GameMode::God
-        } else {
-            on_save
-        }
     }
 }

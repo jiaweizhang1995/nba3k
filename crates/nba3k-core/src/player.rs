@@ -120,6 +120,7 @@ impl Ratings {
     /// Bridge constructor taking the legacy M2 8-attribute shape. Spreads
     /// each legacy value across its 21-attribute cluster. Used by test
     /// fixtures while M5 lands; new code should populate fields directly.
+    #[allow(clippy::too_many_arguments)]
     pub fn legacy(
         shooting_3: u8,
         shooting_mid: u8,
@@ -174,20 +175,15 @@ pub enum InjurySeverity {
 /// Player role per NBA 2K MyGM/MyNBA. Drives morale, promised-PT contract
 /// clauses, and chemistry calc (role-vs-archetype mismatch). The variant
 /// `Prospect` exists for draftees / two-way G-League call-ups.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlayerRole {
     Star,
     Starter,
     SixthMan,
+    #[default]
     RolePlayer,
     BenchWarmer,
     Prospect,
-}
-
-impl Default for PlayerRole {
-    fn default() -> Self {
-        Self::RolePlayer
-    }
 }
 
 impl std::fmt::Display for PlayerRole {

@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 /// Coaching scheme. NBA 2K's published list, 8 variants.
 /// Used for `scheme_fit(player, coach)` in chemistry calc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Scheme {
+    #[default]
     Balanced,
     Defense,
     GritAndGrind,
@@ -12,12 +13,6 @@ pub enum Scheme {
     PostCentric,
     Triangle,
     SevenSeconds,
-}
-
-impl Default for Scheme {
-    fn default() -> Self {
-        Self::Balanced
-    }
 }
 
 impl std::fmt::Display for Scheme {

@@ -11,8 +11,8 @@ use chrono::NaiveDate;
 use indexmap::IndexMap;
 use nba3k_core::{
     Cents, Conference, Contract, ContractYear, Division, DraftPick, DraftPickId, GMArchetype,
-    GMPersonality, LeagueYear, Player, PlayerId, Position, Ratings, SeasonId, SeasonPhase, Team,
-    TeamId, TradeAssets, TradeId, TradeOffer,
+    GMPersonality, LeagueYear, Player, PlayerId, Position, Protection, Ratings, SeasonId,
+    SeasonPhase, Team, TeamId, TradeAssets, TradeId, TradeOffer,
 };
 use nba3k_trade::snapshot::{LeagueSnapshot, TeamRecordSummary};
 use std::collections::HashMap;
@@ -162,6 +162,50 @@ pub fn assets_with_cash(players: &[u32], cash: Cents) -> TradeAssets {
         players_out: players.iter().copied().map(PlayerId).collect(),
         picks_out: Vec::new(),
         cash_out: cash,
+    }
+}
+
+pub fn assets_picks(picks: &[DraftPickId]) -> TradeAssets {
+    TradeAssets {
+        players_out: Vec::new(),
+        picks_out: picks.to_vec(),
+        cash_out: Cents::ZERO,
+    }
+}
+
+pub fn add_pick(
+    world: &mut World,
+    season: SeasonId,
+    round: u8,
+    original_team: TeamId,
+    current_owner: TeamId,
+) -> DraftPickId {
+    let id = DraftPickId((season.0 as u32) * 1000 + (round as u32) * 100 + original_team.0 as u32);
+    world.picks.insert(
+        id,
+        DraftPick {
+            id,
+            original_team,
+            current_owner,
+            season,
+            round,
+            protections: Protection::Unprotected,
+            protection_text: None,
+            resolved: false,
+            protection_history: Vec::new(),
+        },
+    );
+    id
+}
+
+pub fn pad_picks(world: &mut World, teams: &[TeamId], start: SeasonId, years: u8) {
+    for offset in 0..years {
+        let season = SeasonId(start.0 + offset as u16);
+        for &team in teams {
+            for round in 1..=2 {
+                add_pick(world, season, round, team, team);
+            }
+        }
     }
 }
 

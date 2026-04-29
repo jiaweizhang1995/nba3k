@@ -21,7 +21,8 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration as StdDuration;
 
 /// Default seed DB shipped by `nba3k-scrape`. CLI `new` looks here unless overridden.
 pub(crate) const DEFAULT_SEED_PATH: &str = "data/seed_2025_26.sqlite";
@@ -56,6 +57,22 @@ struct FreeAgentSeed {
     potential: u8,
 }
 
+#[derive(Debug, Deserialize)]
+struct PickSwapOverrides {
+    #[serde(default)]
+    swap: Vec<PickSwapOverride>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PickSwapOverride {
+    year: u16,
+    original_team: String,
+    round: u8,
+    current_owner: String,
+    #[serde(default)]
+    protection: Option<String>,
+}
+
 pub fn dispatch(app: &mut AppState, cmd: Command) -> Result<()> {
     match cmd {
         Command::New(args) => cmd_new(app, args),
@@ -75,6 +92,7 @@ pub fn dispatch(app: &mut AppState, cmd: Command) -> Result<()> {
         Command::RosterSetRole { player, role } => cmd_roster_set_role(app, &player, &role),
         Command::Player { name, json } => cmd_player(app, &name, json),
         Command::Trade(args) => cmd_trade(app, args.action),
+        Command::Picks { team, season, json } => cmd_picks(app, team, season, json),
         Command::Dev(args) => cmd_dev(app, args.action),
         Command::Draft(args) => match args.action {
             DraftAction::Board(JsonFlag { json }) => cmd_draft_board(app, json),
@@ -183,7 +201,7 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
         let report = crate::from_today::build_today_save(&path, &args.team, mode, today)?;
         app.open_path(path.clone())?;
         println!(
-            "created live save {} (team={} mode={})\n  teams_loaded={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={}",
+            "created live save {} (team={} mode={})\n  teams_loaded={} games_unplayed={} players_with_stats={} injuries_marked={} roster_moves_applied={} picks_loaded={}",
             path.display(),
             args.team.to_uppercase(),
             mode,
@@ -192,6 +210,7 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
             report.players_with_stats,
             report.injuries_marked,
             report.roster_moves_applied,
+            report.picks_loaded,
         );
         return Ok(());
     }
@@ -289,6 +308,8 @@ fn cmd_new(app: &mut AppState, args: NewArgs) -> Result<()> {
             assign_initial_roles(store, team.id)?;
         }
         seed_free_agents(store)?;
+        seed_default_picks(store, season)?;
+        apply_pick_swaps_toml(store, Path::new("data/pick_swaps_overrides.toml"))?;
     }
 
     // Generate + persist 82-game schedule so subsequent sim-day commands can
@@ -355,6 +376,163 @@ pub fn seed_free_agents(store: &mut nba3k_store::Store) -> Result<u32> {
     }
 
     Ok(inserted)
+}
+
+pub(crate) fn seed_live_or_default_picks(
+    store: &nba3k_store::Store,
+    season: SeasonId,
+) -> Result<u32> {
+    let inserted = seed_default_picks(store, season)?;
+    let cache_root = std::env::var("NBA3K_CACHE_DIR")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data/cache"));
+    match nba3k_scrape::sources::spotrac::SpotracClient::new(
+        cache_root,
+        StdDuration::from_secs(60 * 60 * 24 * 7),
+    )
+    .and_then(|client| client.fetch_future_picks())
+    {
+        Ok(raw_picks) => {
+            let mut overlaid = 0_u32;
+            for raw in raw_picks {
+                let Some(original_team) = store.find_team_by_abbrev(&raw.original_team_abbrev)?
+                else {
+                    tracing::warn!(team = %raw.original_team_abbrev, "Spotrac pick original team not in seed");
+                    continue;
+                };
+                let Some(current_owner) = store.find_team_by_abbrev(&raw.current_owner_abbrev)?
+                else {
+                    tracing::warn!(team = %raw.current_owner_abbrev, "Spotrac pick current owner not in seed");
+                    continue;
+                };
+                let pick = DraftPick {
+                    id: draft_pick_id(SeasonId(raw.year), raw.round, original_team),
+                    original_team,
+                    current_owner,
+                    season: SeasonId(raw.year),
+                    round: raw.round,
+                    protections: protection_from_text(raw.protection_text.as_deref()),
+                    protection_text: raw.protection_text,
+                    resolved: false,
+                    protection_history: Vec::new(),
+                };
+                store.upsert_draft_pick(&pick)?;
+                overlaid += 1;
+            }
+            apply_pick_swaps_toml(store, Path::new("data/pick_swaps_overrides.toml"))?;
+            Ok(overlaid)
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "spotrac unavailable, seeding vanilla picks");
+            apply_pick_swaps_toml(store, Path::new("data/pick_swaps_overrides.toml"))?;
+            Ok(inserted)
+        }
+    }
+}
+
+pub(crate) fn seed_default_picks(
+    store: &nba3k_store::Store,
+    current_season: SeasonId,
+) -> Result<u32> {
+    let teams = store.list_teams()?;
+    let mut count = 0_u32;
+    for offset in 0..7_u16 {
+        let season = SeasonId(current_season.0 + offset);
+        for team in &teams {
+            for round in 1..=2_u8 {
+                let pick = DraftPick {
+                    id: draft_pick_id(season, round, team.id),
+                    original_team: team.id,
+                    current_owner: team.id,
+                    season,
+                    round,
+                    protections: Protection::Unprotected,
+                    protection_text: None,
+                    resolved: false,
+                    protection_history: Vec::new(),
+                };
+                store.upsert_if_absent_draft_pick(&pick)?;
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
+pub(crate) fn apply_pick_swaps_toml(store: &nba3k_store::Store, path: &Path) -> Result<u32> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let parsed: PickSwapOverrides = toml::from_str(
+        &std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?,
+    )
+    .with_context(|| format!("parse {}", path.display()))?;
+    let mut applied = 0_u32;
+    for row in parsed.swap {
+        if row.round != 1 && row.round != 2 {
+            bail!("{}: pick override round must be 1 or 2", path.display());
+        }
+        let original = resolve_team(store, &row.original_team)?;
+        let owner = resolve_team(store, &row.current_owner)?;
+        let mut pick = store
+            .find_draft_pick(SeasonId(row.year), original, row.round)?
+            .ok_or_else(|| {
+                anyhow!(
+                    "{}: no pick row for {} R{} {}",
+                    path.display(),
+                    row.year,
+                    row.round,
+                    row.original_team
+                )
+            })?;
+        pick.current_owner = owner;
+        pick.protections = protection_from_text(row.protection.as_deref());
+        pick.protection_text = row.protection.filter(|s| {
+            !matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "unprotected" | "none"
+            )
+        });
+        store.upsert_draft_pick(&pick)?;
+        applied += 1;
+    }
+    Ok(applied)
+}
+
+fn draft_pick_id(season: SeasonId, round: u8, original_team: TeamId) -> DraftPickId {
+    DraftPickId((season.0 as u32) * 1000 + (round as u32) * 100 + original_team.0 as u32)
+}
+
+fn protection_from_text(text: Option<&str>) -> Protection {
+    let Some(text) = text else {
+        return Protection::Unprotected;
+    };
+    let lower = text.trim().to_ascii_lowercase();
+    if lower.is_empty() || lower == "unprotected" || lower == "none" {
+        return Protection::Unprotected;
+    }
+    if lower.contains("lottery") {
+        return Protection::LotteryProtected;
+    }
+    if let Some(n) = parse_top_n_protection(&lower) {
+        return Protection::TopNProtected(n);
+    }
+    Protection::Unprotected
+}
+
+fn parse_top_n_protection(lower: &str) -> Option<u8> {
+    for marker in ["top-", "top ", "top"] {
+        let Some(pos) = lower.find(marker) else {
+            continue;
+        };
+        let rest = &lower[pos + marker.len()..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u8>() {
+            return Some(n);
+        }
+    }
+    None
 }
 
 fn ratings_from_overall(overall: u8, pos: Position) -> Ratings {
@@ -2240,6 +2418,93 @@ pub fn cmd_player(app: &mut AppState, name: &str, as_json: bool) -> Result<()> {
     Ok(())
 }
 
+fn cmd_picks(
+    app: &mut AppState,
+    team: Option<String>,
+    season: Option<u16>,
+    as_json: bool,
+) -> Result<()> {
+    let store = app.store()?;
+    let state = store
+        .load_season_state()?
+        .ok_or_else(|| anyhow!("no season_state"))?;
+    let team_id = match team {
+        Some(abbrev) => resolve_team(store, &abbrev)?,
+        None => state.user_team,
+    };
+    let team_abbrev = store
+        .team_abbrev(team_id)?
+        .unwrap_or_else(|| format!("T{}", team_id.0));
+    let teams = store.list_teams()?;
+    let abbrev: HashMap<TeamId, String> = teams.iter().map(|t| (t.id, t.abbrev.clone())).collect();
+    let mut picks: Vec<DraftPick> = store
+        .all_picks()?
+        .into_iter()
+        .filter(|p| p.current_owner == team_id && !p.resolved)
+        .filter(|p| season.map(|s| p.season.0 == s).unwrap_or(true))
+        .collect();
+    picks.sort_by_key(|p| (p.season.0, p.round, p.original_team.0));
+    if as_json {
+        let arr: Vec<_> = picks
+            .iter()
+            .map(|p| {
+                json!({
+                    "id": p.id.0,
+                    "season": p.season.0,
+                    "round": p.round,
+                    "original_team": abbrev.get(&p.original_team).cloned().unwrap_or_default(),
+                    "current_owner": abbrev.get(&p.current_owner).cloned().unwrap_or_default(),
+                    "protection": protection_label(p),
+                    "protection_text": p.protection_text.clone(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&arr)?);
+    } else {
+        println!("Draft picks — {}:", team_abbrev);
+        for p in &picks {
+            println!("  {}", render_pick(p, &abbrev));
+        }
+    }
+    Ok(())
+}
+
+fn render_pick(pick: &DraftPick, abbrev: &HashMap<TeamId, String>) -> String {
+    let original = abbrev
+        .get(&pick.original_team)
+        .cloned()
+        .unwrap_or_else(|| format!("T{}", pick.original_team.0));
+    let via = if pick.original_team == pick.current_owner {
+        "own".to_string()
+    } else {
+        format!("via {}", original)
+    };
+    let protection = protection_label(pick);
+    if protection == "unprotected" {
+        format!("{} R{} — {}", pick.season.0, pick.round, via)
+    } else {
+        format!(
+            "{} R{} — {} ({})",
+            pick.season.0, pick.round, via, protection
+        )
+    }
+}
+
+fn protection_label(pick: &DraftPick) -> String {
+    if let Some(text) = pick
+        .protection_text
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        return text.clone();
+    }
+    match pick.protections {
+        Protection::Unprotected => "unprotected".to_string(),
+        Protection::LotteryProtected => "lottery-protected".to_string(),
+        Protection::TopNProtected(n) => format!("top-{n} protected"),
+    }
+}
+
 // ----------------------------------------------------------------------
 // LeagueSnapshot construction
 // ----------------------------------------------------------------------
@@ -2327,9 +2592,21 @@ fn cmd_trade(app: &mut AppState, action: TradeAction) -> Result<()> {
             to,
             send,
             receive,
+            send_picks,
+            receive_picks,
             json,
             force,
-        } => cmd_trade_propose(app, &from, &to, &send, &receive, json, force),
+        } => cmd_trade_propose(
+            app,
+            &from,
+            &to,
+            &send,
+            &receive,
+            &send_picks,
+            &receive_picks,
+            json,
+            force,
+        ),
         TradeAction::List(JsonFlag { json }) => cmd_trade_list(app, json),
         TradeAction::Respond { id, action, json } => {
             cmd_trade_respond(app, TradeId(id), &action, json)
@@ -2382,6 +2659,47 @@ fn resolve_player(store: &nba3k_store::Store, team: TeamId, token: &str) -> Resu
     bail!("no player '{}' on team", token);
 }
 
+fn resolve_pick_asset(
+    store: &nba3k_store::Store,
+    owner: TeamId,
+    token: &str,
+) -> Result<DraftPickId> {
+    let token = token.trim();
+    let parts: Vec<&str> = token.split('-').collect();
+    if parts.len() != 3 {
+        bail!("pick '{}' must use YEAR-R1-ORIGINAL format", token);
+    }
+    let year = parts[0]
+        .parse::<u16>()
+        .with_context(|| format!("invalid pick year in '{}'", token))?;
+    let round = parts[1]
+        .strip_prefix('R')
+        .or_else(|| parts[1].strip_prefix('r'))
+        .ok_or_else(|| anyhow!("pick '{}' round must be R1 or R2", token))?
+        .parse::<u8>()
+        .with_context(|| format!("invalid pick round in '{}'", token))?;
+    if round != 1 && round != 2 {
+        bail!("pick '{}' round must be R1 or R2", token);
+    }
+    let original = resolve_team(store, parts[2])?;
+    let pick = store
+        .find_draft_pick(SeasonId(year), original, round)?
+        .ok_or_else(|| anyhow!("no pick found for '{}'", token))?;
+    if pick.current_owner != owner {
+        let owner_abbrev = store.team_abbrev(pick.current_owner)?.unwrap_or_default();
+        bail!(
+            "pick '{}' is owned by {}, not {}",
+            token,
+            owner_abbrev,
+            store.team_abbrev(owner)?.unwrap_or_default()
+        );
+    }
+    if pick.resolved {
+        bail!("pick '{}' has already been resolved", token);
+    }
+    Ok(pick.id)
+}
+
 fn looks_like_pick_token(s: &str) -> bool {
     // crude: starts with 4 digits then '-'
     let bytes = s.as_bytes();
@@ -2394,6 +2712,8 @@ fn cmd_trade_propose(
     to: &str,
     send: &[String],
     receive: &[String],
+    send_picks: &[String],
+    receive_picks: &[String],
     as_json: bool,
     force: bool,
 ) -> Result<()> {
@@ -2410,11 +2730,17 @@ fn cmd_trade_propose(
 
     let send_clean: Vec<&String> = send.iter().filter(|s| !s.trim().is_empty()).collect();
     let receive_clean: Vec<&String> = receive.iter().filter(|s| !s.trim().is_empty()).collect();
-    if send_clean.is_empty() {
-        bail!("--send requires at least one player");
+    let send_pick_clean: Vec<&String> =
+        send_picks.iter().filter(|s| !s.trim().is_empty()).collect();
+    let receive_pick_clean: Vec<&String> = receive_picks
+        .iter()
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if send_clean.is_empty() && send_pick_clean.is_empty() {
+        bail!("--send or --send-picks requires at least one asset");
     }
-    if receive_clean.is_empty() {
-        bail!("--receive requires at least one player");
+    if receive_clean.is_empty() && receive_pick_clean.is_empty() {
+        bail!("--receive or --receive-picks requires at least one asset");
     }
 
     let send_ids: Vec<PlayerId> = send_clean
@@ -2425,13 +2751,21 @@ fn cmd_trade_propose(
         .iter()
         .map(|t| resolve_player(store, to_id, t))
         .collect::<Result<_>>()?;
+    let send_pick_ids: Vec<DraftPickId> = send_pick_clean
+        .iter()
+        .map(|t| resolve_pick_asset(store, from_id, t))
+        .collect::<Result<_>>()?;
+    let receive_pick_ids: Vec<DraftPickId> = receive_pick_clean
+        .iter()
+        .map(|t| resolve_pick_asset(store, to_id, t))
+        .collect::<Result<_>>()?;
 
     let mut assets_by_team = IndexMap::new();
     assets_by_team.insert(
         from_id,
         TradeAssets {
             players_out: send_ids,
-            picks_out: vec![],
+            picks_out: send_pick_ids,
             cash_out: Cents::ZERO,
         },
     );
@@ -2439,7 +2773,7 @@ fn cmd_trade_propose(
         to_id,
         TradeAssets {
             players_out: receive_ids,
-            picks_out: vec![],
+            picks_out: receive_pick_ids,
             cash_out: Cents::ZERO,
         },
     );
@@ -2607,7 +2941,7 @@ fn run_ai_trade_volume(
     }
 
     // Persist + execute (drop the snapshot first — it borrows the store).
-    drop(snap);
+    let _ = snap;
     drop(snap_owned);
     for offer in &accepted {
         apply_accepted_trade(app, offer)?;
@@ -2820,7 +3154,7 @@ fn run_ai_inbox_offers(
         return Ok(());
     }
 
-    drop(snap);
+    let _ = snap;
     drop(snap_owned);
     let store = app.store()?;
     for offer in pending {
@@ -2896,8 +3230,8 @@ fn trade_headline(offer: &TradeOffer, store: &nba3k_store::Store) -> String {
     }
 }
 
-/// Walk `assets_by_team` and swap player team assignments. For a 2-team
-/// trade A↔B, A's `players_out` move to B and B's `players_out` move to A.
+/// Walk `assets_by_team` and swap player/pick assignments. For a 2-team
+/// trade A↔B, A's outgoing assets move to B and B's outgoing assets move to A.
 /// For 3+ team trades each team sends to the next team in iteration order
 /// (round-robin) — same convention the trade-engine uses internally.
 fn apply_accepted_trade(app: &mut AppState, offer: &TradeOffer) -> Result<()> {
@@ -2907,16 +3241,23 @@ fn apply_accepted_trade(app: &mut AppState, offer: &TradeOffer) -> Result<()> {
     }
     // Build outbound list: (player, current_team, dest_team).
     let mut moves: Vec<(PlayerId, TeamId)> = Vec::new();
+    let mut pick_moves: Vec<(DraftPickId, TeamId)> = Vec::new();
     for (i, sender) in teams.iter().enumerate() {
         let dest = teams[(i + 1) % teams.len()];
         let assets = offer.assets_by_team.get(sender).expect("present");
         for &pid in &assets.players_out {
             moves.push((pid, dest));
         }
+        for &pick_id in &assets.picks_out {
+            pick_moves.push((pick_id, dest));
+        }
     }
     let store = app.store()?;
     for (pid, dest) in moves {
         store.assign_player_to_team(pid, dest)?;
+    }
+    for (pick_id, dest) in pick_moves {
+        store.transfer_draft_pick(pick_id, dest)?;
     }
     Ok(())
 }
@@ -4066,7 +4407,19 @@ fn cmd_messages(app: &mut AppState, as_json: bool) -> Result<()> {
 // M6: draft / season-advance
 // ----------------------------------------------------------------------
 
-fn draft_order(app: &mut AppState) -> Result<Vec<TeamId>> {
+#[derive(Debug, Clone)]
+struct DraftSlot {
+    slot: u8,
+    season: SeasonId,
+    round: u8,
+    pick_id: DraftPickId,
+    original_team: TeamId,
+    current_owner: TeamId,
+    protections: Protection,
+    conveyed: bool,
+}
+
+fn draft_order(app: &mut AppState) -> Result<Vec<DraftSlot>> {
     let state = current_state(app)?;
     let store = app.store()?;
     let teams = store.list_teams()?;
@@ -4164,7 +4517,52 @@ fn draft_order(app: &mut AppState) -> Result<Vec<TeamId>> {
 
     let mut final_order = lottery_order;
     final_order.extend(post_lottery);
-    Ok(final_order)
+    let mut slots = Vec::with_capacity(final_order.len() * 2);
+    for round in 1..=2_u8 {
+        for original_team in &final_order {
+            let pick = store
+                .find_draft_pick(state.season, *original_team, round)?
+                .unwrap_or_else(|| DraftPick {
+                    id: draft_pick_id(state.season, round, *original_team),
+                    original_team: *original_team,
+                    current_owner: *original_team,
+                    season: state.season,
+                    round,
+                    protections: Protection::Unprotected,
+                    protection_text: None,
+                    resolved: false,
+                    protection_history: Vec::new(),
+                });
+            if pick.resolved {
+                continue;
+            }
+            let original_slot = (slots.len() % final_order.len()) + 1;
+            let conveys = protection_conveys(pick.protections, original_slot as u8);
+            slots.push(DraftSlot {
+                slot: (slots.len() + 1) as u8,
+                season: pick.season,
+                round,
+                pick_id: pick.id,
+                original_team: *original_team,
+                current_owner: if conveys {
+                    pick.current_owner
+                } else {
+                    pick.original_team
+                },
+                protections: pick.protections,
+                conveyed: conveys,
+            });
+        }
+    }
+    Ok(slots)
+}
+
+fn protection_conveys(protection: Protection, original_slot: u8) -> bool {
+    match protection {
+        Protection::Unprotected => true,
+        Protection::LotteryProtected => original_slot > 14,
+        Protection::TopNProtected(n) => original_slot > n,
+    }
 }
 
 fn cmd_draft_board(app: &mut AppState, as_json: bool) -> Result<()> {
@@ -4242,23 +4640,29 @@ fn cmd_draft_order(app: &mut AppState, as_json: bool) -> Result<()> {
     if as_json {
         let arr: Vec<_> = order
             .iter()
-            .enumerate()
-            .map(|(i, t)| {
+            .map(|slot| {
                 json!({
-                    "pick": i + 1,
-                    "team": abbrev.get(t).cloned().unwrap_or_default(),
+                    "pick": slot.slot,
+                    "season": slot.season.0,
+                    "round": slot.round,
+                    "original_team": abbrev.get(&slot.original_team).cloned().unwrap_or_default(),
+                    "team": abbrev.get(&slot.current_owner).cloned().unwrap_or_default(),
+                    "protection": format!("{:?}", slot.protections),
                 })
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&arr)?);
     } else {
         println!("Draft order:");
-        for (i, t) in order.iter().enumerate() {
-            println!(
-                "  Pick {:>2}: {}",
-                i + 1,
-                abbrev.get(t).cloned().unwrap_or_default()
-            );
+        for slot in &order {
+            let owner = abbrev.get(&slot.current_owner).cloned().unwrap_or_default();
+            let original = abbrev.get(&slot.original_team).cloned().unwrap_or_default();
+            let suffix = if slot.current_owner == slot.original_team {
+                String::new()
+            } else {
+                format!(" (via {original})")
+            };
+            println!("  Pick {:>2}: {}", slot.slot, format!("{owner}{suffix}"));
         }
     }
     Ok(())
@@ -4285,14 +4689,16 @@ fn cmd_draft_sim(app: &mut AppState, as_json: bool) -> Result<()> {
         .collect();
 
     let mut picks: Vec<(usize, TeamId, Player)> = Vec::new();
-    for (idx, team_id) in order.into_iter().enumerate() {
+    for slot in order {
         if prospects.is_empty() {
             break;
         }
         // BPA: best-available is index 0 (Store sort: potential DESC, overall DESC).
         let player = prospects.remove(0);
-        app.store()?.assign_player_to_team(player.id, team_id)?;
-        picks.push((idx + 1, team_id, player));
+        app.store()?
+            .assign_player_to_team(player.id, slot.current_owner)?;
+        resolve_or_defer_pick(app.store()?, &slot)?;
+        picks.push((slot.slot as usize, slot.current_owner, player));
     }
 
     if as_json {
@@ -4420,12 +4826,14 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
     let order = draft_order(app)?;
     let mut prospects = app.store()?.list_prospects()?;
     let mut draftees = 0u32;
-    for team_id in order {
+    for slot in order {
         if prospects.is_empty() {
             break;
         }
         let player = prospects.remove(0);
-        app.store()?.assign_player_to_team(player.id, team_id)?;
+        app.store()?
+            .assign_player_to_team(player.id, slot.current_owner)?;
+        resolve_or_defer_pick(app.store()?, &slot)?;
         draftees += 1;
     }
     if draftees > 0 {
@@ -4459,6 +4867,7 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
     // then generate fresh games for the new year.
     app.store()?.clear_schedule_for_season(state.season)?;
     generate_and_store_schedule(app, next_season, new_state.rng_seed)?;
+    roll_pick_horizon(app.store()?, next_season)?;
 
     if as_json {
         println!(
@@ -4482,6 +4891,45 @@ fn cmd_season_advance(app: &mut AppState, as_json: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn resolve_or_defer_pick(store: &nba3k_store::Store, slot: &DraftSlot) -> Result<()> {
+    if slot.conveyed {
+        store.mark_draft_pick_resolved(slot.pick_id)?;
+        return Ok(());
+    }
+    let next_season = SeasonId(slot.season.0 + 1);
+    let history = vec![ProtectionHistoryEntry {
+        season: slot.season,
+        original_team_record: "protected".to_string(),
+        action: "deferred".to_string(),
+    }];
+    store.defer_draft_pick_once(slot.pick_id, next_season, &history)?;
+    Ok(())
+}
+
+fn roll_pick_horizon(store: &nba3k_store::Store, current: SeasonId) -> Result<u32> {
+    let target = SeasonId(current.0 + 6);
+    let teams = store.list_teams()?;
+    let mut inserted = 0_u32;
+    for team in teams {
+        for round in 1..=2_u8 {
+            let pick = DraftPick {
+                id: draft_pick_id(target, round, team.id),
+                original_team: team.id,
+                current_owner: team.id,
+                season: target,
+                round,
+                protections: Protection::Unprotected,
+                protection_text: None,
+                resolved: false,
+                protection_history: Vec::new(),
+            };
+            store.upsert_if_absent_draft_pick(&pick)?;
+            inserted += 1;
+        }
+    }
+    Ok(inserted)
 }
 
 /// AI free-agent pass run as part of `season-advance`. Iterates teams in

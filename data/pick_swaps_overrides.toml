@@ -1,0 +1,16 @@
+# Optional manual draft-pick ownership overrides.
+# Applied after live Spotrac import or offline vanilla seeding.
+#
+# [[swap]]
+# year = 2027
+# original_team = "PHO"
+# round = 1
+# current_owner = "HOU"
+# protection = "top-3"
+#
+# [[swap]]
+# year = 2026
+# original_team = "DAL"
+# round = 1
+# current_owner = "BOS"
+# protection = "lottery"

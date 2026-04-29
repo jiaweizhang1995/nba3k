@@ -234,7 +234,14 @@ nba3k --save my.db tui --legacy  # 回退到 M19 5-tab 只读旧版
 | `draft order` | 当年选秀顺位（含彩票排序）|
 | `draft sim` | AI 一键完成整个选秀 |
 | `draft pick <name>` | 你的顺位人工选人 |
+| `picks [--team BOS] [--season 2027]` | 查看某队持有的未来选秀权 |
 | `scout <name>` | 花一次球探名额揭示新秀真实评分（每赛季 5 次）|
+
+### 选秀权交易
+
+新档会写入未来 7 年、两轮、30 队的选秀权表。`new` 默认先写入 vanilla 自有签，再尝试从 Spotrac future draft picks 页面覆盖真实交易/互换信息；Spotrac 失败不会导致开档失败，会保留 vanilla 自有签并记录 warning。`new --offline` 只写 vanilla 自有签。
+
+可用 `data/pick_swaps_overrides.toml` 手工覆盖 `(year, original_team, round)` 行。交易命令支持 `--send-picks 2027-R1-BOS` / `--receive-picks 2028-R2-LAL`，并会执行七年规则与 Stepien 规则。
 
 ### 季后赛与赛季奖项
 

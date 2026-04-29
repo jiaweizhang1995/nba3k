@@ -13,18 +13,13 @@ pub enum SeasonPhase {
     FreeAgency,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameMode {
+    #[default]
     Standard,
     God,
     Hardcore,
     Sandbox,
-}
-
-impl Default for GameMode {
-    fn default() -> Self {
-        Self::Standard
-    }
 }
 
 impl GameMode {

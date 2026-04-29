@@ -13,7 +13,7 @@ use chrono::NaiveDate;
 use std::collections::HashMap;
 
 /// Compact per-team standings view used by trade-engine and sim consumers.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TeamRecordSummary {
     pub wins: u16,
     pub losses: u16,
@@ -34,17 +34,6 @@ impl TeamRecordSummary {
             0.5
         } else {
             self.wins as f32 / gp as f32
-        }
-    }
-}
-
-impl Default for TeamRecordSummary {
-    fn default() -> Self {
-        Self {
-            wins: 0,
-            losses: 0,
-            conf_rank: 0,
-            point_diff: 0,
         }
     }
 }

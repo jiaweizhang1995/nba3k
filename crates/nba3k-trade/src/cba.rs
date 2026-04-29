@@ -23,6 +23,7 @@ use crate::snapshot::LeagueSnapshot;
 use nba3k_core::{
     Cents, Contract, ContractYear, Player, PlayerId, SeasonId, SeasonPhase, TeamId, TradeOffer,
 };
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CbaViolation {
@@ -45,6 +46,14 @@ pub enum CbaViolation {
     RosterSize { team: TeamId, size: u32 },
     #[error("apron 2 forbids cash and aggregation")]
     Apron2Restriction { team: TeamId },
+    #[error("seven-year rule: team {team:?} cannot trade a {year} pick")]
+    PickTooFarOut { team: TeamId, year: u16 },
+    #[error("stepien rule: team {team:?} would lack a 1st in {year1} and {year2}")]
+    StepienViolation {
+        team: TeamId,
+        year1: u16,
+        year2: u16,
+    },
 }
 
 /// Salary-matching tier the *sending* team falls into based on its pre-trade
@@ -101,10 +110,77 @@ pub fn validate(offer: &TradeOffer, league: &LeagueSnapshot) -> Result<(), CbaVi
     for &team in offer.assets_by_team.keys() {
         check_roster_size(team, offer, league)?;
     }
+    check_seven_year_rule(offer, league)?;
+    check_stepien_rule(offer, league)?;
     // Hard-cap trigger gate (v1: just verifies neither side rises above
     // apron_2 after the trade, since apron_2 is a hard cap).
     for &team in offer.assets_by_team.keys() {
         check_hard_cap(team, offer, league)?;
+    }
+    Ok(())
+}
+
+pub fn check_seven_year_rule(
+    offer: &TradeOffer,
+    league: &LeagueSnapshot,
+) -> Result<(), CbaViolation> {
+    for (team, assets) in &offer.assets_by_team {
+        for pick_id in &assets.picks_out {
+            let Some(pick) = league.pick(*pick_id) else {
+                continue;
+            };
+            if pick.season.0.saturating_sub(league.current_season.0) > 7 {
+                return Err(CbaViolation::PickTooFarOut {
+                    team: *team,
+                    year: pick.season.0,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn check_stepien_rule(offer: &TradeOffer, league: &LeagueSnapshot) -> Result<(), CbaViolation> {
+    if league.picks_by_id.is_empty() {
+        return Ok(());
+    }
+    let mut owners: HashMap<_, _> = league
+        .picks_by_id
+        .iter()
+        .map(|(id, pick)| (*id, pick.current_owner))
+        .collect();
+    let teams: Vec<TeamId> = offer.assets_by_team.keys().copied().collect();
+    for (idx, sender) in teams.iter().enumerate() {
+        let Some(assets) = offer.assets_by_team.get(sender) else {
+            continue;
+        };
+        let dest = teams[(idx + 1) % teams.len()];
+        for pick_id in &assets.picks_out {
+            owners.insert(*pick_id, dest);
+        }
+    }
+
+    for team in league.teams {
+        let mut prior_missing: Option<u16> = None;
+        for year in league.current_season.0..=league.current_season.0 + 6 {
+            let owns_first = league.picks_by_id.iter().any(|(id, pick)| {
+                pick.round == 1
+                    && pick.season.0 == year
+                    && !pick.resolved
+                    && owners.get(id).copied() == Some(team.id)
+            });
+            if owns_first {
+                prior_missing = None;
+            } else if let Some(prev) = prior_missing {
+                return Err(CbaViolation::StepienViolation {
+                    team: team.id,
+                    year1: prev,
+                    year2: year,
+                });
+            } else {
+                prior_missing = Some(year);
+            }
+        }
     }
     Ok(())
 }

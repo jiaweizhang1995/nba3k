@@ -19,7 +19,8 @@ nba3k-season    Schedule generation, playoffs, awards, HoF, all-star,
 nba3k-store     SQLite persistence + `refinery` migrations. Owns ALL
                 schema. All writes go through this crate.
 nba3k-scrape    Bootstrap scraper (Basketball-Reference, rate-limited
-                1 req / 3s) + ESPN client (M31+) + calibration tools.
+                1 req / 3s) + ESPN client (M31+) + Spotrac future-pick
+                client (M36) + calibration tools.
 nba3k-cli       argv parser, REPL, TUI, command implementations.
                 The thick top of the stack.
 ```
@@ -173,6 +174,8 @@ column).
    per-save `season_calendar` row.
 7. Runs the same starter / role / FA seed pass `cmd_new`'s legacy path
    does.
+8. Seeds vanilla future draft picks and overlays Spotrac future-pick
+   ownership when available.
 
 The model matches NBA 2K MyNBA "Start Today" — a *snapshot*, not a
 historical replay. Past played games and trade-news are deliberately

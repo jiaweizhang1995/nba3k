@@ -105,6 +105,18 @@ pub enum Command {
     },
     /// Trade subcommands.
     Trade(TradeArgs),
+    /// Show draft picks owned by a team.
+    Picks {
+        /// Team abbreviation (e.g. BOS, LAL). Defaults to your save's team.
+        #[arg(long)]
+        team: Option<String>,
+        /// Draft year filter, e.g. 2027.
+        #[arg(long)]
+        season: Option<u16>,
+        /// Emit JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Draft subcommands.
     Draft(DraftArgs),
     /// Show team chemistry breakdown.
@@ -353,6 +365,12 @@ pub enum TradeAction {
         /// Comma-separated player names received FROM --to.
         #[arg(long, value_delimiter = ',')]
         receive: Vec<String>,
+        /// Comma-separated pick tokens sent BY --from, e.g. 2027-R1-BOS.
+        #[arg(long, value_delimiter = ',')]
+        send_picks: Vec<String>,
+        /// Comma-separated pick tokens received FROM --to, e.g. 2027-R1-LAL.
+        #[arg(long, value_delimiter = ',')]
+        receive_picks: Vec<String>,
         /// Emit JSON instead of text.
         #[arg(long)]
         json: bool,

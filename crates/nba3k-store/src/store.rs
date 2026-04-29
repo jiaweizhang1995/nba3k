@@ -1188,33 +1188,168 @@ impl Store {
         rows.into_iter().map(deserialize_player).collect()
     }
 
+    pub fn upsert_draft_pick(&self, pick: &DraftPick) -> StoreResult<()> {
+        let protections_json = serde_json::to_string(&pick.protections)?;
+        let history_json = if pick.protection_history.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&pick.protection_history)?)
+        };
+        self.conn.execute(
+            "INSERT INTO draft_picks
+                (id, original_team, current_owner, season, round, protections_json,
+                 resolved, protection_text, protection_history)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(season, original_team, round) DO UPDATE SET
+                current_owner      = excluded.current_owner,
+                protections_json   = excluded.protections_json,
+                resolved           = excluded.resolved,
+                protection_text    = excluded.protection_text,
+                protection_history = excluded.protection_history",
+            params![
+                pick.id.0 as i64,
+                pick.original_team.0 as i64,
+                pick.current_owner.0 as i64,
+                pick.season.0 as i64,
+                pick.round as i64,
+                protections_json,
+                if pick.resolved { 1_i64 } else { 0_i64 },
+                pick.protection_text.as_deref(),
+                history_json.as_deref(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn upsert_if_absent_draft_pick(&self, pick: &DraftPick) -> StoreResult<()> {
+        let protections_json = serde_json::to_string(&pick.protections)?;
+        let history_json = if pick.protection_history.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&pick.protection_history)?)
+        };
+        self.conn.execute(
+            "INSERT OR IGNORE INTO draft_picks
+                (id, original_team, current_owner, season, round, protections_json,
+                 resolved, protection_text, protection_history)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                pick.id.0 as i64,
+                pick.original_team.0 as i64,
+                pick.current_owner.0 as i64,
+                pick.season.0 as i64,
+                pick.round as i64,
+                protections_json,
+                if pick.resolved { 1_i64 } else { 0_i64 },
+                pick.protection_text.as_deref(),
+                history_json.as_deref(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn next_draft_pick_id(&self) -> StoreResult<DraftPickId> {
+        let next: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM draft_picks",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(DraftPickId(next as u32))
+    }
+
+    pub fn find_draft_pick(
+        &self,
+        season: SeasonId,
+        original_team: TeamId,
+        round: u8,
+    ) -> StoreResult<Option<DraftPick>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT id, original_team, current_owner, season, round, protections_json,
+                        resolved, protection_text, protection_history
+                   FROM draft_picks
+                  WHERE season = ?1 AND original_team = ?2 AND round = ?3",
+                params![season.0 as i64, original_team.0 as i64, round as i64],
+                read_draft_pick_row,
+            )
+            .optional()?;
+        row.map(deserialize_draft_pick).transpose()
+    }
+
+    pub fn transfer_draft_pick(&self, pick: DraftPickId, owner: TeamId) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE draft_picks SET current_owner = ?1 WHERE id = ?2",
+            params![owner.0 as i64, pick.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_draft_pick_resolved(&self, pick: DraftPickId) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE draft_picks SET resolved = 1 WHERE id = ?1",
+            params![pick.0 as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn defer_draft_pick_once(
+        &self,
+        pick: DraftPickId,
+        next_season: SeasonId,
+        history: &[ProtectionHistoryEntry],
+    ) -> StoreResult<()> {
+        let (original_team, round): (i64, i64) = self.conn.query_row(
+            "SELECT original_team, round FROM draft_picks WHERE id = ?1",
+            params![pick.0 as i64],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let history_json = if history.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(history)?)
+        };
+        self.conn.execute(
+            "DELETE FROM draft_picks
+              WHERE season = ?1
+                AND round = ?2
+                AND original_team = ?3
+                AND id != ?4",
+            params![next_season.0 as i64, round, original_team, pick.0 as i64],
+        )?;
+        self.conn.execute(
+            "UPDATE draft_picks
+                SET season = ?1,
+                    protections_json = ?2,
+                    protection_text = NULL,
+                    protection_history = ?3
+              WHERE id = ?4",
+            params![
+                next_season.0 as i64,
+                serde_json::to_string(&Protection::Unprotected)?,
+                history_json.as_deref(),
+                pick.0 as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_draft_pick_protection_resolution(&self, pick: &DraftPick) -> StoreResult<()> {
+        self.upsert_draft_pick(pick)
+    }
+
     pub fn all_picks(&self) -> StoreResult<Vec<DraftPick>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_team, current_owner, season, round, protections_json
+            "SELECT id, original_team, current_owner, season, round, protections_json,
+                    resolved, protection_text, protection_history
              FROM draft_picks ORDER BY season, round, current_owner",
         )?;
         let rows = stmt
-            .query_map([], |r| {
-                let id: i64 = r.get(0)?;
-                let original: i64 = r.get(1)?;
-                let owner: i64 = r.get(2)?;
-                let season: i64 = r.get(3)?;
-                let round: i64 = r.get(4)?;
-                let protections_json: String = r.get(5)?;
-                Ok((id, original, owner, season, round, protections_json))
-            })?
+            .query_map([], read_draft_pick_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut out = Vec::with_capacity(rows.len());
-        for (id, original, owner, season, round, protections_json) in rows {
-            let protections: Protection = serde_json::from_str(&protections_json)?;
-            out.push(DraftPick {
-                id: DraftPickId(id as u32),
-                original_team: TeamId(original as u8),
-                current_owner: TeamId(owner as u8),
-                season: SeasonId(season as u16),
-                round: round as u8,
-                protections,
-            });
+        for row in rows {
+            out.push(deserialize_draft_pick(row)?);
         }
         Ok(out)
     }
@@ -1953,6 +2088,52 @@ type PlayerRow = (
     String,         // 13 role_str
     f64,            // 14 morale
 );
+
+type DraftPickRow = (
+    i64,            // 0 id
+    i64,            // 1 original_team
+    i64,            // 2 current_owner
+    i64,            // 3 season
+    i64,            // 4 round
+    String,         // 5 protections_json
+    i64,            // 6 resolved
+    Option<String>, // 7 protection_text
+    Option<String>, // 8 protection_history
+);
+
+fn read_draft_pick_row(r: &rusqlite::Row) -> rusqlite::Result<DraftPickRow> {
+    Ok((
+        r.get(0)?,
+        r.get(1)?,
+        r.get(2)?,
+        r.get(3)?,
+        r.get(4)?,
+        r.get(5)?,
+        r.get(6)?,
+        r.get(7)?,
+        r.get(8)?,
+    ))
+}
+
+fn deserialize_draft_pick(r: DraftPickRow) -> StoreResult<DraftPick> {
+    let protections: Protection = serde_json::from_str(&r.5)?;
+    let protection_history: Vec<ProtectionHistoryEntry> =
+        r.8.as_deref()
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+    Ok(DraftPick {
+        id: DraftPickId(r.0 as u32),
+        original_team: TeamId(r.1 as u8),
+        current_owner: TeamId(r.2 as u8),
+        season: SeasonId(r.3 as u16),
+        round: r.4 as u8,
+        protections,
+        protection_text: r.7,
+        resolved: r.6 != 0,
+        protection_history,
+    })
+}
 
 fn read_player_row(r: &rusqlite::Row) -> rusqlite::Result<PlayerRow> {
     Ok((

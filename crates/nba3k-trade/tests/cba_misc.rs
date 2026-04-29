@@ -3,7 +3,7 @@
 mod cba_common;
 
 use cba_common::*;
-use nba3k_core::{Cents, PlayerId, SeasonPhase};
+use nba3k_core::{Cents, DraftPickId, PlayerId, SeasonId, SeasonPhase};
 use nba3k_trade::cba::{
     check_season_start_rosters, check_season_start_user_roster, validate, CbaViolation,
     REGULAR_SEASON_ROSTER_MAX,
@@ -22,6 +22,82 @@ fn baseline_world() -> World {
     pad_roster(&mut w, TEAM_A, 14, 1_000);
     pad_roster(&mut w, TEAM_B, 14, 2_000);
     w
+}
+
+#[test]
+fn seven_year_rule_blocks_year_8() {
+    let mut w = baseline_world();
+    pad_picks(&mut w, &[TEAM_A, TEAM_B], SEASON, 8);
+    let pick = add_pick(&mut w, SeasonId(SEASON.0 + 8), 1, TEAM_A, TEAM_A);
+    let snap = w.snapshot();
+    let offer = two_team_offer(
+        TEAM_A,
+        assets_picks(&[pick]),
+        TEAM_B,
+        nba3k_core::TradeAssets::default(),
+    );
+    match validate(&offer, &snap) {
+        Err(CbaViolation::PickTooFarOut { team, year }) => {
+            assert_eq!(team, TEAM_A);
+            assert_eq!(year, SEASON.0 + 8);
+        }
+        other => panic!("expected PickTooFarOut, got {other:?}"),
+    }
+}
+
+#[test]
+fn seven_year_rule_allows_year_7() {
+    let mut w = baseline_world();
+    pad_picks(&mut w, &[TEAM_A, TEAM_B], SEASON, 8);
+    let pick = add_pick(&mut w, SeasonId(SEASON.0 + 7), 1, TEAM_A, TEAM_A);
+    let snap = w.snapshot();
+    let offer = two_team_offer(
+        TEAM_A,
+        assets_picks(&[pick]),
+        TEAM_B,
+        nba3k_core::TradeAssets::default(),
+    );
+    assert!(validate(&offer, &snap).is_ok());
+}
+
+#[test]
+fn stepien_blocks_consecutive_first_loss() {
+    let mut w = baseline_world();
+    pad_picks(&mut w, &[TEAM_A, TEAM_B], SEASON, 7);
+    let missing_2026 = DraftPickId((SEASON.0 as u32) * 1000 + 100 + TEAM_A.0 as u32);
+    w.picks.get_mut(&missing_2026).unwrap().current_owner = TEAM_B;
+    let trade_2027 = DraftPickId(((SEASON.0 + 1) as u32) * 1000 + 100 + TEAM_A.0 as u32);
+    let snap = w.snapshot();
+    let offer = two_team_offer(
+        TEAM_A,
+        assets_picks(&[trade_2027]),
+        TEAM_B,
+        nba3k_core::TradeAssets::default(),
+    );
+    match validate(&offer, &snap) {
+        Err(CbaViolation::StepienViolation { team, year1, year2 }) => {
+            assert_eq!(team, TEAM_A);
+            assert_eq!((year1, year2), (SEASON.0, SEASON.0 + 1));
+        }
+        other => panic!("expected StepienViolation, got {other:?}"),
+    }
+}
+
+#[test]
+fn stepien_allows_non_consecutive() {
+    let mut w = baseline_world();
+    pad_picks(&mut w, &[TEAM_A, TEAM_B], SEASON, 7);
+    let missing_2026 = DraftPickId((SEASON.0 as u32) * 1000 + 100 + TEAM_A.0 as u32);
+    w.picks.get_mut(&missing_2026).unwrap().current_owner = TEAM_B;
+    let trade_2028 = DraftPickId(((SEASON.0 + 2) as u32) * 1000 + 100 + TEAM_A.0 as u32);
+    let snap = w.snapshot();
+    let offer = two_team_offer(
+        TEAM_A,
+        assets_picks(&[trade_2028]),
+        TEAM_B,
+        nba3k_core::TradeAssets::default(),
+    );
+    assert!(validate(&offer, &snap).is_ok());
 }
 
 #[test]
