@@ -9,8 +9,8 @@ mod repl;
 mod state;
 mod tui;
 
-use cli::Cli;
 use clap::Parser;
+use cli::Cli;
 
 fn main() -> Result<()> {
     init_tracing();

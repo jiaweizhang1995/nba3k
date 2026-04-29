@@ -79,7 +79,9 @@ fn pre_peak_workhorse_gains_two_to_three_ovr() {
     assert!(
         gain >= 2 && gain <= 3,
         "expected +2..=3 OVR for 22yo workhorse, got {} (was {} now {})",
-        gain, prior_ovr, player.overall
+        gain,
+        prior_ovr,
+        player.overall
     );
 }
 
@@ -102,7 +104,9 @@ fn post_peak_veteran_regresses_one_to_two_ovr() {
     assert!(
         drop >= 1 && drop <= 2,
         "expected -1..=2 OVR for 32yo, got drop={} (was {} now {})",
-        drop, prior_ovr, player.overall
+        drop,
+        prior_ovr,
+        player.overall
     );
 
     let post_ath = player.ratings.speed as i16
@@ -118,7 +122,8 @@ fn post_peak_veteran_regresses_one_to_two_ovr() {
     assert!(
         ath_per_attr >= iq_per_attr,
         "athleticism per-attribute drop should lead IQ: ath={} iq={}",
-        ath_per_attr, iq_per_attr
+        ath_per_attr,
+        iq_per_attr
     );
 }
 
@@ -160,7 +165,9 @@ fn pre_peak_falling_behind_revises_potential_down() {
     assert!(
         (2..=4).contains(&drop),
         "expected dynamic_potential to drop 2-4, got drop={} (was {} now {})",
-        drop, dev.dynamic_potential, new_dp
+        drop,
+        dev.dynamic_potential,
+        new_dp
     );
 }
 
@@ -188,11 +195,26 @@ fn per_attribute_caps_are_enforced() {
     };
     let delta = progress_player(&player, &dev, 3000, 19);
     let fields: [i8; 21] = [
-        delta.close_shot, delta.driving_layup, delta.driving_dunk, delta.standing_dunk,
-        delta.post_control, delta.mid_range, delta.three_point, delta.free_throw,
-        delta.passing_accuracy, delta.ball_handle, delta.speed_with_ball,
-        delta.interior_defense, delta.perimeter_defense, delta.steal, delta.block,
-        delta.off_reb, delta.def_reb, delta.speed, delta.agility, delta.strength,
+        delta.close_shot,
+        delta.driving_layup,
+        delta.driving_dunk,
+        delta.standing_dunk,
+        delta.post_control,
+        delta.mid_range,
+        delta.three_point,
+        delta.free_throw,
+        delta.passing_accuracy,
+        delta.ball_handle,
+        delta.speed_with_ball,
+        delta.interior_defense,
+        delta.perimeter_defense,
+        delta.steal,
+        delta.block,
+        delta.off_reb,
+        delta.def_reb,
+        delta.speed,
+        delta.agility,
+        delta.strength,
         delta.vertical,
     ];
     for f in fields {
@@ -206,11 +228,27 @@ fn per_attribute_caps_are_enforced() {
     let old_dev = make_dev(&old, 30);
     let d = regress_player(&old, &old_dev, 36);
     let fields: [i8; 21] = [
-        d.close_shot, d.driving_layup, d.driving_dunk, d.standing_dunk,
-        d.post_control, d.mid_range, d.three_point, d.free_throw,
-        d.passing_accuracy, d.ball_handle, d.speed_with_ball,
-        d.interior_defense, d.perimeter_defense, d.steal, d.block,
-        d.off_reb, d.def_reb, d.speed, d.agility, d.strength, d.vertical,
+        d.close_shot,
+        d.driving_layup,
+        d.driving_dunk,
+        d.standing_dunk,
+        d.post_control,
+        d.mid_range,
+        d.three_point,
+        d.free_throw,
+        d.passing_accuracy,
+        d.ball_handle,
+        d.speed_with_ball,
+        d.interior_defense,
+        d.perimeter_defense,
+        d.steal,
+        d.block,
+        d.off_reb,
+        d.def_reb,
+        d.speed,
+        d.agility,
+        d.strength,
+        d.vertical,
     ];
     for f in fields {
         assert!(f >= -4, "no attribute can lose more than -4 (got {})", f);
@@ -250,6 +288,7 @@ fn headroom_throttles_growth_at_ceiling() {
     assert!(
         d_low.sum_signed() > d_high.sum_signed(),
         "player with more headroom should gain more aggregate: low={} high={}",
-        d_low.sum_signed(), d_high.sum_signed()
+        d_low.sum_signed(),
+        d_high.sum_signed()
     );
 }

@@ -75,9 +75,7 @@ enum Modal {
         picker: Picker<PlayerOption>,
     },
     /// "Clear all" confirmation.
-    ClearAll {
-        confirm: Confirm,
-    },
+    ClearAll { confirm: Confirm },
 }
 
 thread_local! {
@@ -146,7 +144,11 @@ fn draw_slot_list(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         let index = cache.roster_index.as_ref();
         let cursor = cache.slot_cursor.min(4);
 
-        let title = format!(" {} - {} ", t(tui.lang, T::RotationStarters), tui.user_abbrev);
+        let title = format!(
+            " {} - {} ",
+            t(tui.lang, T::RotationStarters),
+            tui.user_abbrev
+        );
         let mut lines: Vec<Line> = Vec::with_capacity(8);
         lines.push(Line::from(""));
 
@@ -220,7 +222,12 @@ fn modal_rect(area: Rect) -> Rect {
     let h = area.height.saturating_sub(4).min(20).max(8);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
@@ -234,8 +241,12 @@ fn draw_modal(f: &mut Frame, rect: Rect, theme: &Theme, lang: Lang) {
         let cache = c.borrow();
         match &cache.modal {
             Modal::None => DrawSpec::None,
-            Modal::Pick { picker, .. } => DrawSpec::Pick { picker: picker.clone() },
-            Modal::ClearAll { confirm } => DrawSpec::ClearAll { confirm: confirm.clone() },
+            Modal::Pick { picker, .. } => DrawSpec::Pick {
+                picker: picker.clone(),
+            },
+            Modal::ClearAll { confirm } => DrawSpec::ClearAll {
+                confirm: confirm.clone(),
+            },
         }
     });
 
@@ -287,7 +298,9 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
             .map(|o| (o.id, o.clone()))
             .collect();
 
-        let starters_now = CACHE.with(|c| c.borrow().starters.clone()).unwrap_or_default();
+        let starters_now = CACHE
+            .with(|c| c.borrow().starters.clone())
+            .unwrap_or_default();
         for (_, pid) in starters_now.iter_assigned() {
             if !index.contains_key(&pid) {
                 let name = store
@@ -323,11 +336,7 @@ fn ensure_cache(app: &mut AppState, tui: &TuiApp) -> Result<()> {
                     on_roster: true,
                 })
                 .collect();
-            bucket.sort_by(|a, b| {
-                b.overall
-                    .cmp(&a.overall)
-                    .then_with(|| a.name.cmp(&b.name))
-            });
+            bucket.sort_by(|a, b| b.overall.cmp(&a.overall).then_with(|| a.name.cmp(&b.name)));
             eligible.insert(slot, bucket);
         }
 
@@ -402,7 +411,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             return Ok(true);
         }
-        ModalAction::PickSubmit { slot, player_id, player_name } => {
+        ModalAction::PickSubmit {
+            slot,
+            player_id,
+            player_name,
+        } => {
             CACHE.with(|c| c.borrow_mut().modal = Modal::None);
             let pos_str = pos_to_str(slot);
             let res = upsert_starter(app, tui, pos_str, player_id);
@@ -422,7 +435,11 @@ pub fn handle_key(app: &mut AppState, tui: &mut TuiApp, key: KeyEvent) -> Result
         KeyCode::Up => {
             CACHE.with(|c| {
                 let mut c = c.borrow_mut();
-                c.slot_cursor = if c.slot_cursor == 0 { 4 } else { c.slot_cursor - 1 };
+                c.slot_cursor = if c.slot_cursor == 0 {
+                    4
+                } else {
+                    c.slot_cursor - 1
+                };
             });
             Ok(true)
         }

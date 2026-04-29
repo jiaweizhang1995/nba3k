@@ -35,7 +35,10 @@ pub fn team_chemistry(snap: &LeagueSnapshot<'_>, team_id: TeamId) -> Score {
     let team = snap.team(team_id);
     let coach = team.map(|t| &t.coach);
 
-    score.add("positional balance", positional_balance(&roster) * W_BALANCE);
+    score.add(
+        "positional balance",
+        positional_balance(&roster) * W_BALANCE,
+    );
     score.add("role distribution", role_distribution(&roster) * W_ROLES);
     if let Some(coach) = coach {
         score.add("scheme fit", scheme_fit_team(&roster, coach) * W_SCHEME);
@@ -82,10 +85,18 @@ fn positional_balance(roster: &[&Player]) -> f64 {
 
 fn role_distribution(roster: &[&Player]) -> f64 {
     let stars = roster.iter().filter(|p| p.role == PlayerRole::Star).count() as i32;
-    let starters = roster.iter().filter(|p| p.role == PlayerRole::Starter).count() as i32;
+    let starters = roster
+        .iter()
+        .filter(|p| p.role == PlayerRole::Starter)
+        .count() as i32;
     let bench = roster
         .iter()
-        .filter(|p| matches!(p.role, PlayerRole::SixthMan | PlayerRole::RolePlayer | PlayerRole::BenchWarmer))
+        .filter(|p| {
+            matches!(
+                p.role,
+                PlayerRole::SixthMan | PlayerRole::RolePlayer | PlayerRole::BenchWarmer
+            )
+        })
         .count() as i32;
 
     let mut delta: f64 = 0.0;
@@ -98,7 +109,11 @@ fn role_distribution(roster: &[&Player]) -> f64 {
         4 => -1.2,
         _ => -1.8, // 5+ stars: roster meltdown
     };
-    delta += if (3..=5).contains(&starters) { 0.2 } else { -0.2 };
+    delta += if (3..=5).contains(&starters) {
+        0.2
+    } else {
+        -0.2
+    };
     delta += if bench >= 5 { 0.1 } else { -0.1 };
 
     // Star slotted as BenchWarmer = chemistry tank.
@@ -191,7 +206,9 @@ fn defense_match(scheme: Scheme, player: &Player) -> f32 {
         return 0.0;
     }
     let r = &player.ratings;
-    let d = (r.interior_defense as i32 + r.perimeter_defense as i32 + r.steal as i32 + r.block as i32) / 4;
+    let d =
+        (r.interior_defense as i32 + r.perimeter_defense as i32 + r.steal as i32 + r.block as i32)
+            / 4;
     if d >= 80 {
         0.6
     } else if d >= 70 {
@@ -205,7 +222,7 @@ fn defense_match(scheme: Scheme, player: &Player) -> f32 {
 mod tests {
     use super::*;
     use nba3k_core::{
-        Conference, DraftPickId, Division, GMArchetype, GMPersonality, LeagueYear, Player,
+        Conference, Division, DraftPickId, GMArchetype, GMPersonality, LeagueYear, Player,
         PlayerId, PlayerRole, Position, Ratings, SeasonId, SeasonPhase, Team, TeamId,
         TeamRecordSummary,
     };
@@ -272,16 +289,32 @@ mod tests {
     fn balanced_rotation_scores_above_baseline() {
         let team = make_team(1, "BOS");
         let mut players = vec![];
-        let positions = [Position::PG, Position::SG, Position::SF, Position::PF, Position::C];
+        let positions = [
+            Position::PG,
+            Position::SG,
+            Position::SF,
+            Position::PF,
+            Position::C,
+        ];
         for (i, &pos) in positions.iter().enumerate() {
             players.push(make_player(i as u32 + 1, 80, pos, PlayerRole::Starter, 1));
         }
         players[0].role = PlayerRole::Star;
         for (i, &pos) in positions.iter().take(4).enumerate() {
-            players.push(make_player(20 + i as u32, 70, pos, PlayerRole::RolePlayer, 1));
+            players.push(make_player(
+                20 + i as u32,
+                70,
+                pos,
+                PlayerRole::RolePlayer,
+                1,
+            ));
         }
         let s = run_team_chemistry(team, players);
-        assert!(s.value >= 0.65, "balanced roster should score ≥0.65, got {}", s.value);
+        assert!(
+            s.value >= 0.65,
+            "balanced roster should score ≥0.65, got {}",
+            s.value
+        );
     }
 
     #[test]
@@ -292,17 +325,33 @@ mod tests {
             players.push(make_player(i, 92, Position::SG, PlayerRole::Star, 1));
         }
         for i in 0..3 {
-            players.push(make_player(10 + i, 70, Position::SF, PlayerRole::RolePlayer, 1));
+            players.push(make_player(
+                10 + i,
+                70,
+                Position::SF,
+                PlayerRole::RolePlayer,
+                1,
+            ));
         }
         let s = run_team_chemistry(team, players);
-        assert!(s.value < 0.65, "star-stack roster should score below 0.65, got {}", s.value);
+        assert!(
+            s.value < 0.65,
+            "star-stack roster should score below 0.65, got {}",
+            s.value
+        );
     }
 
     #[test]
     fn star_in_bench_role_tanks_chemistry() {
         let team = make_team(1, "BOS");
         let mut players = vec![];
-        let positions = [Position::PG, Position::SG, Position::SF, Position::PF, Position::C];
+        let positions = [
+            Position::PG,
+            Position::SG,
+            Position::SF,
+            Position::PF,
+            Position::C,
+        ];
         for (i, &pos) in positions.iter().enumerate() {
             players.push(make_player(i as u32 + 1, 80, pos, PlayerRole::Starter, 1));
         }
@@ -310,6 +359,10 @@ mod tests {
         bench_star.morale = 0.2;
         players.push(bench_star);
         let s = run_team_chemistry(team, players);
-        assert!(s.value < 0.6, "bench-star team should drop below 0.6, got {}", s.value);
+        assert!(
+            s.value < 0.6,
+            "bench-star team should drop below 0.6, got {}",
+            s.value
+        );
     }
 }

@@ -73,9 +73,7 @@ fn roundtrip_cut_then_sign() {
 
     // Sign back → roster grows, FA pool empties. Going through
     // `assign_player_to_team` is what the CLI does — must clear `is_free_agent`.
-    store
-        .assign_player_to_team(p.id, HOME)
-        .expect("assign");
+    store.assign_player_to_team(p.id, HOME).expect("assign");
     assert_eq!(store.roster_for_team(HOME).unwrap().len(), 1);
     assert!(
         store.list_free_agents().unwrap().is_empty(),
@@ -130,9 +128,7 @@ fn cut_then_resign_round_trips_cleanly() {
 
     store.cut_player(p.id).expect("cut");
     assert_eq!(store.list_free_agents().unwrap().len(), 1);
-    store
-        .assign_player_to_team(p.id, HOME)
-        .expect("re-sign");
+    store.assign_player_to_team(p.id, HOME).expect("re-sign");
 
     // Cut a second time after re-signing — the FA flag must come back on,
     // not stay stale from an earlier flip.

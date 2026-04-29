@@ -15,33 +15,69 @@ use rand_chacha::ChaCha8Rng;
 
 fn shooter_ratings(three_point: u8, mid_range: u8, free_throw: u8, base: u8) -> Ratings {
     Ratings {
-        close_shot: base, driving_layup: base, driving_dunk: base,
-        standing_dunk: base, post_control: base,
-        mid_range, three_point, free_throw,
-        passing_accuracy: base, ball_handle: base, speed_with_ball: base,
-        interior_defense: base, perimeter_defense: base, steal: base, block: base,
-        off_reb: base, def_reb: base,
-        speed: base, agility: base, strength: base, vertical: base,
+        close_shot: base,
+        driving_layup: base,
+        driving_dunk: base,
+        standing_dunk: base,
+        post_control: base,
+        mid_range,
+        three_point,
+        free_throw,
+        passing_accuracy: base,
+        ball_handle: base,
+        speed_with_ball: base,
+        interior_defense: base,
+        perimeter_defense: base,
+        steal: base,
+        block: base,
+        off_reb: base,
+        def_reb: base,
+        speed: base,
+        agility: base,
+        strength: base,
+        vertical: base,
     }
 }
 
 fn uniform_ratings(base: u8) -> Ratings {
     Ratings {
-        close_shot: base, driving_layup: base, driving_dunk: base,
-        standing_dunk: base, post_control: base,
-        mid_range: base, three_point: base, free_throw: base,
-        passing_accuracy: base, ball_handle: base, speed_with_ball: base,
-        interior_defense: base, perimeter_defense: base, steal: base, block: base,
-        off_reb: base, def_reb: base,
-        speed: base, agility: base, strength: base, vertical: base,
+        close_shot: base,
+        driving_layup: base,
+        driving_dunk: base,
+        standing_dunk: base,
+        post_control: base,
+        mid_range: base,
+        three_point: base,
+        free_throw: base,
+        passing_accuracy: base,
+        ball_handle: base,
+        speed_with_ball: base,
+        interior_defense: base,
+        perimeter_defense: base,
+        steal: base,
+        block: base,
+        off_reb: base,
+        def_reb: base,
+        speed: base,
+        agility: base,
+        strength: base,
+        vertical: base,
     }
 }
 
 /// Build a team where the SG (slot 1) is the OVR-90 sniper under test.
 fn team_with_sniper(id: u8, abbrev: &str, sniper: Ratings, sniper_overall: u8) -> TeamSnapshot {
     let baseline = uniform_ratings(75);
-    let positions = [Position::PG, Position::SG, Position::SF, Position::PF, Position::C,
-                     Position::PG, Position::SG, Position::C];
+    let positions = [
+        Position::PG,
+        Position::SG,
+        Position::SF,
+        Position::PF,
+        Position::C,
+        Position::PG,
+        Position::SG,
+        Position::C,
+    ];
     let minutes_share = [1.0, 1.0, 0.95, 0.85, 0.85, 0.45, 0.45, 0.45];
     let usage = [0.20, 0.28, 0.18, 0.14, 0.12, 0.04, 0.02, 0.02];
 
@@ -103,7 +139,10 @@ fn ovr90_sg_50_games_fg_calibration() {
     for g in 0..50 {
         let r = engine.simulate_game(&home, &away, &ctx(g + 1), &mut rng);
         // Sniper is SG (rotation index 1) on the home team.
-        let line = r.box_score.home_lines.iter()
+        let line = r
+            .box_score
+            .home_lines
+            .iter()
             .find(|l| l.player == PlayerId(101))
             .expect("sniper line present");
         if line.fg_att > 0 {
@@ -117,30 +156,50 @@ fn ovr90_sg_50_games_fg_calibration() {
         // Hard sanity: a single game must never break NBA-realistic per-game band.
         if line.fg_att > 0 {
             let pct = line.fg_made as f32 / line.fg_att as f32;
-            assert!(pct >= 0.20 && pct <= 0.75,
+            assert!(
+                pct >= 0.20 && pct <= 0.75,
                 "game {} fg_pct {} (made={}, att={}) outside [0.20, 0.75]",
-                g, pct, line.fg_made, line.fg_att);
+                g,
+                pct,
+                line.fg_made,
+                line.fg_att
+            );
         }
     }
 
-    assert!(games_with_attempts >= 40,
-        "sniper had FG attempts in only {} of 50 games", games_with_attempts);
+    assert!(
+        games_with_attempts >= 40,
+        "sniper had FG attempts in only {} of 50 games",
+        games_with_attempts
+    );
 
     let mean_fg: f32 = fg_pcts.iter().sum::<f32>() / fg_pcts.len() as f32;
     let mean_three: f32 = three_pcts.iter().sum::<f32>() / three_pcts.len().max(1) as f32;
     let min_fg = fg_pcts.iter().cloned().fold(1.0_f32, f32::min);
     let max_fg = fg_pcts.iter().cloned().fold(0.0_f32, f32::max);
 
-    assert!(mean_fg >= 0.40 && mean_fg <= 0.55,
-        "mean FG% {} outside [0.40, 0.55] (50 games, three_point=92, mid_range=88)", mean_fg);
-    assert!(min_fg > 0.20,
-        "min FG% {} <= 0.20 — single game should not crash so low", min_fg);
-    assert!(max_fg < 0.75,
-        "max FG% {} >= 0.75 — single game should not exceed band", max_fg);
+    assert!(
+        mean_fg >= 0.40 && mean_fg <= 0.55,
+        "mean FG% {} outside [0.40, 0.55] (50 games, three_point=92, mid_range=88)",
+        mean_fg
+    );
+    assert!(
+        min_fg > 0.20,
+        "min FG% {} <= 0.20 — single game should not crash so low",
+        min_fg
+    );
+    assert!(
+        max_fg < 0.75,
+        "max FG% {} >= 0.75 — single game should not exceed band",
+        max_fg
+    );
 
     if !three_pcts.is_empty() {
-        assert!(mean_three >= 0.30 && mean_three <= 0.45,
-            "mean 3P% {} outside [0.30, 0.45]", mean_three);
+        assert!(
+            mean_three >= 0.30 && mean_three <= 0.45,
+            "mean 3P% {} outside [0.30, 0.45]",
+            mean_three
+        );
     }
 }
 
@@ -159,11 +218,19 @@ fn season_aggregate_fg_pct_in_band_100_games() {
     let mut sniper_att: u32 = 0;
     for g in 0..100 {
         let r = engine.simulate_game(&home, &away, &ctx(g + 1), &mut rng);
-        for line in r.box_score.home_lines.iter().chain(r.box_score.away_lines.iter()) {
+        for line in r
+            .box_score
+            .home_lines
+            .iter()
+            .chain(r.box_score.away_lines.iter())
+        {
             fg_made_total += line.fg_made as u32;
             fg_att_total += line.fg_att as u32;
         }
-        let sniper_line = r.box_score.home_lines.iter()
+        let sniper_line = r
+            .box_score
+            .home_lines
+            .iter()
             .find(|l| l.player == PlayerId(301))
             .expect("sniper line");
         sniper_made += sniper_line.fg_made as u32;
@@ -171,10 +238,16 @@ fn season_aggregate_fg_pct_in_band_100_games() {
     }
 
     let team_fg_pct = fg_made_total as f32 / fg_att_total as f32;
-    assert!(team_fg_pct >= 0.40 && team_fg_pct <= 0.55,
-        "season-aggregate league FG% {} outside [0.40, 0.55]", team_fg_pct);
+    assert!(
+        team_fg_pct >= 0.40 && team_fg_pct <= 0.55,
+        "season-aggregate league FG% {} outside [0.40, 0.55]",
+        team_fg_pct
+    );
 
     let sniper_fg_pct = sniper_made as f32 / sniper_att as f32;
-    assert!(sniper_fg_pct >= 0.40 && sniper_fg_pct <= 0.60,
-        "100-game sniper FG% {} outside [0.40, 0.60] — Curry .887 bug regression", sniper_fg_pct);
+    assert!(
+        sniper_fg_pct >= 0.40 && sniper_fg_pct <= 0.60,
+        "100-game sniper FG% {} outside [0.40, 0.60] — Curry .887 bug regression",
+        sniper_fg_pct
+    );
 }

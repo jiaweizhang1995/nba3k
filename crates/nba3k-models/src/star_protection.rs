@@ -45,9 +45,7 @@ impl StarRoster {
         let Some(names) = self.by_team.get(&key) else {
             return false;
         };
-        names
-            .iter()
-            .any(|n| n.eq_ignore_ascii_case(player_name))
+        names.iter().any(|n| n.eq_ignore_ascii_case(player_name))
     }
 
     /// Total number of teams with at least one tagged player.
@@ -159,7 +157,9 @@ pub fn star_protection(
     // mode). Already baked into the top_ovr bump above; here we apply a
     // small floor adjustment so a FullRebuild's top_ovr never accidentally
     // crosses the absolute_threshold without an explicit franchise tag.
-    if matches!(context.mode, TeamMode::FullRebuild) && score.value < weights.absolute_threshold as f64 {
+    if matches!(context.mode, TeamMode::FullRebuild)
+        && score.value < weights.absolute_threshold as f64
+    {
         let pull = -0.05_f64;
         score.add("team_mode_full_rebuild", pull);
     }

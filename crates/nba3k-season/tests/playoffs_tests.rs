@@ -11,8 +11,8 @@
 
 use chrono::NaiveDate;
 use nba3k_core::{
-    BoxScore, Conference, Division, GMArchetype, GMPersonality, GameId, GameResult,
-    PlayerId, PlayerLine, SeasonId, Team, TeamId,
+    BoxScore, Conference, Division, GMArchetype, GMPersonality, GameId, GameResult, PlayerId,
+    PlayerLine, SeasonId, Team, TeamId,
 };
 use nba3k_season::playoffs::{
     compute_finals_mvp, generate_bracket, simulate_series, PlayoffRound, Series, SeriesResult,
@@ -24,7 +24,6 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::collections::HashMap;
 
-
 // ----------------------------------------------------------------------
 // Fixtures
 // ----------------------------------------------------------------------
@@ -32,14 +31,38 @@ use std::collections::HashMap;
 fn fixture_teams() -> Vec<Team> {
     let mut out = Vec::with_capacity(30);
     let east_div_seq = [
-        Division::Atlantic, Division::Atlantic, Division::Atlantic, Division::Atlantic, Division::Atlantic,
-        Division::Central, Division::Central, Division::Central, Division::Central, Division::Central,
-        Division::Southeast, Division::Southeast, Division::Southeast, Division::Southeast, Division::Southeast,
+        Division::Atlantic,
+        Division::Atlantic,
+        Division::Atlantic,
+        Division::Atlantic,
+        Division::Atlantic,
+        Division::Central,
+        Division::Central,
+        Division::Central,
+        Division::Central,
+        Division::Central,
+        Division::Southeast,
+        Division::Southeast,
+        Division::Southeast,
+        Division::Southeast,
+        Division::Southeast,
     ];
     let west_div_seq = [
-        Division::Northwest, Division::Northwest, Division::Northwest, Division::Northwest, Division::Northwest,
-        Division::Pacific, Division::Pacific, Division::Pacific, Division::Pacific, Division::Pacific,
-        Division::Southwest, Division::Southwest, Division::Southwest, Division::Southwest, Division::Southwest,
+        Division::Northwest,
+        Division::Northwest,
+        Division::Northwest,
+        Division::Northwest,
+        Division::Northwest,
+        Division::Pacific,
+        Division::Pacific,
+        Division::Pacific,
+        Division::Pacific,
+        Division::Pacific,
+        Division::Southwest,
+        Division::Southwest,
+        Division::Southwest,
+        Division::Southwest,
+        Division::Southwest,
     ];
     for i in 0..15u8 {
         out.push(Team {
@@ -214,7 +237,11 @@ fn bracket_sixteen_teams_split_8_8() {
         .iter()
         .filter(|s| s.conference == Some(Conference::West))
         .collect();
-    assert_eq!(east_series.len(), 4, "expected 4 East R1 series (1v8/4v5/3v6/2v7)");
+    assert_eq!(
+        east_series.len(),
+        4,
+        "expected 4 East R1 series (1v8/4v5/3v6/2v7)"
+    );
     assert_eq!(west_series.len(), 4, "expected 4 West R1 series");
 }
 
@@ -244,7 +271,10 @@ fn bracket_seeds_match_canonical_pairings() {
     unique.dedup();
     let mut expected_sorted = expected.clone();
     expected_sorted.sort();
-    assert_eq!(unique, expected_sorted, "East pairings must be 1v8 / 4v5 / 3v6 / 2v7");
+    assert_eq!(
+        unique, expected_sorted,
+        "East pairings must be 1v8 / 4v5 / 3v6 / 2v7"
+    );
 }
 
 #[test]
@@ -259,7 +289,10 @@ fn bracket_first_three_rounds_stay_within_conference() {
     let standings = make_standings(&teams, &wins);
     let bracket = generate_bracket(&standings, SeasonId(2026));
     for s in &bracket.r1 {
-        assert!(s.conference.is_some(), "R1 series must be tagged with a conference");
+        assert!(
+            s.conference.is_some(),
+            "R1 series must be tagged with a conference"
+        );
     }
 }
 
@@ -343,7 +376,11 @@ fn finals_mvp_picked_from_winning_team() {
         .games
         .iter()
         .flat_map(|g| {
-            let lines = if g.home == champ { &g.box_score.home_lines } else { &g.box_score.away_lines };
+            let lines = if g.home == champ {
+                &g.box_score.home_lines
+            } else {
+                &g.box_score.away_lines
+            };
             lines.iter().map(|l| l.player).collect::<Vec<_>>()
         })
         .collect();
@@ -351,7 +388,9 @@ fn finals_mvp_picked_from_winning_team() {
     assert!(
         champ_player_ids.contains(&mvp_player),
         "Finals MVP {:?} must be on champion {:?}; champ players were {:?}",
-        mvp_player, champ, champ_player_ids
+        mvp_player,
+        champ,
+        champ_player_ids
     );
 }
 
@@ -367,10 +406,22 @@ fn host_pattern_is_2_2_1_1_1() {
     let res = run_one_series(0, 80, 80);
     let host_seq: Vec<TeamId> = res.games.iter().map(|g| g.home).collect();
     let pattern = [
-        TeamId(1), TeamId(1), TeamId(2), TeamId(2),
-        TeamId(1), TeamId(2), TeamId(1),
+        TeamId(1),
+        TeamId(1),
+        TeamId(2),
+        TeamId(2),
+        TeamId(1),
+        TeamId(2),
+        TeamId(1),
     ];
     for (i, host) in host_seq.iter().enumerate() {
-        assert_eq!(*host, pattern[i], "game {} host should be {:?}; got {:?}", i + 1, pattern[i], host);
+        assert_eq!(
+            *host,
+            pattern[i],
+            "game {} host should be {:?}; got {:?}",
+            i + 1,
+            pattern[i],
+            host
+        );
     }
 }

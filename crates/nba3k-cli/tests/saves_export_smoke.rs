@@ -13,9 +13,7 @@ fn nba3k_bin() -> PathBuf {
 
 fn fresh_save(path: &std::path::Path) {
     let store = Store::open(path).expect("open store");
-    store
-        .init_metadata(SeasonId(2026))
-        .expect("init metadata");
+    store.init_metadata(SeasonId(2026)).expect("init metadata");
     store.set_meta("user_team", "BOS").expect("set user_team");
     drop(store);
 }
@@ -57,8 +55,7 @@ fn saves_export_writes_pretty_json_with_all_tables() {
     );
 
     let bytes = std::fs::read(&dump).expect("read dump file");
-    let v: serde_json::Value =
-        serde_json::from_slice(&bytes).expect("dump must be valid JSON");
+    let v: serde_json::Value = serde_json::from_slice(&bytes).expect("dump must be valid JSON");
 
     let tables = v
         .get("tables")

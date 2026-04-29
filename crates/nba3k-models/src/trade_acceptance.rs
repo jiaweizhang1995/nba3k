@@ -78,16 +78,11 @@ pub struct ComposeWeights<'w> {
 /// Closures that wrap A/B/D model functions. Tests inject deterministic
 /// stubs; production wiring inserts the real `crate::*::*` calls.
 pub struct ValueProviders<'a> {
-    pub player_value:
-        Box<dyn Fn(&Player, &GMTraits, TeamId, &LeagueSnapshot) -> Score + 'a>,
-    pub contract_value:
-        Box<dyn Fn(&Player, &GMTraits, &LeagueYear) -> Score + 'a>,
-    pub star_protection:
-        Box<dyn Fn(PlayerId, TeamId, &LeagueSnapshot, &StarRoster) -> Score + 'a>,
-    pub team_context:
-        Box<dyn Fn(TeamId, &LeagueSnapshot) -> TeamContext + 'a>,
-    pub asset_fit:
-        Box<dyn Fn(&Player, TeamId, &LeagueSnapshot) -> Score + 'a>,
+    pub player_value: Box<dyn Fn(&Player, &GMTraits, TeamId, &LeagueSnapshot) -> Score + 'a>,
+    pub contract_value: Box<dyn Fn(&Player, &GMTraits, &LeagueYear) -> Score + 'a>,
+    pub star_protection: Box<dyn Fn(PlayerId, TeamId, &LeagueSnapshot, &StarRoster) -> Score + 'a>,
+    pub team_context: Box<dyn Fn(TeamId, &LeagueSnapshot) -> TeamContext + 'a>,
+    pub asset_fit: Box<dyn Fn(&Player, TeamId, &LeagueSnapshot) -> Score + 'a>,
 }
 
 impl<'a> ValueProviders<'a> {
@@ -147,7 +142,15 @@ pub fn trade_acceptance(
         trade_acceptance: weights,
     };
     let providers = ValueProviders::real(&bundle);
-    trade_acceptance_with_providers(offer, evaluator, league, star_roster, &bundle, &providers, rng)
+    trade_acceptance_with_providers(
+        offer,
+        evaluator,
+        league,
+        star_roster,
+        &bundle,
+        &providers,
+        rng,
+    )
 }
 
 /// Composition entry that takes injected providers. Callers (production
@@ -170,7 +173,9 @@ pub fn trade_acceptance_with_providers(
     // headline behavior: Luka cannot be acquired, period.
     if let Some(outgoing_assets) = offer.assets_by_team.get(&evaluator) {
         for pid in &outgoing_assets.players_out {
-            let Some(player) = league.player(*pid) else { continue };
+            let Some(player) = league.player(*pid) else {
+                continue;
+            };
             let sp_score = (providers.star_protection)(*pid, evaluator, league, star_roster);
             if sp_score.value >= weights.star_protection.absolute_threshold as f64 {
                 return short_circuit_untouchable(player, &sp_score);
@@ -287,7 +292,10 @@ fn evaluator_traits(evaluator: TeamId, league: &LeagueSnapshot) -> GMTraits {
 }
 
 fn short_circuit_untouchable(player: &Player, sp_score: &Score) -> TradeAcceptance {
-    let mut reasons = vec![Reason { label: "untouchable star", delta: -1.0 }];
+    let mut reasons = vec![Reason {
+        label: "untouchable star",
+        delta: -1.0,
+    }];
     // Forward star_protection's component reasons so callers can render
     // *why* the player is untouchable (franchise tag, top-OVR, etc).
     reasons.extend(sp_score.reasons.iter().copied());
@@ -314,7 +322,9 @@ fn sum_outgoing_side(
 ) -> f64 {
     let mut total: f64 = 0.0;
     for pid in &assets.players_out {
-        let Some(player) = league.player(*pid) else { continue };
+        let Some(player) = league.player(*pid) else {
+            continue;
+        };
         let pv = (providers.player_value)(player, traits, evaluator, league);
         let cv = (providers.contract_value)(player, traits, league_year);
         // contract_value > 0 = team-friendly: losing it costs us. So the
@@ -330,10 +340,9 @@ fn sum_outgoing_side(
             // Linear ramp from 0× at premium_threshold to ~+25% of pv at
             // absolute_threshold. We add this to the outgoing total so the
             // side feels heavier.
-            let span =
-                (weights.star_protection.absolute_threshold
-                    - weights.star_protection.premium_threshold)
-                    .max(0.001) as f64;
+            let span = (weights.star_protection.absolute_threshold
+                - weights.star_protection.premium_threshold)
+                .max(0.001) as f64;
             let frac = ((sp.value - weights.star_protection.premium_threshold as f64) / span)
                 .clamp(0.0, 1.0);
             let penalty = pv.value.abs() * 0.25 * frac;
@@ -344,7 +353,10 @@ fn sum_outgoing_side(
             });
         }
 
-        out_reasons.push(Reason { label: "outgoing player_value", delta: -pv.value });
+        out_reasons.push(Reason {
+            label: "outgoing player_value",
+            delta: -pv.value,
+        });
         out_reasons.extend(pv.reasons.into_iter());
         if cv.value.abs() > 1.0 {
             out_reasons.push(Reason {
@@ -357,12 +369,18 @@ fn sum_outgoing_side(
         if let Some(pk) = league.pick(*pickid) {
             let pv = pick_value_cents(pk, league.current_season, traits, league);
             total += pv;
-            out_reasons.push(Reason { label: "outgoing pick", delta: -pv });
+            out_reasons.push(Reason {
+                label: "outgoing pick",
+                delta: -pv,
+            });
         }
     }
     total += assets.cash_out.0 as f64;
     if assets.cash_out.0 != 0 {
-        out_reasons.push(Reason { label: "outgoing cash", delta: -(assets.cash_out.0 as f64) });
+        out_reasons.push(Reason {
+            label: "outgoing cash",
+            delta: -(assets.cash_out.0 as f64),
+        });
     }
     total
 }
@@ -378,35 +396,52 @@ fn sum_incoming_side(
 ) -> f64 {
     let mut total: f64 = 0.0;
     for pid in &assets.players_out {
-        let Some(player) = league.player(*pid) else { continue };
+        let Some(player) = league.player(*pid) else {
+            continue;
+        };
         let pv = (providers.player_value)(player, traits, evaluator, league);
         let af = (providers.asset_fit)(player, evaluator, league);
         let cv = (providers.contract_value)(player, traits, league_year);
         let line = pv.value + af.value + cv.value;
         total += line;
 
-        out_reasons.push(Reason { label: "incoming player_value", delta: pv.value });
+        out_reasons.push(Reason {
+            label: "incoming player_value",
+            delta: pv.value,
+        });
         if af.value.abs() > 1.0 {
-            out_reasons.push(Reason { label: "asset fit", delta: af.value });
+            out_reasons.push(Reason {
+                label: "asset fit",
+                delta: af.value,
+            });
             // Forward the most descriptive sub-reason from asset_fit.
             if let Some(top) = af.reasons.first() {
                 out_reasons.push(*top);
             }
         }
         if cv.value.abs() > 1.0 {
-            out_reasons.push(Reason { label: "incoming contract_value", delta: cv.value });
+            out_reasons.push(Reason {
+                label: "incoming contract_value",
+                delta: cv.value,
+            });
         }
     }
     for pickid in &assets.picks_out {
         if let Some(pk) = league.pick(*pickid) {
             let pv = pick_value_cents(pk, league.current_season, traits, league);
             total += pv;
-            out_reasons.push(Reason { label: "incoming pick", delta: pv });
+            out_reasons.push(Reason {
+                label: "incoming pick",
+                delta: pv,
+            });
         }
     }
     total += assets.cash_out.0 as f64;
     if assets.cash_out.0 != 0 {
-        out_reasons.push(Reason { label: "incoming cash", delta: assets.cash_out.0 as f64 });
+        out_reasons.push(Reason {
+            label: "incoming cash",
+            delta: assets.cash_out.0 as f64,
+        });
     }
     total
 }
@@ -481,12 +516,9 @@ fn context_label(mode: &TeamMode) -> &'static str {
     }
 }
 
-fn sample_noise(
-    gullibility: f64,
-    weights: &ComposeWeights<'_>,
-    rng: &mut dyn RngCore,
-) -> f64 {
-    let stddev = weights.trade_acceptance.gullibility_noise_pct * gullibility.max(0.0)
+fn sample_noise(gullibility: f64, weights: &ComposeWeights<'_>, rng: &mut dyn RngCore) -> f64 {
+    let stddev = weights.trade_acceptance.gullibility_noise_pct
+        * gullibility.max(0.0)
         * weights.trade_acceptance.accept_probability_slope.abs();
     if stddev <= 0.0 {
         return 0.0;
@@ -522,14 +554,14 @@ fn commentary_for(verdict: &Verdict, top_reason: Option<&Reason>) -> String {
     let label = top_reason.map(|r| r.label).unwrap_or("the math");
     match verdict {
         Verdict::Accept => format!("Works for us — {label} tips it our way."),
-        Verdict::Counter(_) => format!("Close, but {label} is the sticking point — counter coming."),
+        Verdict::Counter(_) => {
+            format!("Close, but {label} is the sticking point — counter coming.")
+        }
         Verdict::Reject(reason) => match reason {
             RejectReason::InsufficientValue => {
                 format!("Doesn't move the needle — {label} kills it.")
             }
-            RejectReason::Other(s) if s == "untouchable" => {
-                "Not on the table.".to_string()
-            }
+            RejectReason::Other(s) if s == "untouchable" => "Not on the table.".to_string(),
             other => format!("Pass — {other:?}."),
         },
     }

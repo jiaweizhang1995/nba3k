@@ -104,10 +104,7 @@ impl Store {
 
     /// Read the calendar row for a season. Returns `None` when no row
     /// exists yet; callers usually fall back to `SeasonCalendar::default_for`.
-    pub fn get_season_calendar(
-        &self,
-        season: SeasonId,
-    ) -> StoreResult<Option<SeasonCalendar>> {
+    pub fn get_season_calendar(&self, season: SeasonId) -> StoreResult<Option<SeasonCalendar>> {
         let row = self
             .conn
             .query_row(

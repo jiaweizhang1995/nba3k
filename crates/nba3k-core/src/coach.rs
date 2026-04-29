@@ -125,12 +125,8 @@ impl Coach {
     /// to [0, 99].
     pub fn overall(&self) -> u8 {
         let a = &self.axes;
-        let avg = (a.strategy
-            + a.leadership
-            + a.mentorship
-            + a.knowledge
-            + a.team_management)
-            / 5.0;
+        let avg =
+            (a.strategy + a.leadership + a.mentorship + a.knowledge + a.team_management) / 5.0;
         avg.round().clamp(0.0, 99.0) as u8
     }
 
@@ -191,15 +187,31 @@ const SCHEMES: [Scheme; 8] = [
 ];
 
 const FIRST_NAMES: &[&str] = &[
-    "Wilson", "Marcus", "Jamal", "Tyrone", "Doc", "Chris", "Mike", "Steve",
-    "Erik", "Quin", "Tom", "Greg", "Ime", "Will", "Taylor", "Joe",
-    "Brian", "Jerry", "Frank", "Nate",
+    "Wilson", "Marcus", "Jamal", "Tyrone", "Doc", "Chris", "Mike", "Steve", "Erik", "Quin", "Tom",
+    "Greg", "Ime", "Will", "Taylor", "Joe", "Brian", "Jerry", "Frank", "Nate",
 ];
 
 const LAST_NAMES: &[&str] = &[
-    "Tillis", "Hardaway", "Crawford", "Lue", "Rivers", "Finch", "Snyder",
-    "Kerr", "Spoelstra", "Popovich", "Udoka", "Hardy", "Jenkins", "Mazzulla",
-    "Borrego", "Stotts", "Mosley", "Vogel", "Atkinson", "Daigneault",
+    "Tillis",
+    "Hardaway",
+    "Crawford",
+    "Lue",
+    "Rivers",
+    "Finch",
+    "Snyder",
+    "Kerr",
+    "Spoelstra",
+    "Popovich",
+    "Udoka",
+    "Hardy",
+    "Jenkins",
+    "Mazzulla",
+    "Borrego",
+    "Stotts",
+    "Mosley",
+    "Vogel",
+    "Atkinson",
+    "Daigneault",
 ];
 
 fn synthetic_name(h: u64) -> String {

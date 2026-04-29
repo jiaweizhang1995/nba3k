@@ -69,9 +69,14 @@ fn parse_team_page(html: &str) -> Result<Vec<RawPlayerStats>> {
 
     let mut out = Vec::with_capacity(roster.len());
     for r in roster {
-        let stats = per_game.iter().find(|p| names_match(&p.name, &r.name)).cloned();
+        let stats = per_game
+            .iter()
+            .find(|p| names_match(&p.name, &r.name))
+            .cloned();
         let (primary, secondary) = parse_position(&r.position);
-        let age = r.age.unwrap_or(stats.as_ref().and_then(|s| s.age).unwrap_or(25));
+        let age = r
+            .age
+            .unwrap_or(stats.as_ref().and_then(|s| s.age).unwrap_or(25));
         out.push(RawPlayerStats {
             name: r.name,
             primary_position: primary,
@@ -145,7 +150,11 @@ fn parse_roster(doc: &Html) -> Result<Vec<RosterRow>> {
         if name.trim().is_empty() {
             continue;
         }
-        rows.push(RosterRow { name, position, age });
+        rows.push(RosterRow {
+            name,
+            position,
+            age,
+        });
     }
     Ok(rows)
 }
@@ -163,7 +172,12 @@ fn roster_age_from_tr(tr: &scraper::ElementRef<'_>) -> Option<u8> {
     if let Some(csk) = cell.value().attr("csk") {
         if csk.len() >= 4 {
             if let Ok(year) = csk[..4].parse::<i32>() {
-                let now_year: i32 = chrono::Utc::now().date_naive().format("%Y").to_string().parse().unwrap_or(2026);
+                let now_year: i32 = chrono::Utc::now()
+                    .date_naive()
+                    .format("%Y")
+                    .to_string()
+                    .parse()
+                    .unwrap_or(2026);
                 let age = (now_year - year).clamp(17, 50);
                 return Some(age as u8);
             }
@@ -192,7 +206,11 @@ struct PerGameRow {
 fn parse_per_game(doc: &Html) -> Result<Vec<PerGameRow>> {
     // BBRef uses `per_game_stats`, `per_game`, or `per_game-team` ids
     // depending on era; try the modern one first.
-    let candidates = ["table#per_game_stats", "table#per_game", "table#per_game-team"];
+    let candidates = [
+        "table#per_game_stats",
+        "table#per_game",
+        "table#per_game-team",
+    ];
     let row_sel = Selector::parse("tbody tr").map_err(|e| anyhow!("selector: {e:?}"))?;
 
     for sel_str in candidates {

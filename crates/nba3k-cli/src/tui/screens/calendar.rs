@@ -238,7 +238,11 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
             area,
             theme,
             t(tui.lang, T::CalendarTitle),
-            &[t(tui.lang, T::CommonNoSaveLoaded), "", t(tui.lang, T::SavesLoad)],
+            &[
+                t(tui.lang, T::CommonNoSaveLoaded),
+                "",
+                t(tui.lang, T::SavesLoad),
+            ],
         );
         return;
     }
@@ -265,7 +269,6 @@ pub fn render(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui:
             SubTab::AllStar => draw_all_star_tab(f, outer[1], theme, app, tui, &st),
             SubTab::Cup => draw_cup_tab(f, outer[1], theme, app, tui, &st),
         }
-
     });
 }
 
@@ -307,7 +310,13 @@ fn draw_schedule_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, t(tui.lang, T::CalendarSchedule), &[t(tui.lang, T::CommonNoSaveLoaded)]);
+        centered_block(
+            f,
+            area,
+            theme,
+            t(tui.lang, T::CalendarSchedule),
+            &[t(tui.lang, T::CommonNoSaveLoaded)],
+        );
         return;
     };
 
@@ -328,12 +337,9 @@ fn draw_schedule_tab(
         month_name(tui.lang, st.view_month.month()),
         st.view_month.year(),
     );
-    let header = Paragraph::new(Line::from(Span::styled(
-        header_text,
-        theme.accent_style(),
-    )))
-    .alignment(Alignment::Center)
-    .block(theme.block(""));
+    let header = Paragraph::new(Line::from(Span::styled(header_text, theme.accent_style())))
+        .alignment(Alignment::Center)
+        .block(theme.block(""));
     f.render_widget(header, chunks[0]);
 
     // Index schedule entries by date for quick cell rendering.
@@ -391,7 +397,7 @@ fn draw_month_grid(
             weekday_name(lang, i),
             theme.muted_style(),
         )))
-            .alignment(Alignment::Center);
+        .alignment(Alignment::Center);
         f.render_widget(p, header_cols[i]);
     }
 
@@ -467,7 +473,9 @@ fn draw_day_cell(
             .bg(theme.highlight_bg)
             .add_modifier(Modifier::BOLD);
     }
-    let block = Block::default().borders(Borders::ALL).border_style(border_style);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -539,21 +547,27 @@ fn format_opponent(
 // Tab 2: Standings
 // ---------------------------------------------------------------------------
 
-fn draw_standings_tab(
-    f: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    app: &mut AppState,
-    tui: &TuiApp,
-) {
+fn draw_standings_tab(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, t(tui.lang, T::CalendarStandings), &[t(tui.lang, T::CommonNoSaveLoaded)]);
+        centered_block(
+            f,
+            area,
+            theme,
+            t(tui.lang, T::CalendarStandings),
+            &[t(tui.lang, T::CommonNoSaveLoaded)],
+        );
         return;
     };
     let rows = match app.store().and_then(|s| Ok(s.read_standings(ctx.season)?)) {
         Ok(v) => v,
         Err(_) => {
-            centered_block(f, area, theme, t(tui.lang, T::CalendarStandings), &["(unable to load)"]);
+            centered_block(
+                f,
+                area,
+                theme,
+                t(tui.lang, T::CalendarStandings),
+                &["(unable to load)"],
+            );
             return;
         }
     };
@@ -573,10 +587,14 @@ fn draw_standings_tab(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    let east: Vec<&StandingRow> =
-        rows.iter().filter(|r| r.conference == Conference::East).collect();
-    let west: Vec<&StandingRow> =
-        rows.iter().filter(|r| r.conference == Conference::West).collect();
+    let east: Vec<&StandingRow> = rows
+        .iter()
+        .filter(|r| r.conference == Conference::East)
+        .collect();
+    let west: Vec<&StandingRow> = rows
+        .iter()
+        .filter(|r| r.conference == Conference::West)
+        .collect();
 
     f.render_widget(standings_table(&east, theme, " East "), cols[0]);
     f.render_widget(standings_table(&west, theme, " West "), cols[1]);
@@ -638,15 +656,15 @@ fn standings_table<'a>(rows: &[&StandingRow], theme: &'a Theme, title: &'a str) 
 // Tab 3: Playoffs
 // ---------------------------------------------------------------------------
 
-fn draw_playoffs_tab(
-    f: &mut Frame,
-    area: Rect,
-    theme: &Theme,
-    app: &mut AppState,
-    tui: &TuiApp,
-) {
+fn draw_playoffs_tab(f: &mut Frame, area: Rect, theme: &Theme, app: &mut AppState, tui: &TuiApp) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, t(tui.lang, T::CalendarPlayoffs), &[t(tui.lang, T::CommonNoSaveLoaded)]);
+        centered_block(
+            f,
+            area,
+            theme,
+            t(tui.lang, T::CalendarPlayoffs),
+            &[t(tui.lang, T::CommonNoSaveLoaded)],
+        );
         return;
     };
     let phase = ctx.season_state.phase;
@@ -668,7 +686,13 @@ fn draw_playoffs_tab(
     let series = match app.store().and_then(|s| Ok(s.read_series(ctx.season)?)) {
         Ok(v) => v,
         Err(_) => {
-            centered_block(f, area, theme, t(tui.lang, T::CalendarPlayoffs), &["(unable to load)"]);
+            centered_block(
+                f,
+                area,
+                theme,
+                t(tui.lang, T::CalendarPlayoffs),
+                &["(unable to load)"],
+            );
             return;
         }
     };
@@ -678,9 +702,7 @@ fn draw_playoffs_tab(
             area,
             theme,
             t(tui.lang, T::CalendarPlayoffs),
-            &[
-                "Bracket not yet generated.",
-            ],
+            &["Bracket not yet generated."],
         );
         return;
     }
@@ -759,18 +781,27 @@ fn draw_awards_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, t(tui.lang, T::CalendarAwards), &[t(tui.lang, T::CommonNoSaveLoaded)]);
+        centered_block(
+            f,
+            area,
+            theme,
+            t(tui.lang, T::CalendarAwards),
+            &[t(tui.lang, T::CommonNoSaveLoaded)],
+        );
         return;
     };
-    let target_season = SeasonId(
-        ((ctx.season.0 as i32) + st.awards_season_offset)
-            .max(1) as u16,
-    );
+    let target_season = SeasonId(((ctx.season.0 as i32) + st.awards_season_offset).max(1) as u16);
 
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
-            centered_block(f, area, theme, t(tui.lang, T::CalendarAwards), &["(unable to load)"]);
+            centered_block(
+                f,
+                area,
+                theme,
+                t(tui.lang, T::CalendarAwards),
+                &["(unable to load)"],
+            );
             return;
         }
     };
@@ -779,14 +810,15 @@ fn draw_awards_tab(
     let player_name: HashMap<PlayerId, String> =
         players.iter().map(|p| (p.id, p.name.clone())).collect();
 
-    let mut header_lines: Vec<(&str, String)> = vec![
-        (
-            t(tui.lang, T::NewGameSeason),
-            format!("{}-{:02}", target_season.0 - 1, target_season.0 % 100),
-        ),
-    ];
+    let mut header_lines: Vec<(&str, String)> = vec![(
+        t(tui.lang, T::NewGameSeason),
+        format!("{}-{:02}", target_season.0 - 1, target_season.0 % 100),
+    )];
     if award_rows.is_empty() {
-        header_lines.push((t(tui.lang, T::CommonReady), t(tui.lang, T::CalendarAwards).to_string()));
+        header_lines.push((
+            t(tui.lang, T::CommonReady),
+            t(tui.lang, T::CalendarAwards).to_string(),
+        ));
         let table = kv_table(&header_lines, theme, t(tui.lang, T::CalendarAwards));
         f.render_widget(table, area);
         return;
@@ -833,18 +865,27 @@ fn draw_all_star_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, t(tui.lang, T::CalendarAllStar), &[t(tui.lang, T::CommonNoSaveLoaded)]);
+        centered_block(
+            f,
+            area,
+            theme,
+            t(tui.lang, T::CalendarAllStar),
+            &[t(tui.lang, T::CommonNoSaveLoaded)],
+        );
         return;
     };
-    let target_season = SeasonId(
-        ((ctx.season.0 as i32) + st.awards_season_offset)
-            .max(1) as u16,
-    );
+    let target_season = SeasonId(((ctx.season.0 as i32) + st.awards_season_offset).max(1) as u16);
 
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
-            centered_block(f, area, theme, t(tui.lang, T::CalendarAllStar), &["(unable to load)"]);
+            centered_block(
+                f,
+                area,
+                theme,
+                t(tui.lang, T::CalendarAllStar),
+                &["(unable to load)"],
+            );
             return;
         }
     };
@@ -893,12 +934,18 @@ fn draw_all_star_tab(
 
     let render_side = |starters: &[String], reserves: &[String]| -> Vec<Line<'static>> {
         let mut lines: Vec<Line> = Vec::new();
-        lines.push(Line::from(Span::styled(t(tui.lang, T::RotationStarters), theme.accent_style())));
+        lines.push(Line::from(Span::styled(
+            t(tui.lang, T::RotationStarters),
+            theme.accent_style(),
+        )));
         for n in starters {
             lines.push(Line::from(format!("  {}", n)));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(t(tui.lang, T::RotationBench), theme.accent_style())));
+        lines.push(Line::from(Span::styled(
+            t(tui.lang, T::RotationBench),
+            theme.accent_style(),
+        )));
         for n in reserves {
             lines.push(Line::from(format!("  {}", n)));
         }
@@ -907,10 +954,10 @@ fn draw_all_star_tab(
 
     let east_title = " East ".to_string();
     let west_title = " West ".to_string();
-    let east = Paragraph::new(render_side(&east_starters, &east_reserves))
-        .block(theme.block(&east_title));
-    let west = Paragraph::new(render_side(&west_starters, &west_reserves))
-        .block(theme.block(&west_title));
+    let east =
+        Paragraph::new(render_side(&east_starters, &east_reserves)).block(theme.block(&east_title));
+    let west =
+        Paragraph::new(render_side(&west_starters, &west_reserves)).block(theme.block(&west_title));
     f.render_widget(east, cols[0]);
     f.render_widget(west, cols[1]);
 }
@@ -928,18 +975,27 @@ fn draw_cup_tab(
     st: &CalendarState,
 ) {
     let Some(ctx) = tui.save_ctx.as_ref() else {
-        centered_block(f, area, theme, t(tui.lang, T::CalendarCup), &[t(tui.lang, T::CommonNoSaveLoaded)]);
+        centered_block(
+            f,
+            area,
+            theme,
+            t(tui.lang, T::CalendarCup),
+            &[t(tui.lang, T::CommonNoSaveLoaded)],
+        );
         return;
     };
-    let target_season = SeasonId(
-        ((ctx.season.0 as i32) + st.awards_season_offset)
-            .max(1) as u16,
-    );
+    let target_season = SeasonId(((ctx.season.0 as i32) + st.awards_season_offset).max(1) as u16);
 
     let store = match app.store() {
         Ok(s) => s,
         Err(_) => {
-            centered_block(f, area, theme, t(tui.lang, T::CalendarCup), &["(unable to load)"]);
+            centered_block(
+                f,
+                area,
+                theme,
+                t(tui.lang, T::CalendarCup),
+                &["(unable to load)"],
+            );
             return;
         }
     };
@@ -1040,53 +1096,49 @@ pub fn handle_key(_app: &mut AppState, _tui: &mut TuiApp, key: KeyEvent) -> Resu
 
         // Sub-tab specific keys.
         match st.sub_tab {
-            SubTab::Schedule => {
-                match key.code {
-                    KeyCode::Left => {
-                        if !key.modifiers.contains(KeyModifiers::SHIFT) {
-                            st.cell_cursor = st.cell_cursor.saturating_sub(1);
-                        }
-                        consumed = true;
+            SubTab::Schedule => match key.code {
+                KeyCode::Left => {
+                    if !key.modifiers.contains(KeyModifiers::SHIFT) {
+                        st.cell_cursor = st.cell_cursor.saturating_sub(1);
                     }
-                    KeyCode::Right => {
-                        st.cell_cursor = (st.cell_cursor + 1).min(41);
-                        consumed = true;
-                    }
-                    KeyCode::Up => {
-                        st.cell_cursor = st.cell_cursor.saturating_sub(7);
-                        consumed = true;
-                    }
-                    KeyCode::Down => {
-                        st.cell_cursor = (st.cell_cursor + 7).min(41);
-                        consumed = true;
-                    }
-                    KeyCode::Char('[') => {
-                        st.view_month = prev_month(st.view_month);
-                        consumed = true;
-                    }
-                    KeyCode::Char(']') => {
-                        st.view_month = next_month(st.view_month);
-                        consumed = true;
-                    }
-                    _ => {}
+                    consumed = true;
                 }
-            }
+                KeyCode::Right => {
+                    st.cell_cursor = (st.cell_cursor + 1).min(41);
+                    consumed = true;
+                }
+                KeyCode::Up => {
+                    st.cell_cursor = st.cell_cursor.saturating_sub(7);
+                    consumed = true;
+                }
+                KeyCode::Down => {
+                    st.cell_cursor = (st.cell_cursor + 7).min(41);
+                    consumed = true;
+                }
+                KeyCode::Char('[') => {
+                    st.view_month = prev_month(st.view_month);
+                    consumed = true;
+                }
+                KeyCode::Char(']') => {
+                    st.view_month = next_month(st.view_month);
+                    consumed = true;
+                }
+                _ => {}
+            },
             SubTab::Playoffs => {}
-            SubTab::Awards | SubTab::AllStar | SubTab::Cup => {
-                match key.code {
-                    KeyCode::Left => {
-                        st.awards_season_offset -= 1;
+            SubTab::Awards | SubTab::AllStar | SubTab::Cup => match key.code {
+                KeyCode::Left => {
+                    st.awards_season_offset -= 1;
+                    consumed = true;
+                }
+                KeyCode::Right => {
+                    if st.awards_season_offset < 0 {
+                        st.awards_season_offset += 1;
                         consumed = true;
                     }
-                    KeyCode::Right => {
-                        if st.awards_season_offset < 0 {
-                            st.awards_season_offset += 1;
-                            consumed = true;
-                        }
-                    }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
     });

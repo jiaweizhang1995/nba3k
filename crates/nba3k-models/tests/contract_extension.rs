@@ -64,7 +64,10 @@ fn near_90pct_market_returns_counter_with_bumped_request() {
     let offered = Cents(27_000_000_00).0;
     let d = accept_extension(&p, offered, 4, SEASON);
     match d {
-        ExtensionDecision::Counter { request_salary_cents, request_years } => {
+        ExtensionDecision::Counter {
+            request_salary_cents,
+            request_years,
+        } => {
             assert!(
                 request_salary_cents > offered,
                 "counter ({}) should bump above offer ({})",

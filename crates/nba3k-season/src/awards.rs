@@ -133,31 +133,67 @@ impl PlayerSeason {
     }
 
     pub fn ppg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.pts as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.pts as f32 / self.games as f32
+        }
     }
     pub fn mpg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.minutes as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.minutes as f32 / self.games as f32
+        }
     }
     pub fn rpg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.reb as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.reb as f32 / self.games as f32
+        }
     }
     pub fn apg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.ast as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.ast as f32 / self.games as f32
+        }
     }
     pub fn spg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.stl as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.stl as f32 / self.games as f32
+        }
     }
     pub fn bpg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.blk as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.blk as f32 / self.games as f32
+        }
     }
     pub fn tpg(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.tov as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.tov as f32 / self.games as f32
+        }
     }
     pub fn three_made_per_game(&self) -> f32 {
-        if self.games == 0 { 0.0 } else { self.three_made as f32 / self.games as f32 }
+        if self.games == 0 {
+            0.0
+        } else {
+            self.three_made as f32 / self.games as f32
+        }
     }
     pub fn fg_pct(&self) -> f32 {
-        if self.fg_att == 0 { 0.0 } else { self.fg_made as f32 / self.fg_att as f32 }
+        if self.fg_att == 0 {
+            0.0
+        } else {
+            self.fg_made as f32 / self.fg_att as f32
+        }
     }
 }
 
@@ -202,12 +238,19 @@ pub fn aggregate_season(games: &[GameResult]) -> SeasonAggregate {
     let team_drtg = def
         .into_iter()
         .map(|(t, (pts, gp))| {
-            let drtg = if gp == 0 { 110.0 } else { pts as f32 / gp as f32 };
+            let drtg = if gp == 0 {
+                110.0
+            } else {
+                pts as f32 / gp as f32
+            };
             (t, drtg)
         })
         .collect();
 
-    SeasonAggregate { by_player, team_drtg }
+    SeasonAggregate {
+        by_player,
+        team_drtg,
+    }
 }
 
 fn accumulate_line(
@@ -363,8 +406,10 @@ pub fn run_ballot<K: Copy + Eq + std::hash::Hash + Ord>(
 
     // Normalize tally by total possible (so values sit in 0..=1 range).
     let total_possible = voters as f32 * weights.iter().sum::<u32>() as f32;
-    let mut out: Vec<(K, f32)> =
-        tally.into_iter().map(|(k, v)| (k, v / total_possible)).collect();
+    let mut out: Vec<(K, f32)> = tally
+        .into_iter()
+        .map(|(k, v)| (k, v / total_possible))
+        .collect();
     // Tiebreak deterministically on the natural order of K (e.g. PlayerId asc).
     out.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
@@ -395,13 +440,14 @@ pub fn compute_mvp(
     let scores = mvp_scores(aggregate, standings);
     let mut rng = rng_for(season, 1);
     let ballot = run_ballot(&scores, MVP_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::MVP, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::MVP,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
-pub fn compute_dpoy(
-    aggregate: &SeasonAggregate,
-    season: SeasonId,
-) -> AwardResult {
+pub fn compute_dpoy(aggregate: &SeasonAggregate, season: SeasonId) -> AwardResult {
     let scores: Vec<(PlayerId, f32)> = aggregate
         .by_player
         .values()
@@ -412,12 +458,20 @@ pub fn compute_dpoy(
                 .copied()
                 .unwrap_or(110.0);
             let s = dpoy_composite(p, drtg);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 2);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::DPOY, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::DPOY,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 /// `is_rookie(player_id) -> bool` is supplied by the caller — the awards
@@ -434,29 +488,42 @@ pub fn compute_roy(
         .filter(|p| is_rookie(p.player))
         .filter_map(|p| {
             let s = roy_composite(p);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 3);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::ROY, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::ROY,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
-pub fn compute_sixth_man(
-    aggregate: &SeasonAggregate,
-    season: SeasonId,
-) -> AwardResult {
+pub fn compute_sixth_man(aggregate: &SeasonAggregate, season: SeasonId) -> AwardResult {
     let scores: Vec<(PlayerId, f32)> = aggregate
         .by_player
         .values()
         .filter_map(|p| {
             let s = sixth_man_composite(p);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 4);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::SixthMan, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::SixthMan,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 pub fn compute_mip(
@@ -470,23 +537,27 @@ pub fn compute_mip(
         .filter_map(|p| {
             let prev_p = prev.by_player.get(&p.player);
             let d = mip_delta(p, prev_p);
-            if d > 0.0 { Some((p.player, d)) } else { None }
+            if d > 0.0 {
+                Some((p.player, d))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 5);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::MIP, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::MIP,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 /// COY composite — biggest year-over-year team improvement. The "coach" in
 /// our model is `Team.coach`, but we vote on TeamId here and let the caller
 /// dereference. Wins delta is the headline metric; Pythagorean (point-diff)
 /// improvement breaks ties.
-pub fn compute_coy(
-    curr: &Standings,
-    prev: &Standings,
-    season: SeasonId,
-) -> TeamAwardResult {
+pub fn compute_coy(curr: &Standings, prev: &Standings, season: SeasonId) -> TeamAwardResult {
     let scores: Vec<(TeamId, f32)> = curr
         .records
         .iter()
@@ -497,18 +568,23 @@ pub fn compute_coy(
             // Wins drive the bulk; point diff breaks ties (~0.05 weight per
             // total-season point delta = ~4 pts ≈ 1 win equivalent).
             let s = win_delta + pd_delta * 0.05;
-            if s > 0.0 { Some((*team, s)) } else { None }
+            if s > 0.0 {
+                Some((*team, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 6);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    TeamAwardResult { kind: AwardKind::COY, winner: ballot.first().map(|(t, _)| *t), ballot }
+    TeamAwardResult {
+        kind: AwardKind::COY,
+        winner: ballot.first().map(|(t, _)| *t),
+        ballot,
+    }
 }
 
-fn mvp_scores(
-    aggregate: &SeasonAggregate,
-    standings: &Standings,
-) -> Vec<(PlayerId, f32)> {
+fn mvp_scores(aggregate: &SeasonAggregate, standings: &Standings) -> Vec<(PlayerId, f32)> {
     aggregate
         .by_player
         .values()
@@ -516,7 +592,11 @@ fn mvp_scores(
             let team = p.team?;
             let rec = standings.records.get(&team)?;
             let s = mvp_composite(p, rec.win_pct(), rec.wins);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -583,7 +663,11 @@ pub fn compute_all_defensive(
                 .copied()
                 .unwrap_or(110.0);
             let s = dpoy_composite(p, drtg);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let _ = season;
@@ -624,7 +708,9 @@ fn build_lineup_teams(
     let mut c_used = [0usize; TEAMS];
 
     for (pid, share) in ballot {
-        let Some(pos) = position_of(*pid) else { continue };
+        let Some(pos) = position_of(*pid) else {
+            continue;
+        };
         let slot = slot_for(pos);
         // Place into the lowest-index team that still has room for this slot.
         for t in 0..TEAMS {
@@ -634,24 +720,32 @@ fn build_lineup_teams(
                         g_used[t] += 1;
                         teams[t].push((*pid, *share));
                         true
-                    } else { false }
+                    } else {
+                        false
+                    }
                 }
                 LineupSlot::Forward => {
                     if f_used[t] < F_PER_TEAM {
                         f_used[t] += 1;
                         teams[t].push((*pid, *share));
                         true
-                    } else { false }
+                    } else {
+                        false
+                    }
                 }
                 LineupSlot::Center => {
                     if c_used[t] < C_PER_TEAM {
                         c_used[t] += 1;
                         teams[t].push((*pid, *share));
                         true
-                    } else { false }
+                    } else {
+                        false
+                    }
                 }
             };
-            if placed { break; }
+            if placed {
+                break;
+            }
         }
         // Stop once every slot in every team is filled.
         if g_used.iter().all(|&n| n == G_PER_TEAM)
@@ -701,14 +795,26 @@ pub fn compute_all_star(
     let mut east_pool: Vec<(PlayerId, f32, Position)> = Vec::new();
     let mut west_pool: Vec<(PlayerId, f32, Position)> = Vec::new();
     for p in aggregate.by_player.values() {
-        let Some(team) = team_of(p.player) else { continue };
-        let Some(pos) = position_of(p.player) else { continue };
-        let Some(rec) = standings.records.get(&team) else { continue };
+        let Some(team) = team_of(p.player) else {
+            continue;
+        };
+        let Some(pos) = position_of(p.player) else {
+            continue;
+        };
+        let Some(rec) = standings.records.get(&team) else {
+            continue;
+        };
         // All-Star uses a relaxed gate: any rotation player counts (no 30-win
         // floor), but mid-season volume must be enough that a mean exists.
-        if p.games < 20 { continue }
-        let composite = (p.pts as f32 + 0.5 * p.reb as f32 + 0.7 * p.ast as f32
-            + 1.5 * p.stl as f32 + 1.5 * p.blk as f32 - p.tov as f32)
+        if p.games < 20 {
+            continue;
+        }
+        let composite = (p.pts as f32
+            + 0.5 * p.reb as f32
+            + 0.7 * p.ast as f32
+            + 1.5 * p.stl as f32
+            + 1.5 * p.blk as f32
+            - p.tov as f32)
             / p.games as f32;
         // Win-pct multiplier capped at 1.4 so a 0.700 team gets ~+12% bump,
         // a 0.300 team still gets meaningful representation.
@@ -747,12 +853,25 @@ fn build_all_star(
     let mut consumed: Vec<bool> = vec![false; ballot.len()];
 
     for (i, (pid, _)) in ballot.iter().enumerate() {
-        if starters.len() == 5 { break; }
-        let Some(pos) = pos_lookup.get(pid).copied() else { continue };
+        if starters.len() == 5 {
+            break;
+        }
+        let Some(pos) = pos_lookup.get(pid).copied() else {
+            continue;
+        };
         let placed = match slot_for(pos) {
-            LineupSlot::Guard if g_used < 2 => { g_used += 1; true }
-            LineupSlot::Forward if f_used < 2 => { f_used += 1; true }
-            LineupSlot::Center if c_used < 1 => { c_used += 1; true }
+            LineupSlot::Guard if g_used < 2 => {
+                g_used += 1;
+                true
+            }
+            LineupSlot::Forward if f_used < 2 => {
+                f_used += 1;
+                true
+            }
+            LineupSlot::Center if c_used < 1 => {
+                c_used += 1;
+                true
+            }
             _ => false,
         };
         if placed {
@@ -764,13 +883,23 @@ fn build_all_star(
     // Reserves: next 7 unplaced players in ballot order.
     let mut reserves: Vec<PlayerId> = Vec::with_capacity(7);
     for (i, (pid, _)) in ballot.iter().enumerate() {
-        if reserves.len() == 7 { break; }
-        if consumed[i] { continue; }
-        if starters.contains(pid) { continue; }
+        if reserves.len() == 7 {
+            break;
+        }
+        if consumed[i] {
+            continue;
+        }
+        if starters.contains(pid) {
+            continue;
+        }
         reserves.push(*pid);
     }
 
-    AllStarRoster { conference: conf, starters, reserves }
+    AllStarRoster {
+        conference: conf,
+        starters,
+        reserves,
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -807,15 +936,32 @@ pub fn compute_all_awards(
     let sixth_man = compute_sixth_man(aggregate, season);
     let mip = match prev_aggregate {
         Some(prev) => compute_mip(aggregate, prev, season),
-        None => AwardResult { kind: AwardKind::MIP, winner: None, ballot: vec![] },
+        None => AwardResult {
+            kind: AwardKind::MIP,
+            winner: None,
+            ballot: vec![],
+        },
     };
     let coy = match prev_standings {
         Some(prev) => compute_coy(standings, prev, season),
-        None => TeamAwardResult { kind: AwardKind::COY, winner: None, ballot: vec![] },
+        None => TeamAwardResult {
+            kind: AwardKind::COY,
+            winner: None,
+            ballot: vec![],
+        },
     };
     let all_nba = compute_all_nba(aggregate, standings, season, &position_of);
     let all_defensive = compute_all_defensive(aggregate, season, &position_of);
-    AwardsBundle { mvp, dpoy, roy, sixth_man, mip, coy, all_nba, all_defensive }
+    AwardsBundle {
+        mvp,
+        dpoy,
+        roy,
+        sixth_man,
+        mip,
+        coy,
+        all_nba,
+        all_defensive,
+    }
 }
 
 // Re-export helpers used by other modules that touch standings.
@@ -876,11 +1022,7 @@ fn sixth_man_composite_midseason(season: &PlayerSeason, min_games: u16) -> f32 {
     season.ppg() + 0.4 * season.apg() + 0.3 * season.rpg()
 }
 
-fn mip_delta_midseason(
-    curr: &PlayerSeason,
-    prev: Option<&PlayerSeason>,
-    min_games: u16,
-) -> f32 {
+fn mip_delta_midseason(curr: &PlayerSeason, prev: Option<&PlayerSeason>, min_games: u16) -> f32 {
     if curr.games < min_games {
         return 0.0;
     }
@@ -909,12 +1051,20 @@ pub fn compute_mvp_race(
             let team = p.team?;
             let rec = standings.records.get(&team)?;
             let s = mvp_composite_midseason(p, rec.win_pct(), min_games);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 11);
     let ballot = run_ballot(&scores, MVP_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::MVP, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::MVP,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 pub fn compute_dpoy_race(
@@ -932,12 +1082,20 @@ pub fn compute_dpoy_race(
                 .copied()
                 .unwrap_or(110.0);
             let s = dpoy_composite_midseason(p, drtg, min_games);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 12);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::DPOY, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::DPOY,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 pub fn compute_roy_race(
@@ -952,12 +1110,20 @@ pub fn compute_roy_race(
         .filter(|p| is_rookie(p.player))
         .filter_map(|p| {
             let s = roy_composite_midseason(p, min_games);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 13);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::ROY, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::ROY,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 pub fn compute_sixth_man_race(
@@ -970,12 +1136,20 @@ pub fn compute_sixth_man_race(
         .values()
         .filter_map(|p| {
             let s = sixth_man_composite_midseason(p, min_games);
-            if s > 0.0 { Some((p.player, s)) } else { None }
+            if s > 0.0 {
+                Some((p.player, s))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 14);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::SixthMan, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::SixthMan,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }
 
 pub fn compute_mip_race(
@@ -987,7 +1161,11 @@ pub fn compute_mip_race(
     let prev = match prev {
         Some(p) => p,
         None => {
-            return AwardResult { kind: AwardKind::MIP, winner: None, ballot: vec![] };
+            return AwardResult {
+                kind: AwardKind::MIP,
+                winner: None,
+                ballot: vec![],
+            };
         }
     };
     let scores: Vec<(PlayerId, f32)> = curr
@@ -996,10 +1174,18 @@ pub fn compute_mip_race(
         .filter_map(|p| {
             let prev_p = prev.by_player.get(&p.player);
             let d = mip_delta_midseason(p, prev_p, min_games);
-            if d > 0.0 { Some((p.player, d)) } else { None }
+            if d > 0.0 {
+                Some((p.player, d))
+            } else {
+                None
+            }
         })
         .collect();
     let mut rng = rng_for(season, 15);
     let ballot = run_ballot(&scores, SHORT_BALLOT_WEIGHTS, VOTERS, &mut rng);
-    AwardResult { kind: AwardKind::MIP, winner: ballot.first().map(|(p, _)| *p), ballot }
+    AwardResult {
+        kind: AwardKind::MIP,
+        winner: ballot.first().map(|(p, _)| *p),
+        ballot,
+    }
 }

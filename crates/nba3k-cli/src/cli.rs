@@ -56,9 +56,7 @@ pub enum Command {
     /// Sim until a phase or named day marker.
     /// Phases: regular | regular-end | playoffs | trade-deadline | offseason.
     /// Markers: all-star (day 41) | cup-final (day 55) | season-end (playoffs done).
-    SimTo {
-        phase: String,
-    },
+    SimTo { phase: String },
     /// Sim 7 days, pausing on incoming trade offers / user-team injuries unless
     /// --no-pause is set.
     SimWeek {
@@ -412,9 +410,7 @@ pub enum DevAction {
         json: bool,
     },
     /// Print team's 9-feature quality vector + derived ORtg/DRtg.
-    TeamStrength {
-        team: String,
-    },
+    TeamStrength { team: String },
 }
 
 #[derive(Parser, Debug, Clone)]

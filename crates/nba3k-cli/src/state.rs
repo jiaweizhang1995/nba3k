@@ -12,7 +12,12 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(save_path: Option<PathBuf>, force_god: bool) -> Self {
-        Self { save_path, force_god, store: None, should_quit: false }
+        Self {
+            save_path,
+            force_god,
+            store: None,
+            should_quit: false,
+        }
     }
 
     pub fn store(&mut self) -> Result<&mut Store> {
@@ -42,6 +47,10 @@ impl AppState {
     }
 
     pub fn effective_mode(&self, on_save: GameMode) -> GameMode {
-        if self.force_god { GameMode::God } else { on_save }
+        if self.force_god {
+            GameMode::God
+        } else {
+            on_save
+        }
     }
 }

@@ -117,9 +117,9 @@ pub(crate) fn star_premium_dollars(ovr: u8, traits: &GMTraits, threshold: u8) ->
         return 0;
     }
     let over = (ovr - threshold) as f64; // 0..=11
-    // Quadratic in `over`. With default traits (star_premium=1.0):
-    //   OVR89→$2M, OVR92→$32M, OVR95→$98M, OVR99→$242M (premium alone).
-    // StarHunter (1.6×) bumps these up; Wildcard/most archetypes stay 1.0.
+                                         // Quadratic in `over`. With default traits (star_premium=1.0):
+                                         //   OVR89→$2M, OVR92→$32M, OVR95→$98M, OVR99→$242M (premium alone).
+                                         // StarHunter (1.6×) bumps these up; Wildcard/most archetypes stay 1.0.
     let raw_millions = 2.0 * over * over;
     let scale = traits.star_premium.clamp(0.0, 3.0) as f64;
     (raw_millions * scale * 1_000_000.0) as i64
@@ -127,7 +127,11 @@ pub(crate) fn star_premium_dollars(ovr: u8, traits: &GMTraits, threshold: u8) ->
 
 /// Talent-side value (baseline × age + star premium delta) in cents.
 /// Reused by `contract_value` to compute "expected market for this player".
-pub(crate) fn talent_value_cents(player: &Player, traits: &GMTraits, weights: &PlayerValueWeights) -> i64 {
+pub(crate) fn talent_value_cents(
+    player: &Player,
+    traits: &GMTraits,
+    weights: &PlayerValueWeights,
+) -> i64 {
     // Blend OVR and potential per GM trait (rebuilders weight potential
     // higher). Falls through to OVR for neutral GMs.
     let cur_w = traits.current_overall_weight.max(0.0) as f64;
@@ -144,7 +148,8 @@ pub(crate) fn talent_value_cents(player: &Player, traits: &GMTraits, weights: &P
     // Star premium uses the *raw* OVR (not the blended one) so calling a
     // 78-OVR with potential 92 still doesn't get a star bonus today. The
     // potential boost is captured already through the blended baseline.
-    let star = star_premium_dollars(player.overall, traits, weights.star_threshold_ovr) as f64 * 100.0;
+    let star =
+        star_premium_dollars(player.overall, traits, weights.star_threshold_ovr) as f64 * 100.0;
 
     (aged + star) as i64
 }

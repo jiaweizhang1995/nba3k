@@ -90,7 +90,10 @@ pub fn asset_fit(
     // ---- 3. Rotation saturation --------------------------------------
     // If the rotation already has 8 players with OVR ≥ incoming, this
     // player can't crack the top-8 → saturation penalty.
-    let saturating = rotation.iter().filter(|p| p.overall >= incoming.overall).count();
+    let saturating = rotation
+        .iter()
+        .filter(|p| p.overall >= incoming.overall)
+        .count();
     let saturated = rotation.len() >= ROTATION_SIZE && saturating >= ROTATION_SIZE;
     let saturation_delta = if saturated {
         -(baseline * weights.rotation_saturation_penalty as f64)

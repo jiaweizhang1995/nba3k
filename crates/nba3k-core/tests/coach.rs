@@ -91,6 +91,9 @@ fn generated_varies_with_key() {
         || a.scheme_offense != b.scheme_offense
         || a.scheme_offense != c.scheme_offense
         || a.overall() != b.overall();
-    assert!(differs, "generated coaches collapse to identical output across keys");
+    assert!(
+        differs,
+        "generated coaches collapse to identical output across keys"
+    );
     let _ = Scheme::Balanced; // ensure import is used
 }

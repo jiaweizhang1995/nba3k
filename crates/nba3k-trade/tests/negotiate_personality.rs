@@ -7,8 +7,8 @@ mod cba_common;
 
 use nba3k_core::GMArchetype;
 use nba3k_trade::negotiate;
-use rand_chacha::ChaCha8Rng;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 #[test]
 fn negotiate_conservative_gm_never_picks_subtract() {

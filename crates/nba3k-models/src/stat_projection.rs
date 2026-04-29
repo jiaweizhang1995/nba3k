@@ -101,7 +101,9 @@ pub fn load_archetype_profiles(path: &std::path::Path) -> crate::ModelResult<Arc
         Err(e) => return Err(e.into()),
     };
     let parsed: HashMap<String, ArchetypeProfile> = toml::from_str(&text)?;
-    Ok(ArchetypeProfiles { by_archetype: parsed })
+    Ok(ArchetypeProfiles {
+        by_archetype: parsed,
+    })
 }
 
 /// Default location of the archetype profile TOML, relative to the workspace.
@@ -173,7 +175,9 @@ pub fn project_player_line(
     let poss_scale = on_court_team_poss / 100.0;
 
     let usage_factor = if base.default_usage > 0.01 {
-        (usage_share.max(0.01) / base.default_usage).clamp(0.05, 3.0).powf(0.8)
+        (usage_share.max(0.01) / base.default_usage)
+            .clamp(0.05, 3.0)
+            .powf(0.8)
     } else {
         1.0
     };
@@ -217,8 +221,7 @@ pub fn project_player_line(
     //      the player's 3PT shooting rating.
     //   4. Sanity-clamp so all components fit u8.
 
-    let ft_make_rate = ((player.ratings.mid_range as f32 + 50.0) / 99.0)
-        .clamp(0.55, 0.92);
+    let ft_make_rate = ((player.ratings.mid_range as f32 + 50.0) / 99.0).clamp(0.55, 0.92);
     let ft_made = binomial_count(ft_att_sampled, ft_make_rate, rng).min(ft_att_sampled);
     let ft_pts = ft_made as u16;
 
@@ -226,8 +229,8 @@ pub fn project_player_line(
 
     // 3PT shooting volume target (already sampled). Given baseline make rate
     // for the player.
-    let three_make_rate = (player.ratings.three_point as f32 / 99.0)
-        .clamp(0.20, 0.55) * 0.65 + 0.05;
+    let three_make_rate =
+        (player.ratings.three_point as f32 / 99.0).clamp(0.20, 0.55) * 0.65 + 0.05;
     let three_made_target = binomial_count(three_att_sampled, three_make_rate, rng);
 
     // First fit 3-point points within needed_field_pts (each 3 = 3 pts).
@@ -257,7 +260,8 @@ pub fn project_player_line(
     // makes themselves. Estimate via player's general FG% so the volume
     // looks reasonable.
     let two_make_rate = ((player.ratings.mid_range as f32 * 0.40
-        + player.ratings.driving_layup as f32 * 0.60) / 99.0)
+        + player.ratings.driving_layup as f32 * 0.60)
+        / 99.0)
         .clamp(0.30, 0.70);
     let two_att = if two_made > 0 {
         ((two_made as f32 / two_make_rate.max(0.30)).round() as u16).min(40) as u8

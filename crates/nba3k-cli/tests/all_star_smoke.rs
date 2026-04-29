@@ -58,12 +58,7 @@ fn all_star_recorded_after_sim_day_41() {
     // pool may be thin until ~day 60 when most teams clear the 20-game floor.
     let out = Command::new(nba3k_bin())
         .current_dir(workspace_root())
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "sim-day",
-            "80",
-        ])
+        .args(["--save", save.to_str().unwrap(), "sim-day", "80"])
         .output()
         .expect("nba3k sim-day");
     assert!(
@@ -127,17 +122,30 @@ fn all_star_json_parses_after_trigger() {
         String::from_utf8_lossy(&out.stderr),
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout).expect("must emit valid JSON");
-    for key in ["east_starters", "east_reserves", "west_starters", "west_reserves"] {
-        assert!(v[key].is_array(), "missing/non-array `{}` in: {}", key, stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("must emit valid JSON");
+    for key in [
+        "east_starters",
+        "east_reserves",
+        "west_starters",
+        "west_reserves",
+    ] {
+        assert!(
+            v[key].is_array(),
+            "missing/non-array `{}` in: {}",
+            key,
+            stdout
+        );
     }
     assert!(v["season"].is_u64(), "missing season: {}", stdout);
     let total = v["east_starters"].as_array().unwrap().len()
         + v["east_reserves"].as_array().unwrap().len()
         + v["west_starters"].as_array().unwrap().len()
         + v["west_reserves"].as_array().unwrap().len();
-    assert!(total > 0, "expected ≥1 all-star selection; got 0 in: {}", stdout);
+    assert!(
+        total > 0,
+        "expected ≥1 all-star selection; got 0 in: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -157,7 +165,10 @@ fn all_star_returns_empty_payload_before_trigger() {
         .args(["--save", save.to_str().unwrap(), "all-star", "--json"])
         .output()
         .expect("nba3k all-star --json");
-    assert!(out.status.success(), "all-star --json failed before trigger");
+    assert!(
+        out.status.success(),
+        "all-star --json failed before trigger"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     let v: serde_json::Value =
         serde_json::from_str(&stdout).expect("must emit valid JSON pre-trigger");

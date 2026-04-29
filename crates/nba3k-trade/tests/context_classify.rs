@@ -145,7 +145,12 @@ fn contender_with_star_and_winning_record() {
             (74, 22),
         ],
     };
-    let record = TeamRecordSummary { wins: 30, losses: 12, conf_rank: 2, point_diff: 200 };
+    let record = TeamRecordSummary {
+        wins: 30,
+        losses: 12,
+        conf_rank: 2,
+        point_diff: 200,
+    };
     let owned = build_snapshot(
         TeamId(1),
         "BOS",
@@ -155,7 +160,10 @@ fn contender_with_star_and_winning_record() {
         SeasonPhase::Regular,
         NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
     );
-    assert_eq!(classify_team(TeamId(1), &owned.snapshot()), TeamMode::Contend);
+    assert_eq!(
+        classify_team(TeamId(1), &owned.snapshot()),
+        TeamMode::Contend
+    );
 }
 
 #[test]
@@ -174,7 +182,12 @@ fn full_rebuild_young_and_no_keepers() {
             (65, 22),
         ],
     };
-    let record = TeamRecordSummary { wins: 8, losses: 30, conf_rank: 14, point_diff: -300 };
+    let record = TeamRecordSummary {
+        wins: 8,
+        losses: 30,
+        conf_rank: 14,
+        point_diff: -300,
+    };
     let owned = build_snapshot(
         TeamId(2),
         "WAS",
@@ -206,7 +219,12 @@ fn tank_old_and_losing() {
             (73, 32),
         ],
     };
-    let record = TeamRecordSummary { wins: 10, losses: 30, conf_rank: 13, point_diff: -250 };
+    let record = TeamRecordSummary {
+        wins: 10,
+        losses: 30,
+        conf_rank: 13,
+        point_diff: -250,
+    };
     let owned = build_snapshot(
         TeamId(3),
         "POR",
@@ -235,7 +253,12 @@ fn soft_rebuild_young_with_a_couple_keepers() {
             (70, 21),
         ],
     };
-    let record = TeamRecordSummary { wins: 18, losses: 22, conf_rank: 11, point_diff: -50 };
+    let record = TeamRecordSummary {
+        wins: 18,
+        losses: 22,
+        conf_rank: 11,
+        point_diff: -50,
+    };
     let owned = build_snapshot(
         TeamId(4),
         "ORL",

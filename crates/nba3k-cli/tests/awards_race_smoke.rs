@@ -5,8 +5,8 @@
 use chrono::NaiveDate;
 use nba3k_core::{
     BoxScore, Coach, Conference, Division, GMArchetype, GMPersonality, GameId, GameMode,
-    GameResult, Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId,
-    SeasonPhase, SeasonState, Team, TeamId,
+    GameResult, Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId, SeasonPhase,
+    SeasonState, Team, TeamId,
 };
 use nba3k_store::Store;
 use std::path::PathBuf;
@@ -79,10 +79,20 @@ fn line_for(player: PlayerId, pts: u8, reb: u8, ast: u8) -> PlayerLine {
 fn fresh_store(path: &std::path::Path) -> Store {
     let store = Store::open(path).expect("open store");
     store
-        .upsert_team(&make_team(HOME, "BOS", Conference::East, Division::Atlantic))
+        .upsert_team(&make_team(
+            HOME,
+            "BOS",
+            Conference::East,
+            Division::Atlantic,
+        ))
         .expect("upsert home");
     store
-        .upsert_team(&make_team(AWAY, "NYK", Conference::East, Division::Atlantic))
+        .upsert_team(&make_team(
+            AWAY,
+            "NYK",
+            Conference::East,
+            Division::Atlantic,
+        ))
         .expect("upsert away");
     let st = SeasonState {
         season: SEASON,
@@ -132,8 +142,7 @@ fn awards_race_json_parses_when_insufficient() {
         .expect("run nba3k awards-race --json");
     assert!(out.status.success(), "awards-race --json exited non-zero");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout).expect("must emit valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("must emit valid JSON");
     assert_eq!(v["insufficient_games"], serde_json::Value::Bool(true));
     assert_eq!(v["season"], 2026);
 }
@@ -161,8 +170,7 @@ fn awards_race_returns_non_empty_mvp_after_30_games() {
         let game = GameResult {
             id: GameId((i + 1) as u64),
             season: SEASON,
-            date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
-                + chrono::Duration::days(i as i64),
+            date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap() + chrono::Duration::days(i as i64),
             home: HOME,
             away: AWAY,
             home_score: 110,
@@ -193,16 +201,8 @@ fn awards_race_returns_non_empty_mvp_after_30_games() {
         String::from_utf8_lossy(&out.stderr),
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("Award race"),
-        "missing header:\n{}",
-        stdout
-    );
-    assert!(
-        stdout.contains("MVP"),
-        "missing MVP section:\n{}",
-        stdout
-    );
+    assert!(stdout.contains("Award race"), "missing header:\n{}", stdout);
+    assert!(stdout.contains("MVP"), "missing MVP section:\n{}", stdout);
     assert!(
         stdout.contains("Star Scorer"),
         "MVP ballot did not include the dominant scorer:\n{}",
@@ -211,20 +211,20 @@ fn awards_race_returns_non_empty_mvp_after_30_games() {
 
     // JSON run: top entry's vote share must be >= every other entry.
     let out_json = Command::new(nba3k_bin())
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "awards-race",
-            "--json",
-        ])
+        .args(["--save", save.to_str().unwrap(), "awards-race", "--json"])
         .output()
         .expect("run nba3k awards-race --json");
-    assert!(out_json.status.success(), "awards-race --json exited non-zero");
+    assert!(
+        out_json.status.success(),
+        "awards-race --json exited non-zero"
+    );
     let stdout_json = String::from_utf8_lossy(&out_json.stdout);
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout_json).expect("must emit valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout_json).expect("must emit valid JSON");
     let mvp = v["mvp"].as_array().expect("mvp must be array");
-    assert!(!mvp.is_empty(), "MVP ballot must be non-empty after 30 games");
+    assert!(
+        !mvp.is_empty(),
+        "MVP ballot must be non-empty after 30 games"
+    );
     let top_share = mvp[0]["share"].as_f64().expect("share must be a number");
     assert!(top_share > 0.0, "top share must be positive");
     for entry in mvp.iter().skip(1) {

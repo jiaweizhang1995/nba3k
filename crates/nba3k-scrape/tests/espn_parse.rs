@@ -19,7 +19,10 @@ fn parse_teams_returns_30() {
     let bytes = fixture("teams.json");
     let teams = espn::parse_teams(&bytes).expect("parse teams");
     assert_eq!(teams.len(), 30);
-    let bos = teams.iter().find(|t| t.abbrev == "BOS").expect("BOS exists");
+    let bos = teams
+        .iter()
+        .find(|t| t.abbrev == "BOS")
+        .expect("BOS exists");
     assert!(bos.display_name.contains("Boston"));
     assert!(bos.id > 0);
 }

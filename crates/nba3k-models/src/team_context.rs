@@ -74,7 +74,11 @@ pub fn team_context(
 
     // top_ovr_signal: how loud is the star presence? Above the star OVR
     // threshold maps to ~1.0; below the keeper threshold drops fast.
-    let top_ovr_signal = ramp(top_ovr as f32, weights.keeper_ovr as f32, weights.star_ovr as f32);
+    let top_ovr_signal = ramp(
+        top_ovr as f32,
+        weights.keeper_ovr as f32,
+        weights.star_ovr as f32,
+    );
 
     // roster_age_signal: young (≤ young_threshold) → 1.0 (rebuild flavour);
     // veteran (≥ veteran_threshold) → 0.0 (contend flavour). Linear in between.
@@ -120,10 +124,9 @@ pub fn team_context(
     // win_now_pressure: how much does this team need to act NOW?
     // High when contender-shaped AND aging — Phoenix-with-KD energy.
     // Low when young or already losing.
-    let win_now_pressure = (0.5 * top_ovr_signal
-        + 0.4 * (1.0 - roster_age_signal)
-        + 0.1 * standings_signal)
-        .clamp(0.0, 1.0);
+    let win_now_pressure =
+        (0.5 * top_ovr_signal + 0.4 * (1.0 - roster_age_signal) + 0.1 * standings_signal)
+            .clamp(0.0, 1.0);
 
     // ---- Discrete classification. Order matters: contender first, hard-tank
     // carve-out before falling through to rebuild branches, retool as the

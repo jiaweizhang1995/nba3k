@@ -32,7 +32,8 @@ pub struct HoopsHypeSource<'a> {
 
 impl<'a> HoopsHypeSource<'a> {
     pub fn fetch_all(&self) -> Result<Vec<ContractRow>> {
-        let html_bytes = if let Some(b) = self.cache.get("hoopshype", "players", "html", html_ttl()) {
+        let html_bytes = if let Some(b) = self.cache.get("hoopshype", "players", "html", html_ttl())
+        {
             b
         } else {
             // The server-rendered table lives at this URL.
@@ -64,8 +65,10 @@ fn parse_table(html: &str) -> Result<Vec<ContractRow>> {
         if let Some(table) = doc.select(&table_sel).next() {
             let mut out = Vec::new();
             for tr in table.select(&row_sel) {
-                let cells: Vec<String> =
-                    tr.select(&cell_sel).map(|c| c.text().collect::<String>()).collect();
+                let cells: Vec<String> = tr
+                    .select(&cell_sel)
+                    .map(|c| c.text().collect::<String>())
+                    .collect();
                 if cells.len() < 3 {
                     continue;
                 }
@@ -78,7 +81,8 @@ fn parse_table(html: &str) -> Result<Vec<ContractRow>> {
                 for cell in &cells {
                     let trimmed = cell.trim();
                     if let Some(caps) = dollars.captures(trimmed) {
-                        let digits: String = caps[1].chars().filter(|c| c.is_ascii_digit()).collect();
+                        let digits: String =
+                            caps[1].chars().filter(|c| c.is_ascii_digit()).collect();
                         if let Ok(d) = digits.parse::<i64>() {
                             // Cents (×100). HoopsHype displays whole dollars.
                             salaries.push(d.saturating_mul(100));
@@ -87,7 +91,9 @@ fn parse_table(html: &str) -> Result<Vec<ContractRow>> {
                     }
                     if name.is_none() {
                         // Skip pure-numeric rank cells.
-                        if !trimmed.chars().all(|c| c.is_ascii_digit() || c.is_whitespace())
+                        if !trimmed
+                            .chars()
+                            .all(|c| c.is_ascii_digit() || c.is_whitespace())
                             && !trimmed.is_empty()
                         {
                             name = Some(trimmed.to_string());
@@ -100,7 +106,10 @@ fn parse_table(html: &str) -> Result<Vec<ContractRow>> {
                         if salaries.len() > 1 {
                             salaries.pop();
                         }
-                        out.push(ContractRow { player_name: n, salaries });
+                        out.push(ContractRow {
+                            player_name: n,
+                            salaries,
+                        });
                     }
                 }
             }

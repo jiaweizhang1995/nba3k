@@ -115,6 +115,10 @@ impl GMPersonality {
                 traits.risk_tolerance = 0.95;
             }
         }
-        Self { name: name.into(), archetype, traits }
+        Self {
+            name: name.into(),
+            archetype,
+            traits,
+        }
     }
 }

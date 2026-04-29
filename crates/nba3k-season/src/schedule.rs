@@ -595,10 +595,14 @@ fn swap_legal(games: &[ScheduledGame], i: usize, j: usize) -> bool {
         if k == i || k == j {
             continue;
         }
-        if g.date == gj.date && (g.home == gi.home || g.away == gi.home || g.home == gi.away || g.away == gi.away) {
+        if g.date == gj.date
+            && (g.home == gi.home || g.away == gi.home || g.home == gi.away || g.away == gi.away)
+        {
             return false;
         }
-        if g.date == gi.date && (g.home == gj.home || g.away == gj.home || g.home == gj.away || g.away == gj.away) {
+        if g.date == gi.date
+            && (g.home == gj.home || g.away == gj.home || g.home == gj.away || g.away == gj.away)
+        {
             return false;
         }
     }

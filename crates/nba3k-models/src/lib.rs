@@ -13,18 +13,18 @@
 //! - `stat_projection`  — Worker C
 //! - `weights`          — TOML loader for tuning, with hardcoded defaults.
 
-pub mod player_value;
-pub mod contract_value;
-pub mod contract_gen;
-pub mod contract_extension;
-pub mod team_context;
-pub mod star_protection;
 pub mod asset_fit;
-pub mod trade_acceptance;
-pub mod stat_projection;
+pub mod contract_extension;
+pub mod contract_gen;
+pub mod contract_value;
+pub mod player_value;
 pub mod progression;
 pub mod retirement;
+pub mod star_protection;
+pub mod stat_projection;
 pub mod team_chemistry;
+pub mod team_context;
+pub mod trade_acceptance;
 pub mod training;
 pub mod weights;
 
@@ -59,7 +59,10 @@ pub struct Reason {
 
 impl Score {
     pub fn new(value: f64) -> Self {
-        Self { value, reasons: Vec::new() }
+        Self {
+            value,
+            reasons: Vec::new(),
+        }
     }
 
     pub fn with_reason(mut self, label: &'static str, delta: f64) -> Self {
@@ -75,8 +78,12 @@ impl Score {
 
     /// Sort reasons by |delta| descending. Call before rendering top-K.
     pub fn sort_reasons(&mut self) {
-        self.reasons
-            .sort_by(|a, b| b.delta.abs().partial_cmp(&a.delta.abs()).unwrap_or(std::cmp::Ordering::Equal));
+        self.reasons.sort_by(|a, b| {
+            b.delta
+                .abs()
+                .partial_cmp(&a.delta.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     /// Truncate to the top-K reasons by |delta|. Mutates in place.

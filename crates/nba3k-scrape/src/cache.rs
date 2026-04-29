@@ -26,7 +26,13 @@ impl Cache {
     fn path(&self, source: &str, key: &str, ext: &str) -> PathBuf {
         let safe: String = key
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let mut p = self.root.join(source);
         let _ = fs::create_dir_all(&p);
@@ -38,7 +44,9 @@ impl Cache {
         let p = self.path(source, key, ext);
         let meta = fs::metadata(&p).ok()?;
         let mtime = meta.modified().ok()?;
-        let age = SystemTime::now().duration_since(mtime).unwrap_or(Duration::ZERO);
+        let age = SystemTime::now()
+            .duration_since(mtime)
+            .unwrap_or(Duration::ZERO);
         if age > ttl {
             return None;
         }

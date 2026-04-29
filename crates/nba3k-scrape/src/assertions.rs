@@ -39,8 +39,11 @@ pub fn run_all(out: &Path, season: SeasonId, bounds: &Bounds) -> Result<()> {
         bail!("expected 30 teams, found {teams}");
     }
 
-    let players: i64 = conn
-        .query_row("SELECT COUNT(*) FROM players WHERE team_id IS NOT NULL", [], |r| r.get(0))?;
+    let players: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM players WHERE team_id IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
     if (players as u32) < bounds.min_players || (players as u32) > bounds.max_players {
         bail!(
             "expected {}..={} active players, found {}",
@@ -50,8 +53,11 @@ pub fn run_all(out: &Path, season: SeasonId, bounds: &Bounds) -> Result<()> {
         );
     }
 
-    let prospects: i64 = conn
-        .query_row("SELECT COUNT(*) FROM players WHERE team_id IS NULL", [], |r| r.get(0))?;
+    let prospects: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM players WHERE team_id IS NULL",
+        [],
+        |r| r.get(0),
+    )?;
     if (prospects as u32) < bounds.min_prospects {
         bail!(
             "expected ≥{} draft prospects, found {}",
@@ -61,10 +67,12 @@ pub fn run_all(out: &Path, season: SeasonId, bounds: &Bounds) -> Result<()> {
     }
 
     // Per-team roster size.
-    let mut stmt = conn
-        .prepare("SELECT team_id, COUNT(*) FROM players WHERE team_id IS NOT NULL GROUP BY team_id")?;
-    let rows = stmt
-        .query_map([], |r| Ok::<_, rusqlite::Error>((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+    let mut stmt = conn.prepare(
+        "SELECT team_id, COUNT(*) FROM players WHERE team_id IS NOT NULL GROUP BY team_id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok::<_, rusqlite::Error>((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+    })?;
     for row in rows {
         let (team_id, count) = row?;
         if (count as u32) < bounds.min_per_team || (count as u32) > bounds.max_per_team {
@@ -121,7 +129,8 @@ pub fn run_all(out: &Path, season: SeasonId, bounds: &Bounds) -> Result<()> {
     // band. 30 teams × ~$170M payroll ≈ $5.1B; the band [$3B, $7B] gives
     // generous slack for over/under-cap teams without missing the case
     // where contract_gen never ran (band would be zero).
-    let mut stmt = conn.prepare("SELECT contract_json FROM players WHERE contract_json IS NOT NULL")?;
+    let mut stmt =
+        conn.prepare("SELECT contract_json FROM players WHERE contract_json IS NOT NULL")?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     let mut total_cents: i64 = 0;
     for row in rows {

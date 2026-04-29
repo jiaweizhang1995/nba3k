@@ -2,8 +2,7 @@
 
 use nba3k_core::{GMArchetype, GMPersonality};
 use nba3k_trade::personality::{
-    embedded_personalities, load_or_embedded, load_personalities, personality_for,
-    NBA_TEAM_ABBREVS,
+    embedded_personalities, load_or_embedded, load_personalities, personality_for, NBA_TEAM_ABBREVS,
 };
 use std::path::PathBuf;
 

@@ -2,48 +2,258 @@
 
 use chrono::NaiveDate;
 use nba3k_core::{
-    BoxScore, Conference, Division, GMArchetype, GMPersonality, GameId, GameResult, SeasonId,
-    SeasonPhase, SeasonState, GameMode, Team, TeamId,
+    BoxScore, Conference, Division, GMArchetype, GMPersonality, GameId, GameMode, GameResult,
+    SeasonId, SeasonPhase, SeasonState, Team, TeamId,
 };
 use nba3k_season::{
-    advance_day, back_to_back_counts, games_per_team, is_after_trade_deadline, matchups,
-    Schedule, Standings,
+    advance_day, back_to_back_counts, games_per_team, is_after_trade_deadline, matchups, Schedule,
+    Standings,
 };
 use std::collections::{HashMap, HashSet};
 
 fn fixture_teams() -> Vec<Team> {
     // Real 2025-26 NBA divisions/conferences. IDs 1..=30, abbrev = real abbrev.
     let teams: &[(u8, &str, &str, &str, Conference, Division)] = &[
-        (1, "BOS", "Boston", "Celtics", Conference::East, Division::Atlantic),
-        (2, "BKN", "Brooklyn", "Nets", Conference::East, Division::Atlantic),
-        (3, "NYK", "New York", "Knicks", Conference::East, Division::Atlantic),
-        (4, "PHI", "Philadelphia", "76ers", Conference::East, Division::Atlantic),
-        (5, "TOR", "Toronto", "Raptors", Conference::East, Division::Atlantic),
-        (6, "CHI", "Chicago", "Bulls", Conference::East, Division::Central),
-        (7, "CLE", "Cleveland", "Cavaliers", Conference::East, Division::Central),
-        (8, "DET", "Detroit", "Pistons", Conference::East, Division::Central),
-        (9, "IND", "Indiana", "Pacers", Conference::East, Division::Central),
-        (10, "MIL", "Milwaukee", "Bucks", Conference::East, Division::Central),
-        (11, "ATL", "Atlanta", "Hawks", Conference::East, Division::Southeast),
-        (12, "CHA", "Charlotte", "Hornets", Conference::East, Division::Southeast),
-        (13, "MIA", "Miami", "Heat", Conference::East, Division::Southeast),
-        (14, "ORL", "Orlando", "Magic", Conference::East, Division::Southeast),
-        (15, "WAS", "Washington", "Wizards", Conference::East, Division::Southeast),
-        (16, "DEN", "Denver", "Nuggets", Conference::West, Division::Northwest),
-        (17, "MIN", "Minnesota", "Timberwolves", Conference::West, Division::Northwest),
-        (18, "OKC", "Oklahoma City", "Thunder", Conference::West, Division::Northwest),
-        (19, "POR", "Portland", "Trail Blazers", Conference::West, Division::Northwest),
-        (20, "UTA", "Utah", "Jazz", Conference::West, Division::Northwest),
-        (21, "GSW", "Golden State", "Warriors", Conference::West, Division::Pacific),
-        (22, "LAC", "LA", "Clippers", Conference::West, Division::Pacific),
-        (23, "LAL", "Los Angeles", "Lakers", Conference::West, Division::Pacific),
-        (24, "PHX", "Phoenix", "Suns", Conference::West, Division::Pacific),
-        (25, "SAC", "Sacramento", "Kings", Conference::West, Division::Pacific),
-        (26, "DAL", "Dallas", "Mavericks", Conference::West, Division::Southwest),
-        (27, "HOU", "Houston", "Rockets", Conference::West, Division::Southwest),
-        (28, "MEM", "Memphis", "Grizzlies", Conference::West, Division::Southwest),
-        (29, "NOP", "New Orleans", "Pelicans", Conference::West, Division::Southwest),
-        (30, "SAS", "San Antonio", "Spurs", Conference::West, Division::Southwest),
+        (
+            1,
+            "BOS",
+            "Boston",
+            "Celtics",
+            Conference::East,
+            Division::Atlantic,
+        ),
+        (
+            2,
+            "BKN",
+            "Brooklyn",
+            "Nets",
+            Conference::East,
+            Division::Atlantic,
+        ),
+        (
+            3,
+            "NYK",
+            "New York",
+            "Knicks",
+            Conference::East,
+            Division::Atlantic,
+        ),
+        (
+            4,
+            "PHI",
+            "Philadelphia",
+            "76ers",
+            Conference::East,
+            Division::Atlantic,
+        ),
+        (
+            5,
+            "TOR",
+            "Toronto",
+            "Raptors",
+            Conference::East,
+            Division::Atlantic,
+        ),
+        (
+            6,
+            "CHI",
+            "Chicago",
+            "Bulls",
+            Conference::East,
+            Division::Central,
+        ),
+        (
+            7,
+            "CLE",
+            "Cleveland",
+            "Cavaliers",
+            Conference::East,
+            Division::Central,
+        ),
+        (
+            8,
+            "DET",
+            "Detroit",
+            "Pistons",
+            Conference::East,
+            Division::Central,
+        ),
+        (
+            9,
+            "IND",
+            "Indiana",
+            "Pacers",
+            Conference::East,
+            Division::Central,
+        ),
+        (
+            10,
+            "MIL",
+            "Milwaukee",
+            "Bucks",
+            Conference::East,
+            Division::Central,
+        ),
+        (
+            11,
+            "ATL",
+            "Atlanta",
+            "Hawks",
+            Conference::East,
+            Division::Southeast,
+        ),
+        (
+            12,
+            "CHA",
+            "Charlotte",
+            "Hornets",
+            Conference::East,
+            Division::Southeast,
+        ),
+        (
+            13,
+            "MIA",
+            "Miami",
+            "Heat",
+            Conference::East,
+            Division::Southeast,
+        ),
+        (
+            14,
+            "ORL",
+            "Orlando",
+            "Magic",
+            Conference::East,
+            Division::Southeast,
+        ),
+        (
+            15,
+            "WAS",
+            "Washington",
+            "Wizards",
+            Conference::East,
+            Division::Southeast,
+        ),
+        (
+            16,
+            "DEN",
+            "Denver",
+            "Nuggets",
+            Conference::West,
+            Division::Northwest,
+        ),
+        (
+            17,
+            "MIN",
+            "Minnesota",
+            "Timberwolves",
+            Conference::West,
+            Division::Northwest,
+        ),
+        (
+            18,
+            "OKC",
+            "Oklahoma City",
+            "Thunder",
+            Conference::West,
+            Division::Northwest,
+        ),
+        (
+            19,
+            "POR",
+            "Portland",
+            "Trail Blazers",
+            Conference::West,
+            Division::Northwest,
+        ),
+        (
+            20,
+            "UTA",
+            "Utah",
+            "Jazz",
+            Conference::West,
+            Division::Northwest,
+        ),
+        (
+            21,
+            "GSW",
+            "Golden State",
+            "Warriors",
+            Conference::West,
+            Division::Pacific,
+        ),
+        (
+            22,
+            "LAC",
+            "LA",
+            "Clippers",
+            Conference::West,
+            Division::Pacific,
+        ),
+        (
+            23,
+            "LAL",
+            "Los Angeles",
+            "Lakers",
+            Conference::West,
+            Division::Pacific,
+        ),
+        (
+            24,
+            "PHX",
+            "Phoenix",
+            "Suns",
+            Conference::West,
+            Division::Pacific,
+        ),
+        (
+            25,
+            "SAC",
+            "Sacramento",
+            "Kings",
+            Conference::West,
+            Division::Pacific,
+        ),
+        (
+            26,
+            "DAL",
+            "Dallas",
+            "Mavericks",
+            Conference::West,
+            Division::Southwest,
+        ),
+        (
+            27,
+            "HOU",
+            "Houston",
+            "Rockets",
+            Conference::West,
+            Division::Southwest,
+        ),
+        (
+            28,
+            "MEM",
+            "Memphis",
+            "Grizzlies",
+            Conference::West,
+            Division::Southwest,
+        ),
+        (
+            29,
+            "NOP",
+            "New Orleans",
+            "Pelicans",
+            Conference::West,
+            Division::Southwest,
+        ),
+        (
+            30,
+            "SAS",
+            "San Antonio",
+            "Spurs",
+            Conference::West,
+            Division::Southwest,
+        ),
     ];
 
     teams
@@ -55,10 +265,7 @@ fn fixture_teams() -> Vec<Team> {
             name: (*name).into(),
             conference: *conf,
             division: *div,
-            gm: GMPersonality::from_archetype(
-                format!("{} GM", abbrev),
-                GMArchetype::Conservative,
-            ),
+            gm: GMPersonality::from_archetype(format!("{} GM", abbrev), GMArchetype::Conservative),
             roster: vec![],
             draft_picks: vec![],
             coach: nba3k_core::Coach::default_for(abbrev),
@@ -78,7 +285,11 @@ fn opponent(home: TeamId, away: TeamId, me: TeamId) -> TeamId {
 fn matchup_solver_produces_1230_pairs() {
     let teams = fixture_teams();
     let pairs = matchups(&teams, 42);
-    assert_eq!(pairs.len(), 1230, "expected 1230 game pairs from matchup solver");
+    assert_eq!(
+        pairs.len(),
+        1230,
+        "expected 1230 game pairs from matchup solver"
+    );
 }
 
 #[test]
@@ -102,7 +313,11 @@ fn matchup_solver_distribution_is_nba_shape() {
         let same_div = ta.division == tb.division;
         let same_conf = ta.conference == tb.conference;
         if same_div {
-            assert_eq!(n, 4, "div opponents {} vs {} should play 4×, got {}", ta.abbrev, tb.abbrev, n);
+            assert_eq!(
+                n, 4,
+                "div opponents {} vs {} should play 4×, got {}",
+                ta.abbrev, tb.abbrev, n
+            );
         } else if same_conf {
             assert!(
                 n == 3 || n == 4,
@@ -112,7 +327,11 @@ fn matchup_solver_distribution_is_nba_shape() {
                 n
             );
         } else {
-            assert_eq!(n, 2, "inter-conf {} vs {} should play 2×, got {}", ta.abbrev, tb.abbrev, n);
+            assert_eq!(
+                n, 2,
+                "inter-conf {} vs {} should play 2×, got {}",
+                ta.abbrev, tb.abbrev, n
+            );
         }
     }
 
@@ -123,7 +342,11 @@ fn matchup_solver_distribution_is_nba_shape() {
         *per_team.entry(*a).or_insert(0) += 1;
     }
     for t in &teams {
-        assert_eq!(per_team[&t.id], 82, "{} should have 82 matchups, got {}", t.abbrev, per_team[&t.id]);
+        assert_eq!(
+            per_team[&t.id], 82,
+            "{} should have 82 matchups, got {}",
+            t.abbrev, per_team[&t.id]
+        );
     }
 
     // Per team: 6 conf-non-div opponents at 4×, 4 at 3×.
@@ -351,11 +574,17 @@ fn phase_preseason_advances_to_regular_after_day_seven() {
     // Day 0..=6 stays in preseason.
     for d in 0..=6 {
         state.day = d;
-        assert_eq!(advance_day(&state, &schedule, &standings), SeasonPhase::PreSeason);
+        assert_eq!(
+            advance_day(&state, &schedule, &standings),
+            SeasonPhase::PreSeason
+        );
     }
     // Day 7+ flips to Regular.
     state.day = 7;
-    assert_eq!(advance_day(&state, &schedule, &standings), SeasonPhase::Regular);
+    assert_eq!(
+        advance_day(&state, &schedule, &standings),
+        SeasonPhase::Regular
+    );
 }
 
 #[test]
@@ -372,13 +601,19 @@ fn phase_regular_advances_to_playoffs_after_82_games_each() {
         rng_seed: 42,
     };
     // Mid-season: not all 82 played → stays Regular.
-    assert_eq!(advance_day(&state, &schedule, &standings), SeasonPhase::Regular);
+    assert_eq!(
+        advance_day(&state, &schedule, &standings),
+        SeasonPhase::Regular
+    );
 
     // Simulate every game: home team always wins by 1.
     for g in &schedule.games {
         standings.record_game_result(&dummy_game(g.id.0, g.home, g.away, 101, 100));
     }
-    assert_eq!(advance_day(&state, &schedule, &standings), SeasonPhase::Playoffs);
+    assert_eq!(
+        advance_day(&state, &schedule, &standings),
+        SeasonPhase::Playoffs
+    );
 }
 
 #[test]
@@ -429,7 +664,10 @@ fn calendar_aware_deadline_helpers() {
     let cal = SeasonCalendar::default_for(2027);
     let deadline = trade_deadline(&cal);
     assert!(is_trade_deadline_day_for(deadline, &cal));
-    assert!(!is_trade_deadline_day_for(deadline + chrono::Duration::days(1), &cal));
+    assert!(!is_trade_deadline_day_for(
+        deadline + chrono::Duration::days(1),
+        &cal
+    ));
     assert!(is_after_trade_deadline_for(
         deadline + chrono::Duration::days(1),
         &cal

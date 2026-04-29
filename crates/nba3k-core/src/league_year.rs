@@ -66,9 +66,7 @@ impl LeagueYear {
         }
         let years_ahead = season.0.saturating_sub(latest.season.0) as u32;
         let factor = 1.0_f64 + 0.05 * years_ahead as f64;
-        let scale = |c: Cents| -> Cents {
-            Cents(((c.0 as f64) * factor).round() as i64)
-        };
+        let scale = |c: Cents| -> Cents { Cents(((c.0 as f64) * factor).round() as i64) };
         Some(LeagueYear {
             season,
             cap: scale(latest.cap),
@@ -89,7 +87,11 @@ impl LeagueYear {
         let (start, end) = label.split_once('-')?;
         let start: u16 = start.parse().ok()?;
         let end_two: u16 = end.parse().ok()?;
-        let end_full = if end_two < 50 { 2000 + end_two } else { 1900 + end_two };
+        let end_full = if end_two < 50 {
+            2000 + end_two
+        } else {
+            1900 + end_two
+        };
         if end_full != start + 1 {
             return None;
         }
@@ -99,21 +101,19 @@ impl LeagueYear {
 
 /// Encoded league years. Append, never reorder — the scraper's sanity check
 /// reads this table and the trade engine looks up by `SeasonId`.
-pub const LEAGUE_YEARS: &[LeagueYear] = &[
-    LeagueYear {
-        season: SeasonId(2026),
-        cap: Cents(15_464_700_000),
-        tax: Cents(18_789_500_000),
-        apron_1: Cents(19_594_500_000),
-        apron_2: Cents(20_782_400_000),
-        mle_non_taxpayer: Cents(1_410_400_000),
-        mle_taxpayer: Cents(568_500_000),
-        mle_room: Cents(878_100_000),
-        bae: Cents(513_400_000),
-        min_team_salary: Cents(13_918_200_000),
-        max_trade_cash: Cents(796_400_000),
-    },
-];
+pub const LEAGUE_YEARS: &[LeagueYear] = &[LeagueYear {
+    season: SeasonId(2026),
+    cap: Cents(15_464_700_000),
+    tax: Cents(18_789_500_000),
+    apron_1: Cents(19_594_500_000),
+    apron_2: Cents(20_782_400_000),
+    mle_non_taxpayer: Cents(1_410_400_000),
+    mle_taxpayer: Cents(568_500_000),
+    mle_room: Cents(878_100_000),
+    bae: Cents(513_400_000),
+    min_team_salary: Cents(13_918_200_000),
+    max_trade_cash: Cents(796_400_000),
+}];
 
 #[cfg(test)]
 mod tests {

@@ -57,7 +57,9 @@ fn test_starters_set_and_read() {
     assert!(starters.is_complete());
 
     // Re-upserting the same slot replaces, not duplicates.
-    store.upsert_starter(HOME, "PG", PlayerId(999)).expect("re-upsert");
+    store
+        .upsert_starter(HOME, "PG", PlayerId(999))
+        .expect("re-upsert");
     let starters = store.read_starters(HOME).expect("read");
     assert_eq!(starters.pg, Some(PlayerId(999)));
 }
@@ -65,7 +67,13 @@ fn test_starters_set_and_read() {
 #[test]
 fn test_starters_clear_one() {
     let (_dir, store) = fresh_store();
-    for (pos, pid) in [("PG", 101), ("SG", 102), ("SF", 103), ("PF", 104), ("C", 105)] {
+    for (pos, pid) in [
+        ("PG", 101),
+        ("SG", 102),
+        ("SF", 103),
+        ("PF", 104),
+        ("C", 105),
+    ] {
         store.upsert_starter(HOME, pos, PlayerId(pid)).expect("set");
     }
     store.clear_starter(HOME, "PG").expect("clear pg");
@@ -76,7 +84,10 @@ fn test_starters_clear_one() {
     assert_eq!(starters.sf, Some(PlayerId(103)));
     assert_eq!(starters.pf, Some(PlayerId(104)));
     assert_eq!(starters.c, Some(PlayerId(105)));
-    assert!(!starters.is_complete(), "partial lineup must not be complete");
+    assert!(
+        !starters.is_complete(),
+        "partial lineup must not be complete"
+    );
 
     // Clearing an already-empty slot is a no-op the UI relies on.
     store.clear_starter(HOME, "PG").expect("clear pg again");
@@ -85,7 +96,13 @@ fn test_starters_clear_one() {
 #[test]
 fn test_starters_clear_all() {
     let (_dir, store) = fresh_store();
-    for (pos, pid) in [("PG", 101), ("SG", 102), ("SF", 103), ("PF", 104), ("C", 105)] {
+    for (pos, pid) in [
+        ("PG", 101),
+        ("SG", 102),
+        ("SF", 103),
+        ("PF", 104),
+        ("C", 105),
+    ] {
         store.upsert_starter(HOME, pos, PlayerId(pid)).expect("set");
     }
     store.clear_all_starters(HOME).expect("clear all");
@@ -129,8 +146,12 @@ fn test_starters_isolated_per_team() {
     };
     store.upsert_team(&team).expect("upsert second team");
 
-    store.upsert_starter(HOME, "PG", PlayerId(11)).expect("bos pg");
-    store.upsert_starter(other, "PG", PlayerId(22)).expect("lal pg");
+    store
+        .upsert_starter(HOME, "PG", PlayerId(11))
+        .expect("bos pg");
+    store
+        .upsert_starter(other, "PG", PlayerId(22))
+        .expect("lal pg");
 
     assert_eq!(store.read_starters(HOME).unwrap().pg, Some(PlayerId(11)));
     assert_eq!(store.read_starters(other).unwrap().pg, Some(PlayerId(22)));

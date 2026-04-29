@@ -6,9 +6,7 @@
 
 mod cba_common;
 
-use cba_common::{
-    assets_players, make_player, make_team, two_team_offer, World, TEAM_A, TEAM_B,
-};
+use cba_common::{assets_players, make_player, make_team, two_team_offer, World, TEAM_A, TEAM_B};
 use nba3k_core::{
     GMArchetype, GMPersonality, NegotiationState, Player, PlayerId, RejectReason, TeamId,
     TradeAssets, TradeEvaluation, TradeOffer, Verdict,
@@ -69,17 +67,11 @@ fn eval_always_reject(
     }
 }
 
-fn validate_always_ok(
-    _offer: &TradeOffer,
-    _league: &LeagueSnapshot,
-) -> Result<(), CbaViolation> {
+fn validate_always_ok(_offer: &TradeOffer, _league: &LeagueSnapshot) -> Result<(), CbaViolation> {
     Ok(())
 }
 
-fn validate_always_fail(
-    _offer: &TradeOffer,
-    _league: &LeagueSnapshot,
-) -> Result<(), CbaViolation> {
+fn validate_always_fail(_offer: &TradeOffer, _league: &LeagueSnapshot) -> Result<(), CbaViolation> {
     Err(CbaViolation::SalaryMatching {
         team: TEAM_A,
         out_dollars: 1_000_000,
@@ -95,10 +87,7 @@ fn validate_requires_cash(
     offer: &TradeOffer,
     _league: &LeagueSnapshot,
 ) -> Result<(), CbaViolation> {
-    let any_cash = offer
-        .assets_by_team
-        .values()
-        .any(|a| a.cash_out.0 > 0);
+    let any_cash = offer.assets_by_team.values().any(|a| a.cash_out.0 > 0);
     if any_cash {
         Ok(())
     } else {
@@ -193,7 +182,10 @@ fn negotiate_step_reject_terminates_with_reason() {
         validate_always_ok,
     );
     match next {
-        NegotiationState::Rejected { reason: RejectReason::InsufficientValue, .. } => {}
+        NegotiationState::Rejected {
+            reason: RejectReason::InsufficientValue,
+            ..
+        } => {}
         other => panic!("expected Rejected/InsufficientValue, got {other:?}"),
     }
 }
@@ -208,7 +200,9 @@ fn negotiate_aggressive_gm_chain_reaches_or_exceeds_four_rounds_before_stalled()
     }
     let snap = world.snapshot();
 
-    let mut state = NegotiationState::Open { chain: vec![star_for_filler_offer()] };
+    let mut state = NegotiationState::Open {
+        chain: vec![star_for_filler_offer()],
+    };
     let mut rng = ChaCha8Rng::seed_from_u64(11);
 
     // Step until terminal.
@@ -236,7 +230,10 @@ fn negotiate_aggressive_gm_chain_reaches_or_exceeds_four_rounds_before_stalled()
             // 4-5 rounds before Stalled — MAX_CHAIN_LEN is 5, so chain length
             // ≥ 4 is satisfied by stalling at all.
         }
-        NegotiationState::Rejected { reason: RejectReason::BadFaith, .. } => {
+        NegotiationState::Rejected {
+            reason: RejectReason::BadFaith,
+            ..
+        } => {
             // Acceptable: a Subtract counter ran out of legal moves. The chain
             // ran multiple rounds before that. We re-assert via inspection of
             // the final_offer.round.
@@ -353,7 +350,10 @@ fn negotiate_step_returns_bad_faith_reject_when_no_counter_can_be_built() {
         validate_always_fail,
     );
     match next {
-        NegotiationState::Rejected { reason: RejectReason::BadFaith, .. } => {}
+        NegotiationState::Rejected {
+            reason: RejectReason::BadFaith,
+            ..
+        } => {}
         other => panic!("expected BadFaith reject, got {other:?}"),
     }
 }

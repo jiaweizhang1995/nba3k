@@ -24,10 +24,7 @@ use rand_chacha::ChaCha8Rng;
 
 const TEAM_C: TeamId = TeamId(3);
 
-fn three_team_offer(
-    initiator: TeamId,
-    legs: [(TeamId, TradeAssets); 3],
-) -> TradeOffer {
+fn three_team_offer(initiator: TeamId, legs: [(TeamId, TradeAssets); 3]) -> TradeOffer {
     let mut map = IndexMap::new();
     for (team, assets) in legs {
         map.insert(team, assets);
@@ -115,7 +112,10 @@ fn three_team_balance_passes_cba() {
         ],
     );
     let res = cba::validate(&offer, &snap);
-    assert!(res.is_ok(), "expected balanced 3-team trade to pass CBA, got {res:?}");
+    assert!(
+        res.is_ok(),
+        "expected balanced 3-team trade to pass CBA, got {res:?}"
+    );
 }
 
 #[test]

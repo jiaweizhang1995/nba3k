@@ -138,7 +138,11 @@ pub fn vector_from_rotation(rotation: &[RotationSlot]) -> TeamQualityVector {
         };
     }
 
-    let total_min: f32 = rotation.iter().map(|r| r.minutes_share).sum::<f32>().max(0.01);
+    let total_min: f32 = rotation
+        .iter()
+        .map(|r| r.minutes_share)
+        .sum::<f32>()
+        .max(0.01);
     let mw = |slot: &RotationSlot| slot.minutes_share / total_min;
 
     // ---- Feature 1: team_efg (eFG-style shooting blend) ----
@@ -221,29 +225,18 @@ pub fn vector_from_rotation(rotation: &[RotationSlot]) -> TeamQualityVector {
     // is OK because it lowers OKC's containment too — the gap to PHO still widens
     // because PHO has 2-3 scorers vs OKC's 1.
     let scorer_adjusted_pd = |r: &RotationSlot| -> u8 {
-        let scorer_signal =
-            r.ratings.three_point as i32 + r.ratings.ball_handle as i32;
+        let scorer_signal = r.ratings.three_point as i32 + r.ratings.ball_handle as i32;
         let penalty = ((scorer_signal - 160).max(0) as f32 * 0.6).round() as i32;
-        ((r.ratings.perimeter_defense as i32) - penalty)
-            .clamp(40, 99) as u8
+        ((r.ratings.perimeter_defense as i32) - penalty).clamp(40, 99) as u8
     };
     let mut perim_pool: Vec<(f32, u8)> = rotation
         .iter()
-        .filter(|r| {
-            matches!(
-                r.position,
-                Position::PG | Position::SG | Position::SF
-            )
-        })
+        .filter(|r| matches!(r.position, Position::PG | Position::SG | Position::SF))
         .map(|r| (r.minutes_share, scorer_adjusted_pd(r)))
         .collect();
     perim_pool.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let perim_top4: Vec<u8> = perim_pool.iter().take(4).map(|(_, pd)| *pd).collect();
-    let perimeter_containment = perim_top4
-        .iter()
-        .min()
-        .copied()
-        .unwrap_or(60) as f32;
+    let perimeter_containment = perim_top4.iter().min().copied().unwrap_or(60) as f32;
 
     // ---- Feature 8: defensive_versatility (count of switchable defenders) ----
     let defensive_versatility = rotation
@@ -382,7 +375,8 @@ mod tests {
         assert!(
             net_a > net_b + 5.0,
             "elite team net ({}) should beat weak ({}) by ≥5",
-            net_a, net_b
+            net_a,
+            net_b
         );
     }
 }

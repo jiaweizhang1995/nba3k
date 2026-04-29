@@ -26,8 +26,7 @@ use std::time::{Duration, Instant};
 // URLs
 // ---------------------------------------------------------------------------
 
-const URL_TEAMS: &str =
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams";
+const URL_TEAMS: &str = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams";
 const URL_STANDINGS: &str =
     "https://site.web.api.espn.com/apis/v2/sports/basketball/nba/standings?season=";
 const URL_SCOREBOARD: &str =
@@ -110,12 +109,7 @@ fn ttl_short() -> Duration {
     Duration::from_secs(60 * 60) // 1 h
 }
 
-fn cached_or_fetch(
-    cache: &Cache,
-    key: &str,
-    ttl: Duration,
-    url: &str,
-) -> Result<Option<Vec<u8>>> {
+fn cached_or_fetch(cache: &Cache, key: &str, ttl: Duration, url: &str) -> Result<Option<Vec<u8>>> {
     if let Some(b) = cache.get("espn", key, "json", ttl) {
         return Ok(Some(b));
     }
@@ -219,9 +213,18 @@ pub fn parse_teams(bytes: &[u8]) -> Result<Vec<EspnTeam>> {
     let mut out = Vec::with_capacity(30);
     for entry in teams {
         let t = entry.get("team").unwrap_or(entry);
-        let id = t.get("id").and_then(|x| x.as_str()).and_then(|s| s.parse::<u32>().ok());
-        let abbrev = t.get("abbreviation").and_then(|x| x.as_str()).map(|s| s.to_string());
-        let name = t.get("displayName").and_then(|x| x.as_str()).map(|s| s.to_string());
+        let id = t
+            .get("id")
+            .and_then(|x| x.as_str())
+            .and_then(|s| s.parse::<u32>().ok());
+        let abbrev = t
+            .get("abbreviation")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string());
+        let name = t
+            .get("displayName")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string());
         if let (Some(id), Some(abbrev), Some(name)) = (id, abbrev, name) {
             out.push(EspnTeam {
                 id,
@@ -532,7 +535,11 @@ pub fn parse_player_stats(bytes: &[u8]) -> Result<Vec<EspnPlayerSeasonStat>> {
         let ath = a.get("athlete").unwrap_or(a);
         let espn_id = ath
             .get("id")
-            .and_then(|x| x.as_str().and_then(|s| s.parse::<u64>().ok()).or(x.as_u64()))
+            .and_then(|x| {
+                x.as_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .or(x.as_u64())
+            })
             .unwrap_or(0);
         let display_name = ath
             .get("displayName")
@@ -579,10 +586,7 @@ pub fn parse_player_stats(bytes: &[u8]) -> Result<Vec<EspnPlayerSeasonStat>> {
                     None => continue,
                 };
                 for (i, name) in names.iter().enumerate() {
-                    let val = values
-                        .get(i)
-                        .and_then(|x| x.as_f64())
-                        .unwrap_or(0.0) as f32;
+                    let val = values.get(i).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
                     let key = format!("{cname}.{name}");
                     match key.as_str() {
                         "general.gamesPlayed" => row.gp = val as u16,

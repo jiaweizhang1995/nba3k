@@ -109,16 +109,13 @@ pub fn step_with(
 
     match evaluation.verdict {
         Verdict::Accept => NegotiationState::Accepted(latest),
-        Verdict::Reject(reason) => NegotiationState::Rejected { final_offer: latest, reason },
+        Verdict::Reject(reason) => NegotiationState::Rejected {
+            final_offer: latest,
+            reason,
+        },
         Verdict::Counter(_) => {
-            match generate_counter_with(
-                &latest,
-                receiver,
-                league,
-                rng,
-                evaluator_fn,
-                validator_fn,
-            ) {
+            match generate_counter_with(&latest, receiver, league, rng, evaluator_fn, validator_fn)
+            {
                 Some(counter) => {
                     chain.push(counter);
                     if chain.len() >= MAX_CHAIN_LEN {

@@ -11,14 +11,14 @@
 
 use chrono::NaiveDate;
 use nba3k_core::{
-    Contract, ContractYear, InjuryStatus, PlayerId, PlayerRole, Position, Ratings, SeasonId,
-    TeamId, Player, BirdRights, Cents,
+    BirdRights, Cents, Contract, ContractYear, InjuryStatus, Player, PlayerId, PlayerRole,
+    Position, Ratings, SeasonId, TeamId,
 };
+use nba3k_models::star_protection::{load_star_roster, StarRoster, STAR_ROSTER_PATH};
 use nba3k_models::stat_projection::{
     infer_archetype, load_archetype_profiles, project_player_line, ArchetypeProfiles,
     StatProjectionInput, ARCHETYPE_PROFILES_PATH,
 };
-use nba3k_models::star_protection::{load_star_roster, StarRoster, STAR_ROSTER_PATH};
 use nba3k_models::weights::StatProjectionWeights;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -32,8 +32,10 @@ const N_GAMES: usize = 200;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent().expect("crates/")
-        .parent().expect("workspace root")
+        .parent()
+        .expect("crates/")
+        .parent()
+        .expect("workspace root")
         .to_path_buf()
 }
 
@@ -170,13 +172,16 @@ fn star_scoring_pg_averages_star_line() {
     assert!(
         avg_pts >= 22.0 && avg_pts <= 40.0,
         "star PG avg PTS {} outside [22, 40]; min={}, max={}",
-        avg_pts, min_pts, max_pts
+        avg_pts,
+        min_pts,
+        max_pts
     );
     // Variance check — not always 30. Range of (max - min) should be > 8.
     assert!(
         max_pts as i32 - min_pts as i32 > 8,
         "star PG should show variance: min={} max={}",
-        min_pts, max_pts
+        min_pts,
+        max_pts
     );
 }
 
@@ -259,7 +264,9 @@ fn star_creator_triple_double_rate_meets_floor() {
     assert!(
         td_rate >= 0.01,
         "primary-creator triple-double rate {:.3} should be ≥ 0.01 ({} TDs / {})",
-        td_rate, td_count, N_GAMES
+        td_rate,
+        td_count,
+        N_GAMES
     );
 }
 
@@ -296,7 +303,9 @@ fn non_star_wing_triple_double_rate_under_ceiling() {
     assert!(
         td_rate <= 0.01,
         "non-star wing triple-double rate {:.3} should be ≤ 0.01 ({} TDs / {})",
-        td_rate, td_count, N_GAMES
+        td_rate,
+        td_count,
+        N_GAMES
     );
 }
 
@@ -342,32 +351,46 @@ fn deterministic_same_seed_same_line() {
 #[test]
 fn archetype_profiles_load_from_workspace_file() {
     let path = workspace_root().join(ARCHETYPE_PROFILES_PATH);
-    let profiles = load_archetype_profiles(&path)
-        .expect("archetype_profiles.toml must parse");
+    let profiles = load_archetype_profiles(&path).expect("archetype_profiles.toml must parse");
     let expected_keys = [
-        "PG-distributor", "PG-scorer", "SG-shooter", "SG-slasher",
-        "SF-3andD", "SF-creator", "PF-stretch", "PF-banger",
-        "C-finisher", "C-stretch",
+        "PG-distributor",
+        "PG-scorer",
+        "SG-shooter",
+        "SG-slasher",
+        "SF-3andD",
+        "SF-creator",
+        "PF-stretch",
+        "PF-banger",
+        "C-finisher",
+        "C-stretch",
     ];
     for k in expected_keys {
         assert!(
             profiles.by_archetype.contains_key(k),
             "missing archetype '{}' in archetype_profiles.toml; have: {:?}",
-            k, profiles.by_archetype.keys().collect::<Vec<_>>()
+            k,
+            profiles.by_archetype.keys().collect::<Vec<_>>()
         );
         let p = profiles.by_archetype.get(k).unwrap();
-        assert!(p.default_usage > 0.05 && p.default_usage < 0.50,
-            "archetype '{}' default_usage {} out of [0.05, 0.50]", k, p.default_usage);
-        assert!(p.pts_per_100 >= 10.0 && p.pts_per_100 <= 50.0,
-            "archetype '{}' pts_per_100 {} out of [10, 50]", k, p.pts_per_100);
+        assert!(
+            p.default_usage > 0.05 && p.default_usage < 0.50,
+            "archetype '{}' default_usage {} out of [0.05, 0.50]",
+            k,
+            p.default_usage
+        );
+        assert!(
+            p.pts_per_100 >= 10.0 && p.pts_per_100 <= 50.0,
+            "archetype '{}' pts_per_100 {} out of [10, 50]",
+            k,
+            p.pts_per_100
+        );
     }
 }
 
 #[test]
 fn missing_file_falls_back_to_empty_profiles() {
     let path = Path::new("/nonexistent/archetype_profiles.toml");
-    let profiles = load_archetype_profiles(path)
-        .expect("missing file should not error");
+    let profiles = load_archetype_profiles(path).expect("missing file should not error");
     assert!(profiles.by_archetype.is_empty());
 
     // And `project_player_line` still works without panicking — it should
@@ -400,9 +423,16 @@ fn missing_file_falls_back_to_empty_profiles() {
 #[test]
 fn infer_archetype_returns_known_label() {
     let known = [
-        "PG-distributor", "PG-scorer", "SG-shooter", "SG-slasher",
-        "SF-3andD", "SF-creator", "PF-stretch", "PF-banger",
-        "C-finisher", "C-stretch",
+        "PG-distributor",
+        "PG-scorer",
+        "SG-shooter",
+        "SG-slasher",
+        "SF-3andD",
+        "SF-creator",
+        "PF-stretch",
+        "PF-banger",
+        "C-finisher",
+        "C-stretch",
     ];
 
     // PG with very high playmaking → distributor.
@@ -411,7 +441,11 @@ fn infer_archetype_returns_known_label() {
     p.ratings.three_point = 75;
     p.ratings.driving_layup = 75;
     let arch = infer_archetype(&p);
-    assert!(known.contains(&arch.as_str()), "infer returned unknown {}", arch);
+    assert!(
+        known.contains(&arch.as_str()),
+        "infer returned unknown {}",
+        arch
+    );
     assert_eq!(arch, "PG-distributor");
 
     // Big with low 3PT and average passing → finisher.
@@ -467,26 +501,41 @@ fn injury_throttles_output() {
     for _ in 0..N_GAMES {
         let lh = project_player_line(
             StatProjectionInput {
-                player: &healthy, minutes: 36, team_pace: 100.0,
-                usage_share: 0.30, archetype: "PG-scorer",
+                player: &healthy,
+                minutes: 36,
+                team_pace: 100.0,
+                usage_share: 0.30,
+                archetype: "PG-scorer",
                 date: NaiveDate::from_ymd_opt(2025, 11, 1).unwrap(),
                 team_abbrev: "LAL",
             },
-            &profiles, &weights, &roster, &mut rng_h,
+            &profiles,
+            &weights,
+            &roster,
+            &mut rng_h,
         );
         let li = project_player_line(
             StatProjectionInput {
-                player: &hurt, minutes: 36, team_pace: 100.0,
-                usage_share: 0.30, archetype: "PG-scorer",
+                player: &hurt,
+                minutes: 36,
+                team_pace: 100.0,
+                usage_share: 0.30,
+                archetype: "PG-scorer",
                 date: NaiveDate::from_ymd_opt(2025, 11, 1).unwrap(),
                 team_abbrev: "LAL",
             },
-            &profiles, &weights, &roster, &mut rng_i,
+            &profiles,
+            &weights,
+            &roster,
+            &mut rng_i,
         );
         healthy_pts += lh.pts as u32;
         hurt_pts += li.pts as u32;
     }
-    assert!(hurt_pts < healthy_pts,
+    assert!(
+        hurt_pts < healthy_pts,
         "long-term injury should reduce PTS production: hurt={} healthy={}",
-        hurt_pts, healthy_pts);
+        hurt_pts,
+        healthy_pts
+    );
 }

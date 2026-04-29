@@ -18,7 +18,11 @@ fn workspace_root() -> PathBuf {
 fn binary() -> PathBuf {
     let mut p = workspace_root();
     p.push("target");
-    p.push(if cfg!(debug_assertions) { "debug" } else { "release" });
+    p.push(if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    });
     p.push("nba3k");
     p
 }
@@ -104,15 +108,13 @@ fn full_season_scripted() {
     // 4) Sanity status check after script: should be in season 2027 with
     //    a fresh schedule (1230 unplayed before sim-day 30, ~1100 after).
     let status_out = Command::new(&bin)
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "status",
-            "--json",
-        ])
+        .args(["--save", save.to_str().unwrap(), "status", "--json"])
         .output()
         .expect("status --json");
-    assert!(status_out.status.success(), "status failed after script run");
+    assert!(
+        status_out.status.success(),
+        "status failed after script run"
+    );
     let s = String::from_utf8_lossy(&status_out.stdout);
     assert!(s.contains("2027"), "status should be in 2027:\n{}", s);
 }

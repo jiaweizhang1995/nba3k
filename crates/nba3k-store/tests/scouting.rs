@@ -83,7 +83,10 @@ fn set_player_scouted_flips_flag() {
         .iter()
         .find(|(pp, _)| pp.id == p.id)
         .expect("prospect present after scout");
-    assert!(row.1, "scout flag must surface through list_prospects_visible");
+    assert!(
+        row.1,
+        "scout flag must surface through list_prospects_visible"
+    );
     assert_eq!(row.0.overall, 73, "ratings remain truthful in store");
     assert_eq!(row.0.potential, 88);
 

@@ -53,7 +53,10 @@ fn cash_limit_per_team_per_season() {
         assets_players(&[250]),
     );
     match validate(&offer, &snap) {
-        Err(CbaViolation::CashLimitExceeded { team, amount_dollars }) => {
+        Err(CbaViolation::CashLimitExceeded {
+            team,
+            amount_dollars,
+        }) => {
             assert_eq!(team, TEAM_A);
             assert_eq!(amount_dollars, 8_000_000);
         }
@@ -78,7 +81,10 @@ fn cash_at_limit_passes_check_isolated() {
         assets_players(&[250]),
     );
     let res = check_cash_limits(&offer, &snap);
-    assert!(res.is_ok(), "expected at-limit cash check to pass, got {res:?}");
+    assert!(
+        res.is_ok(),
+        "expected at-limit cash check to pass, got {res:?}"
+    );
 }
 
 #[test]

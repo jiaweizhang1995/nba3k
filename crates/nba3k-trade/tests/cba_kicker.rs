@@ -110,7 +110,9 @@ fn kicker_skips_unexercised_options() {
     // option. Only year 1 ($20M) counts toward kicker base.
     // Total kicker = 0.15 * $20M = $3M. Prorated over 1 guaranteed year =
     // $3M. Year-1 cap hit = $23M.
-    use nba3k_core::{BirdRights, Contract, ContractYear, Player, PlayerId, Position, Ratings, SeasonId};
+    use nba3k_core::{
+        BirdRights, Contract, ContractYear, Player, PlayerId, Position, Ratings, SeasonId,
+    };
 
     let teams = vec![make_team(TEAM_A, "AAA"), make_team(TEAM_B, "BBB")];
     let kickered = Player {

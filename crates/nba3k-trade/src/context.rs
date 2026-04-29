@@ -194,7 +194,10 @@ pub fn apply_context(
         // Off-season: longer planning horizon, more patience for any team
         // that wasn't already running max patience.
         adjusted.patience = (adjusted.patience * 1.25).min(1.0);
-        if matches!(mode, TeamMode::SoftRebuild | TeamMode::FullRebuild | TeamMode::Tank) {
+        if matches!(
+            mode,
+            TeamMode::SoftRebuild | TeamMode::FullRebuild | TeamMode::Tank
+        ) {
             adjusted.patience = adjusted.patience.max(0.9);
         }
     }

@@ -65,7 +65,11 @@ fn seed_two_season_save(path: &std::path::Path, current_season: SeasonId) {
     // total losses = 1230, total games = 1230 * 2 / 2 = matches the 82-game,
     // 30-team league schedule.
     for (i, t) in teams.iter().enumerate() {
-        let (w, l) = if i < 15 { (50u16, 32u16) } else { (32u16, 50u16) };
+        let (w, l) = if i < 15 {
+            (50u16, 32u16)
+        } else {
+            (32u16, 50u16)
+        };
         store
             .upsert_standing(t.id, SeasonId(2026), w, l, None)
             .expect("upsert standing 2026");
@@ -172,12 +176,7 @@ fn standings_default_uses_current_season() {
     seed_two_season_save(&save, SeasonId(2027));
 
     let out = Command::new(nba3k_bin())
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "standings",
-            "--json",
-        ])
+        .args(["--save", save.to_str().unwrap(), "standings", "--json"])
         .output()
         .expect("run nba3k standings");
     assert!(out.status.success(), "standings exited non-zero");

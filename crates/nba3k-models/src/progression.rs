@@ -164,16 +164,56 @@ struct AgingProfile {
     decline: f32,
 }
 
-const ATHLETIC_FAST: AgingProfile = AgingProfile { grow: 0.85, plateau: 0.05, decline: 1.20 };
-const ATHLETIC_STR: AgingProfile = AgingProfile { grow: 0.55, plateau: 0.30, decline: 0.55 };
-const FINISH_FAST: AgingProfile = AgingProfile { grow: 0.85, plateau: 0.10, decline: 0.85 };
-const POST_SLOW: AgingProfile = AgingProfile { grow: 0.45, plateau: 0.45, decline: 0.45 };
-const SHOOT_SLOW: AgingProfile = AgingProfile { grow: 0.60, plateau: 0.40, decline: 0.45 };
-const PASS_SLOW: AgingProfile = AgingProfile { grow: 0.55, plateau: 0.40, decline: 0.40 };
-const HANDLE_MED: AgingProfile = AgingProfile { grow: 0.65, plateau: 0.20, decline: 0.55 };
-const SPEEDBALL_FAST: AgingProfile = AgingProfile { grow: 0.80, plateau: 0.05, decline: 0.95 };
-const DEFENSE_MED: AgingProfile = AgingProfile { grow: 0.70, plateau: 0.10, decline: 0.80 };
-const REB_MED: AgingProfile = AgingProfile { grow: 0.65, plateau: 0.10, decline: 0.70 };
+const ATHLETIC_FAST: AgingProfile = AgingProfile {
+    grow: 0.85,
+    plateau: 0.05,
+    decline: 1.20,
+};
+const ATHLETIC_STR: AgingProfile = AgingProfile {
+    grow: 0.55,
+    plateau: 0.30,
+    decline: 0.55,
+};
+const FINISH_FAST: AgingProfile = AgingProfile {
+    grow: 0.85,
+    plateau: 0.10,
+    decline: 0.85,
+};
+const POST_SLOW: AgingProfile = AgingProfile {
+    grow: 0.45,
+    plateau: 0.45,
+    decline: 0.45,
+};
+const SHOOT_SLOW: AgingProfile = AgingProfile {
+    grow: 0.60,
+    plateau: 0.40,
+    decline: 0.45,
+};
+const PASS_SLOW: AgingProfile = AgingProfile {
+    grow: 0.55,
+    plateau: 0.40,
+    decline: 0.40,
+};
+const HANDLE_MED: AgingProfile = AgingProfile {
+    grow: 0.65,
+    plateau: 0.20,
+    decline: 0.55,
+};
+const SPEEDBALL_FAST: AgingProfile = AgingProfile {
+    grow: 0.80,
+    plateau: 0.05,
+    decline: 0.95,
+};
+const DEFENSE_MED: AgingProfile = AgingProfile {
+    grow: 0.70,
+    plateau: 0.10,
+    decline: 0.80,
+};
+const REB_MED: AgingProfile = AgingProfile {
+    grow: 0.65,
+    plateau: 0.10,
+    decline: 0.70,
+};
 
 fn profiles() -> [(&'static str, AgingProfile); 21] {
     [
@@ -437,11 +477,7 @@ pub fn progress_player(
 /// Compute the per-attribute regression delta for one season. Athleticism
 /// declines first, IQ-adjacent skills (post_control, passing) decline last
 /// — well-documented NBA aging-curve consensus.
-pub fn regress_player(
-    player: &Player,
-    dev: &PlayerDevelopment,
-    current_age: u8,
-) -> AttributeDelta {
+pub fn regress_player(player: &Player, dev: &PlayerDevelopment, current_age: u8) -> AttributeDelta {
     let phase = age_phase(current_age, dev);
     if phase != AgePhase::PostPeak {
         return AttributeDelta::default();
@@ -514,11 +550,7 @@ pub fn regress_player(
 /// peak_end the projection collapses to current overall.
 ///
 /// Returns the new `dynamic_potential` value.
-pub fn update_dynamic_potential(
-    player: &Player,
-    dev: &PlayerDevelopment,
-    current_age: u8,
-) -> u8 {
+pub fn update_dynamic_potential(player: &Player, dev: &PlayerDevelopment, current_age: u8) -> u8 {
     let cur_ovr = player.ratings.overall_for(player.primary_position);
     let phase = age_phase(current_age, dev);
 
@@ -537,7 +569,9 @@ pub fn update_dynamic_potential(
                 dev.dynamic_potential.saturating_sub(shave)
             } else if needed_per_year < 0.0_f32.max(0.0) {
                 // Already above projection — bump it slightly.
-                dev.dynamic_potential.saturating_add(1).min(player.potential)
+                dev.dynamic_potential
+                    .saturating_add(1)
+                    .min(player.potential)
             } else {
                 dev.dynamic_potential
             }

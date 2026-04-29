@@ -23,7 +23,14 @@ fn seed_present() -> bool {
 fn bootstrap(save: &std::path::Path) {
     let out = Command::new(nba3k_bin())
         .current_dir(workspace_root())
-        .args(["--save", save.to_str().unwrap(), "new", "--team", "BOS", "--offline"])
+        .args([
+            "--save",
+            save.to_str().unwrap(),
+            "new",
+            "--team",
+            "BOS",
+            "--offline",
+        ])
         .output()
         .expect("nba3k new");
     assert!(

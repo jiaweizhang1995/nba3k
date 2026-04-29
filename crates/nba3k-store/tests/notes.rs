@@ -59,7 +59,9 @@ fn add_then_list_returns_row() {
     let p = make_player(101, "Jayson Tatum");
     store.upsert_player(&p).expect("upsert");
 
-    store.insert_note(p.id, "watch as draft target").expect("insert note");
+    store
+        .insert_note(p.id, "watch as draft target")
+        .expect("insert note");
 
     let notes = store.list_notes().expect("list");
     assert_eq!(notes.len(), 1, "one note in, one note out");
@@ -81,7 +83,9 @@ fn add_same_player_twice_overwrites_text() {
     let first = store.list_notes().expect("list");
     assert_eq!(first.len(), 1);
 
-    store.insert_note(p.id, "updated take").expect("second insert");
+    store
+        .insert_note(p.id, "updated take")
+        .expect("second insert");
     let second = store.list_notes().expect("list");
     assert_eq!(second.len(), 1, "UPSERT must not duplicate the row");
     assert_eq!(

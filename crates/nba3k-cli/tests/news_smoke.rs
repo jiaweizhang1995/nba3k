@@ -59,9 +59,11 @@ fn make_player(id: u32, name: &str, team: Option<TeamId>) -> Player {
 
 fn fresh_save(path: &std::path::Path) {
     let mut store = Store::open(path).expect("open store");
-    store.upsert_team(&make_team(BOS, "BOS", "Boston", "Celtics"))
+    store
+        .upsert_team(&make_team(BOS, "BOS", "Boston", "Celtics"))
         .expect("upsert BOS");
-    store.upsert_team(&make_team(LAL, "LAL", "Los Angeles", "Lakers"))
+    store
+        .upsert_team(&make_team(LAL, "LAL", "Los Angeles", "Lakers"))
         .expect("upsert LAL");
     store.set_meta("user_team", "BOS").expect("set user_team");
     let state = SeasonState {
@@ -80,7 +82,9 @@ fn fresh_save(path: &std::path::Path) {
     let mut hauser = make_player(1001, "Sam Hauser", Some(BOS));
     hauser.ratings = Ratings::default();
     let players = vec![hauser];
-    store.bulk_upsert_players(&players).expect("upsert BOS roster");
+    store
+        .bulk_upsert_players(&players)
+        .expect("upsert BOS roster");
 
     // LAL roster: a star to be traded for.
     let lebron = make_player(2001, "LeBron James", Some(LAL));
@@ -120,12 +124,7 @@ fn news_records_retirement() {
 
     // Retire LeBron.
     let out = Command::new(nba3k_bin())
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "retire",
-            "LeBron James",
-        ])
+        .args(["--save", save.to_str().unwrap(), "retire", "LeBron James"])
         .output()
         .expect("run nba3k retire");
     assert!(
@@ -139,9 +138,12 @@ fn news_records_retirement() {
     let store = Store::open(&save).expect("re-open store");
     let rows = store.recent_news(10).expect("recent_news");
     assert!(
-        rows.iter().any(|r| r.kind == "retire" && r.headline.contains("LeBron James")),
+        rows.iter()
+            .any(|r| r.kind == "retire" && r.headline.contains("LeBron James")),
         "expected a retire news row; got: {:?}",
-        rows.iter().map(|r| (r.kind.clone(), r.headline.clone())).collect::<Vec<_>>()
+        rows.iter()
+            .map(|r| (r.kind.clone(), r.headline.clone()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -182,7 +184,9 @@ fn news_records_god_mode_trade() {
     assert!(
         trade_row.is_some(),
         "expected a trade news row; got: {:?}",
-        rows.iter().map(|r| (r.kind.clone(), r.headline.clone())).collect::<Vec<_>>()
+        rows.iter()
+            .map(|r| (r.kind.clone(), r.headline.clone()))
+            .collect::<Vec<_>>()
     );
     let head = &trade_row.unwrap().headline;
     assert!(
@@ -219,9 +223,17 @@ fn news_command_renders_text_and_json() {
         .expect("run nba3k news");
     assert!(out.status.success(), "news exited non-zero");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("Recent league news"), "header missing:\n{}", stdout);
+    assert!(
+        stdout.contains("Recent league news"),
+        "header missing:\n{}",
+        stdout
+    );
     assert!(stdout.contains("[trade"), "kind tag missing:\n{}", stdout);
-    assert!(stdout.contains("BOS sends X to LAL for Y"), "headline missing:\n{}", stdout);
+    assert!(
+        stdout.contains("BOS sends X to LAL for Y"),
+        "headline missing:\n{}",
+        stdout
+    );
 
     // JSON render.
     let out = Command::new(nba3k_bin())

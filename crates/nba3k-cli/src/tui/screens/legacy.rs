@@ -174,7 +174,9 @@ fn event_loop<B: Backend>(
     loop {
         ensure_cache(app, tui)?;
         terminal.draw(|f| draw(f, tui))?;
-        let Event::Key(k) = event::read()? else { continue };
+        let Event::Key(k) = event::read()? else {
+            continue;
+        };
         if k.kind == KeyEventKind::Release {
             continue;
         }
@@ -197,7 +199,9 @@ fn event_loop<B: Backend>(
             KeyCode::Char('d') if tui.tab == Tab::Trades => trade_respond(app, tui, "reject")?,
             KeyCode::Up => {
                 if let Some(max) = selectable_count(tui) {
-                    if tui.selected > 0 { tui.selected -= 1; }
+                    if tui.selected > 0 {
+                        tui.selected -= 1;
+                    }
                     let _ = max;
                 } else {
                     tui.scroll = tui.scroll.saturating_sub(1);
@@ -205,14 +209,19 @@ fn event_loop<B: Backend>(
             }
             KeyCode::Down => {
                 if let Some(max) = selectable_count(tui) {
-                    if tui.selected + 1 < max { tui.selected += 1; }
+                    if tui.selected + 1 < max {
+                        tui.selected += 1;
+                    }
                 } else {
                     tui.scroll = tui.scroll.saturating_add(1);
                 }
             }
             KeyCode::PageUp => tui.scroll = tui.scroll.saturating_sub(10),
             KeyCode::PageDown => tui.scroll = tui.scroll.saturating_add(10),
-            KeyCode::Home => { tui.scroll = 0; tui.selected = 0; }
+            KeyCode::Home => {
+                tui.scroll = 0;
+                tui.selected = 0;
+            }
             _ => {}
         }
     }
@@ -220,7 +229,13 @@ fn event_loop<B: Backend>(
 }
 
 #[derive(Copy, Clone)]
-enum SimKind { Day, Week, Month, TradeDeadline, SeasonEnd }
+enum SimKind {
+    Day,
+    Week,
+    Month,
+    TradeDeadline,
+    SeasonEnd,
+}
 
 fn sim_action(app: &mut AppState, tui: &mut LegacyState, kind: SimKind) -> Result<()> {
     let pre_unplayed = app.store()?.count_unplayed()?;
@@ -276,7 +291,10 @@ fn sim_action(app: &mut AppState, tui: &mut LegacyState, kind: SimKind) -> Resul
 }
 
 fn sim_to_season_end(app: &mut AppState) -> Result<()> {
-    let s = app.store()?.load_season_state()?.ok_or_else(|| anyhow::anyhow!("no state"))?;
+    let s = app
+        .store()?
+        .load_season_state()?
+        .ok_or_else(|| anyhow::anyhow!("no state"))?;
     if !matches!(s.phase, SeasonPhase::Playoffs | SeasonPhase::OffSeason) {
         crate::commands::sim_until_phase(app, SeasonPhase::Playoffs)?;
     }
@@ -289,8 +307,12 @@ fn sim_to_season_end(app: &mut AppState) -> Result<()> {
 }
 
 fn roster_cycle_role(app: &mut AppState, tui: &mut LegacyState) -> Result<()> {
-    let Some(roster) = tui.roster.as_ref() else { return Ok(()) };
-    let Some(p) = roster.get(tui.selected) else { return Ok(()) };
+    let Some(roster) = tui.roster.as_ref() else {
+        return Ok(());
+    };
+    let Some(p) = roster.get(tui.selected) else {
+        return Ok(());
+    };
     let next = match p.role {
         PlayerRole::Star => PlayerRole::Starter,
         PlayerRole::Starter => PlayerRole::SixthMan,
@@ -321,7 +343,9 @@ fn roster_cycle_role(app: &mut AppState, tui: &mut LegacyState) -> Result<()> {
 }
 
 fn trade_respond(app: &mut AppState, tui: &mut LegacyState, action: &str) -> Result<()> {
-    let Some(chains) = tui.open_chains.as_ref() else { return Ok(()) };
+    let Some(chains) = tui.open_chains.as_ref() else {
+        return Ok(());
+    };
     if chains.is_empty() {
         tui.last_msg = Some("no open offers".into());
         return Ok(());
@@ -413,7 +437,8 @@ fn ensure_cache(app: &mut AppState, tui: &mut LegacyState) -> Result<()> {
         }
         Tab::Trades => {
             if tui.open_chains.is_none() {
-                tui.open_chains = Some(store.read_open_chains_targeting(tui.season, tui.user_team)?);
+                tui.open_chains =
+                    Some(store.read_open_chains_targeting(tui.season, tui.user_team)?);
             }
             if tui.recent_chains.is_none() {
                 let mut all = store.list_trade_chains(tui.season)?;
@@ -422,7 +447,8 @@ fn ensure_cache(app: &mut AppState, tui: &mut LegacyState) -> Result<()> {
             }
             if tui.player_index.is_none() {
                 let players = store.all_active_players()?;
-                let map: HashMap<PlayerId, Player> = players.into_iter().map(|p| (p.id, p)).collect();
+                let map: HashMap<PlayerId, Player> =
+                    players.into_iter().map(|p| (p.id, p)).collect();
                 tui.player_index = Some(map);
             }
             if tui.team_abbrev_index.is_none() {
@@ -484,10 +510,16 @@ fn draw_header(f: &mut Frame, area: Rect, tui: &LegacyState) {
         " nba3k 1.0.0 — {} — season {} ({:?}, day {}) — payroll {} ",
         tui.user_abbrev, tui.season.0, tui.season_state.phase, tui.season_state.day, payroll
     );
-    let titles: Vec<Line> = ["[1]Status", "[2]Roster", "[3]Standings", "[4]Trades", "[5]News"]
-        .iter()
-        .map(|s| Line::from(*s))
-        .collect();
+    let titles: Vec<Line> = [
+        "[1]Status",
+        "[2]Roster",
+        "[3]Standings",
+        "[4]Trades",
+        "[5]News",
+    ]
+    .iter()
+    .map(|s| Line::from(*s))
+    .collect();
     let tabs = Tabs::new(titles)
         .select(tui.tab.idx())
         .block(Block::default().borders(Borders::ALL).title(title))
@@ -500,7 +532,8 @@ fn draw_header(f: &mut Frame, area: Rect, tui: &LegacyState) {
 }
 
 fn draw_footer(f: &mut Frame, tui: &LegacyState, area: Rect) {
-    let hint = " q quit · 1-5 tabs · ↑↓ select · [s]day [w]week [m]month [t]→deadline [e]→season-end ";
+    let hint =
+        " q quit · 1-5 tabs · ↑↓ select · [s]day [w]week [m]month [t]→deadline [e]→season-end ";
     let line = if let Some(msg) = tui.last_msg.as_deref() {
         format!(" {} │ {}", msg, hint)
     } else {
@@ -517,10 +550,16 @@ fn draw_status(f: &mut Frame, area: Rect, tui: &LegacyState) {
         .unwrap_or_else(|| "-".to_string());
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(format!("season:    {}", tui.season.0)));
-    lines.push(Line::from(format!("phase:     {:?}", tui.season_state.phase)));
+    lines.push(Line::from(format!(
+        "phase:     {:?}",
+        tui.season_state.phase
+    )));
     lines.push(Line::from(format!("day:       {}", tui.season_state.day)));
     lines.push(Line::from(format!("mode:      {}", tui.season_state.mode)));
-    lines.push(Line::from(format!("seed:      {}", tui.season_state.rng_seed)));
+    lines.push(Line::from(format!(
+        "seed:      {}",
+        tui.season_state.rng_seed
+    )));
     lines.push(Line::from(format!(
         "user team: {} (id={})",
         tui.user_abbrev, tui.user_team.0
@@ -541,7 +580,9 @@ fn draw_status(f: &mut Frame, area: Rect, tui: &LegacyState) {
 }
 
 fn draw_roster(f: &mut Frame, area: Rect, tui: &LegacyState) {
-    let Some(roster) = tui.roster.as_ref() else { return };
+    let Some(roster) = tui.roster.as_ref() else {
+        return;
+    };
     let stats = tui.roster_stats.as_ref();
     let header = Row::new(vec![
         Cell::from("NAME"),
@@ -574,11 +615,21 @@ fn draw_roster(f: &mut Frame, area: Rect, tui: &LegacyState) {
         .map(|(i, p)| {
             let s = stats.and_then(|m| m.get(&p.id));
             let gp = s.map(|r| format!("{}", r.gp)).unwrap_or_else(|| "-".into());
-            let ppg = s.map(|r| format!("{:.1}", r.ppg())).unwrap_or_else(|| "-".into());
-            let rpg = s.map(|r| format!("{:.1}", r.rpg())).unwrap_or_else(|| "-".into());
-            let apg = s.map(|r| format!("{:.1}", r.apg())).unwrap_or_else(|| "-".into());
-            let spg = s.map(|r| format!("{:.1}", r.spg())).unwrap_or_else(|| "-".into());
-            let bpg = s.map(|r| format!("{:.1}", r.bpg())).unwrap_or_else(|| "-".into());
+            let ppg = s
+                .map(|r| format!("{:.1}", r.ppg()))
+                .unwrap_or_else(|| "-".into());
+            let rpg = s
+                .map(|r| format!("{:.1}", r.rpg()))
+                .unwrap_or_else(|| "-".into());
+            let apg = s
+                .map(|r| format!("{:.1}", r.apg()))
+                .unwrap_or_else(|| "-".into());
+            let spg = s
+                .map(|r| format!("{:.1}", r.spg()))
+                .unwrap_or_else(|| "-".into());
+            let bpg = s
+                .map(|r| format!("{:.1}", r.bpg()))
+                .unwrap_or_else(|| "-".into());
             let fgp = s
                 .filter(|r| r.fg_att > 0)
                 .map(|r| format!("{:.0}%", r.fg_pct() * 100.0))
@@ -589,7 +640,10 @@ fn draw_roster(f: &mut Frame, area: Rect, tui: &LegacyState) {
                 .unwrap_or_else(|| "-".into());
             let selected = i == tui.selected;
             let style = if selected {
-                Style::default().bg(Color::DarkGray).fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -634,7 +688,9 @@ fn draw_roster(f: &mut Frame, area: Rect, tui: &LegacyState) {
 }
 
 fn draw_standings(f: &mut Frame, area: Rect, tui: &LegacyState) {
-    let Some(rows) = tui.standings.as_ref() else { return };
+    let Some(rows) = tui.standings.as_ref() else {
+        return;
+    };
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -691,9 +747,11 @@ fn standings_table<'a>(rows: &[&StandingRow], title: &'a str) -> Table<'a> {
         Constraint::Length(4),
         Constraint::Length(6),
     ];
-    Table::new(body, widths)
-        .header(header)
-        .block(Block::default().borders(Borders::ALL).title(title.to_string()))
+    Table::new(body, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title.to_string()),
+    )
 }
 
 fn draw_trades(f: &mut Frame, area: Rect, tui: &LegacyState) {
@@ -729,8 +787,7 @@ fn draw_trade_header(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let cap_space_cents = cap.0.saturating_sub(payroll.0).max(0);
     let cap_space = Cents(cap_space_cents);
     let cur_date = crate::commands::day_index_to_date(tui.season_state.day);
-    let deadline =
-        chrono::NaiveDate::from_ymd_opt(2026, 2, 5).unwrap_or(cur_date);
+    let deadline = chrono::NaiveDate::from_ymd_opt(2026, 2, 5).unwrap_or(cur_date);
     let days_to_deadline = (deadline - cur_date).num_days();
     let deadline_str = if days_to_deadline >= 0 {
         format!("{} days", days_to_deadline)
@@ -753,7 +810,9 @@ fn draw_trade_menu(f: &mut Frame, area: Rect, _tui: &LegacyState) {
         Line::from(""),
         Line::from(Span::styled(
             "> Inbox",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from("  History"),
         Line::from(""),
@@ -766,8 +825,8 @@ fn draw_trade_menu(f: &mut Frame, area: Rect, _tui: &LegacyState) {
         Line::from("(Build Trade"),
         Line::from(" coming v2)"),
     ];
-    let p = Paragraph::new(menu_lines)
-        .block(Block::default().borders(Borders::ALL).title(" Menu "));
+    let p =
+        Paragraph::new(menu_lines).block(Block::default().borders(Borders::ALL).title(" Menu "));
     f.render_widget(p, area);
 }
 
@@ -776,8 +835,14 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let chains = match tui.open_chains.as_ref() {
         Some(c) if !c.is_empty() => c,
         _ => {
-            let p = Paragraph::new(" No open offers. Press [t] to skip to deadline\n or wait for AI offers in sim. ")
-                .block(Block::default().borders(Borders::ALL).title(" Current Offer "));
+            let p = Paragraph::new(
+                " No open offers. Press [t] to skip to deadline\n or wait for AI offers in sim. ",
+            )
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Current Offer "),
+            );
             f.render_widget(p, area);
             return;
         }
@@ -794,7 +859,11 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &LegacyState) {
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        format!("Offer #{} (round {})", id.0, latest.map(|o| o.round).unwrap_or(0)),
+        format!(
+            "Offer #{} (round {})",
+            id.0,
+            latest.map(|o| o.round).unwrap_or(0)
+        ),
         Style::default().add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
@@ -811,7 +880,10 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &LegacyState) {
             _ => format!("[T#{:>3}] -", cid.0),
         };
         let style = if i == idx {
-            Style::default().bg(Color::DarkGray).fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(Color::DarkGray)
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -831,7 +903,9 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &LegacyState) {
             let label = format!("{} Send", abbrev_for(*team_id));
             lines.push(Line::from(Span::styled(
                 label,
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             )));
             for pid in &assets.players_out {
                 let (name, salary, ovr) = player_index
@@ -865,8 +939,11 @@ fn draw_trade_offer(f: &mut Frame, area: Rect, tui: &LegacyState) {
         }
     }
 
-    let p = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Current Offer "));
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Current Offer "),
+    );
     f.render_widget(p, area);
 }
 
@@ -875,11 +952,8 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &LegacyState) {
     let chains = match tui.open_chains.as_ref() {
         Some(c) if !c.is_empty() => c,
         _ => {
-            let p = Paragraph::new("").block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Analysis "),
-            );
+            let p = Paragraph::new("")
+                .block(Block::default().borders(Borders::ALL).title(" Analysis "));
             f.render_widget(p, area);
             return;
         }
@@ -928,16 +1002,10 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &LegacyState) {
         }));
         lines.push(Line::from(""));
         lines.push(Line::from("Outgoing Salary"));
-        lines.push(Line::from(format!(
-            " ${:.1}M",
-            outgoing.as_millions_f32()
-        )));
+        lines.push(Line::from(format!(" ${:.1}M", outgoing.as_millions_f32())));
         lines.push(Line::from(""));
         lines.push(Line::from("Incoming Salary"));
-        lines.push(Line::from(format!(
-            " ${:.1}M",
-            incoming.as_millions_f32()
-        )));
+        lines.push(Line::from(format!(" ${:.1}M", incoming.as_millions_f32())));
         lines.push(Line::from(""));
         lines.push(Line::from("Net"));
         let net = incoming.as_millions_f32() - outgoing.as_millions_f32();
@@ -971,12 +1039,17 @@ fn draw_trade_analysis(f: &mut Frame, area: Rect, tui: &LegacyState) {
             "Risk",
             Style::default().add_modifier(Modifier::BOLD),
         )));
-        let risk = if delta_ovr >= 5 { "Low" } else if delta_ovr >= 0 { "Medium" } else { "High" };
+        let risk = if delta_ovr >= 5 {
+            "Low"
+        } else if delta_ovr >= 0 {
+            "Medium"
+        } else {
+            "High"
+        };
         lines.push(Line::from(risk));
     }
 
-    let p = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Analysis "));
+    let p = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Analysis "));
     f.render_widget(p, area);
 }
 
@@ -1010,7 +1083,9 @@ fn truncate(s: &str, n: usize) -> String {
 }
 
 fn draw_news(f: &mut Frame, area: Rect, tui: &LegacyState) {
-    let Some(rows) = tui.news.as_ref() else { return };
+    let Some(rows) = tui.news.as_ref() else {
+        return;
+    };
     let visible_h = area.height.saturating_sub(2) as usize;
     let max_scroll = rows.len().saturating_sub(visible_h.max(1)) as u16;
     let scroll = tui.scroll.min(max_scroll) as usize;

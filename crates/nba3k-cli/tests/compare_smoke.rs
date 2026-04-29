@@ -50,13 +50,7 @@ fn compare_bos_vs_lal_text_renders() {
 
     let out = Command::new(nba3k_bin())
         .current_dir(workspace_root())
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "compare",
-            "BOS",
-            "LAL",
-        ])
+        .args(["--save", save.to_str().unwrap(), "compare", "BOS", "LAL"])
         .output()
         .expect("run nba3k compare");
     assert!(
@@ -70,7 +64,13 @@ fn compare_bos_vs_lal_text_renders() {
     assert!(stdout.contains("BOS"), "BOS column missing:\n{}", stdout);
     assert!(stdout.contains("LAL"), "LAL column missing:\n{}", stdout);
     // Every required label rendered.
-    for label in &["roster size", "top-8 OVR (avg)", "payroll", "chemistry", "TOP 8"] {
+    for label in &[
+        "roster size",
+        "top-8 OVR (avg)",
+        "payroll",
+        "chemistry",
+        "TOP 8",
+    ] {
         assert!(
             stdout.contains(label),
             "label `{}` missing from compare output:\n{}",
@@ -150,14 +150,34 @@ fn compare_bos_vs_lal_json_parses() {
         assert!(top8.len() <= 8, "{} top8 has >8 entries: {}", label, t);
         let row = &top8[0];
         assert!(row["name"].is_string(), "top8 row missing name: {}", row);
-        assert!(row["overall"].as_u64().is_some(), "top8 row missing overall: {}", row);
-        assert!(row["position"].is_string(), "top8 row missing position: {}", row);
+        assert!(
+            row["overall"].as_u64().is_some(),
+            "top8 row missing overall: {}",
+            row
+        );
+        assert!(
+            row["position"].is_string(),
+            "top8 row missing position: {}",
+            row
+        );
     }
 
     // Deltas object present.
-    assert!(deltas["payroll_dollars"].as_i64().is_some(), "deltas.payroll_dollars: {}", deltas);
-    assert!(deltas["top8_avg_overall"].as_f64().is_some(), "deltas.top8_avg_overall: {}", deltas);
-    assert!(deltas["chemistry"].as_f64().is_some(), "deltas.chemistry: {}", deltas);
+    assert!(
+        deltas["payroll_dollars"].as_i64().is_some(),
+        "deltas.payroll_dollars: {}",
+        deltas
+    );
+    assert!(
+        deltas["top8_avg_overall"].as_f64().is_some(),
+        "deltas.top8_avg_overall: {}",
+        deltas
+    );
+    assert!(
+        deltas["chemistry"].as_f64().is_some(),
+        "deltas.chemistry: {}",
+        deltas
+    );
 }
 
 #[test]
@@ -172,13 +192,7 @@ fn compare_same_team_errors() {
 
     let out = Command::new(nba3k_bin())
         .current_dir(workspace_root())
-        .args([
-            "--save",
-            save.to_str().unwrap(),
-            "compare",
-            "BOS",
-            "BOS",
-        ])
+        .args(["--save", save.to_str().unwrap(), "compare", "BOS", "BOS"])
         .output()
         .expect("run nba3k compare BOS BOS");
     assert!(

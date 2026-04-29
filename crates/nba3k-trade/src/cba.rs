@@ -25,7 +25,12 @@ use nba3k_core::{Cents, Contract, ContractYear, Player, PlayerId, SeasonId, Team
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CbaViolation {
     #[error("salary matching failed: out={out_dollars} in={in_dollars} tier={tier}")]
-    SalaryMatching { team: TeamId, out_dollars: i64, in_dollars: i64, tier: String },
+    SalaryMatching {
+        team: TeamId,
+        out_dollars: i64,
+        in_dollars: i64,
+        tier: String,
+    },
     #[error("hard-cap trigger: team would exceed apron after trade")]
     HardCapTrigger { team: TeamId, apron: u8 },
     #[error("no-trade clause held by player {0}")]
@@ -302,10 +307,7 @@ pub fn check_no_trade_clauses(
     Ok(())
 }
 
-pub fn check_cash_limits(
-    offer: &TradeOffer,
-    league: &LeagueSnapshot,
-) -> Result<(), CbaViolation> {
+pub fn check_cash_limits(offer: &TradeOffer, league: &LeagueSnapshot) -> Result<(), CbaViolation> {
     let limit = league.league_year.max_trade_cash;
     for (team, side) in &offer.assets_by_team {
         if side.cash_out > limit {
@@ -366,7 +368,10 @@ pub fn check_roster_size(
     // 2025-26 CBA: 15 standard contracts + 3 two-way = 18 total roster spots.
     // Floor of 13 enforces the league minimum carry rule.
     if !(13..=18).contains(&post) {
-        return Err(CbaViolation::RosterSize { team, size: post.max(0) as u32 });
+        return Err(CbaViolation::RosterSize {
+            team,
+            size: post.max(0) as u32,
+        });
     }
     Ok(())
 }

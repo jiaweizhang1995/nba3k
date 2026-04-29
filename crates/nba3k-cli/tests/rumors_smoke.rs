@@ -26,7 +26,14 @@ fn seed_present() -> bool {
 fn bootstrap(save: &std::path::Path) {
     let new_status = Command::new(nba3k_bin())
         .current_dir(workspace_root())
-        .args(["--save", save.to_str().unwrap(), "new", "--team", "BOS", "--offline"])
+        .args([
+            "--save",
+            save.to_str().unwrap(),
+            "new",
+            "--team",
+            "BOS",
+            "--offline",
+        ])
         .status()
         .expect("nba3k new");
     assert!(new_status.success(), "nba3k new failed");
@@ -103,7 +110,9 @@ fn rumors_json_parses() {
     let arr = v.as_array().expect("rumors json must be an array");
     assert!(!arr.is_empty(), "expected ≥1 rumor on a fresh save");
     let first = &arr[0];
-    for key in ["rank", "player", "team", "ovr", "role", "interest", "suitors"] {
+    for key in [
+        "rank", "player", "team", "ovr", "role", "interest", "suitors",
+    ] {
         assert!(
             !first[key].is_null(),
             "missing `{}` in first row: {}",

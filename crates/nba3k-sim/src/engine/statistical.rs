@@ -1,6 +1,8 @@
 use crate::params::SimParams;
 use crate::{Engine, GameContext, RotationSlot, TeamSnapshot};
-use nba3k_core::{BoxScore, GameResult, InjuryStatus, InjurySeverity, PlayerId, PlayerLine, Ratings};
+use nba3k_core::{
+    BoxScore, GameResult, InjurySeverity, InjuryStatus, PlayerId, PlayerLine, Ratings,
+};
 use rand::{Rng, RngCore};
 use rand_distr::{Distribution, Normal};
 
@@ -12,7 +14,9 @@ pub struct StatisticalEngine {
 
 impl StatisticalEngine {
     pub fn with_defaults() -> Self {
-        Self { params: SimParams::default() }
+        Self {
+            params: SimParams::default(),
+        }
     }
 
     pub fn with_params(params: SimParams) -> Self {
@@ -54,14 +58,20 @@ fn derive_profile(team: &TeamSnapshot, base_pace: f32) -> TeamProfile {
     // structural signals the linear sum couldn't: perimeter_containment (MIN
     // not AVG), top-3 star concentration, position-aware spacing, top-2 product
     // for rim protection. Coefficients are hand-tuned to NBA 2024-25 anchors.
-    use crate::engine::team_quality::{ratings_from_vector, vector_from_rotation, QualityToRatingWeights};
+    use crate::engine::team_quality::{
+        ratings_from_vector, vector_from_rotation, QualityToRatingWeights,
+    };
     let v = vector_from_rotation(&team.rotation);
     let weights = QualityToRatingWeights::default();
     let (ortg, drtg) = ratings_from_vector(&v, &weights);
 
     // Pace adjustment from rotation athleticism; small magnitude.
     let total_minutes_share: f32 = team.rotation.iter().map(|r| r.minutes_share).sum();
-    let norm = if total_minutes_share > 0.0 { total_minutes_share } else { 1.0 };
+    let norm = if total_minutes_share > 0.0 {
+        total_minutes_share
+    } else {
+        1.0
+    };
     let pace_acc: f32 = team
         .rotation
         .iter()
@@ -80,7 +90,12 @@ fn derive_profile(team: &TeamSnapshot, base_pace: f32) -> TeamProfile {
     }
 }
 
-fn sample_possessions(home: &TeamProfile, away: &TeamProfile, sigma: f32, rng: &mut dyn RngCore) -> f32 {
+fn sample_possessions(
+    home: &TeamProfile,
+    away: &TeamProfile,
+    sigma: f32,
+    rng: &mut dyn RngCore,
+) -> f32 {
     let combined = (home.pace + away.pace) * 0.5;
     let dist = Normal::new(combined as f64, sigma.max(0.1) as f64).expect("valid sigma");
     let raw = dist.sample(rng) as f32;
@@ -162,7 +177,10 @@ fn distribute_u16(total: u16, weights: &[f32]) -> Vec<u16> {
 }
 
 fn distribute_u8(total: u16, weights: &[f32]) -> Vec<u8> {
-    distribute_u16(total, weights).into_iter().map(|v| v.min(u8::MAX as u16) as u8).collect()
+    distribute_u16(total, weights)
+        .into_iter()
+        .map(|v| v.min(u8::MAX as u16) as u8)
+        .collect()
 }
 
 // ---- Per-game shooting-percentage calibration ------------------------------
@@ -186,7 +204,8 @@ fn fg_pct_mean(r: &Ratings) -> f32 {
     let composite = (r.mid_range as f32 * 0.30
         + r.free_throw as f32 * 0.20
         + r.close_shot as f32 * 0.25
-        + r.driving_layup as f32 * 0.25) - 75.0;
+        + r.driving_layup as f32 * 0.25)
+        - 75.0;
     (0.45 + composite * 0.005).clamp(0.38, 0.55)
 }
 
@@ -312,18 +331,35 @@ fn build_lines(
             player: PlayerId(fallback_id_base),
             minutes: (available_team_minutes / 5).min(u8::MAX as u16) as u8,
             pts: points.min(u8::MAX as u16) as u8,
-            reb: 0, ast: 0, stl: 0, blk: 0, tov: 0,
-            fg_made: 0, fg_att: 0,
-            three_made: 0, three_att: 0,
-            ft_made: 0, ft_att: 0,
+            reb: 0,
+            ast: 0,
+            stl: 0,
+            blk: 0,
+            tov: 0,
+            fg_made: 0,
+            fg_att: 0,
+            three_made: 0,
+            three_att: 0,
+            ft_made: 0,
+            ft_att: 0,
             plus_minus: plus_minus.clamp(i8::MIN as i16, i8::MAX as i16) as i8,
         };
         return vec![line];
     }
 
     // Realism path: per-player line from `nba3k_models::stat_projection`.
-    if !realism_resources::archetype_profiles().by_archetype.is_empty() {
-        return build_lines_realism(rotation, points, available_team_minutes, plus_minus, team_abbrev, rng);
+    if !realism_resources::archetype_profiles()
+        .by_archetype
+        .is_empty()
+    {
+        return build_lines_realism(
+            rotation,
+            points,
+            available_team_minutes,
+            plus_minus,
+            team_abbrev,
+            rng,
+        );
     }
     // Fallback to the M2 distribution arithmetic when archetype data is absent.
 
@@ -373,11 +409,17 @@ fn build_lines(
 
     // Steals & blocks: ~7.5 STL + 4.8 BLK per team per game baseline.
     let total_stl: u16 = ((points as f32) * 0.07).round() as u16;
-    let stl_weights: Vec<f32> = rotation.iter().map(|r| r.ratings.perimeter_defense as f32).collect();
+    let stl_weights: Vec<f32> = rotation
+        .iter()
+        .map(|r| r.ratings.perimeter_defense as f32)
+        .collect();
     let stl_per = distribute_u8(total_stl, &stl_weights);
 
     let total_blk: u16 = ((points as f32) * 0.045).round() as u16;
-    let blk_weights: Vec<f32> = rotation.iter().map(|r| r.ratings.interior_defense as f32).collect();
+    let blk_weights: Vec<f32> = rotation
+        .iter()
+        .map(|r| r.ratings.interior_defense as f32)
+        .collect();
     let blk_per = distribute_u8(total_blk, &blk_weights);
 
     // Turnovers: ~14 per team. Weighted inverse to IQ.
@@ -404,10 +446,17 @@ fn build_lines(
             player: slot.player,
             minutes: m,
             pts: 0,
-            reb: 0, ast: 0, stl: 0, blk: 0, tov: 0,
-            fg_made: 0, fg_att: 0,
-            three_made: 0, three_att: 0,
-            ft_made: 0, ft_att: ft_att_per[i],
+            reb: 0,
+            ast: 0,
+            stl: 0,
+            blk: 0,
+            tov: 0,
+            fg_made: 0,
+            fg_att: 0,
+            three_made: 0,
+            three_att: 0,
+            ft_made: 0,
+            ft_att: ft_att_per[i],
             plus_minus: 0,
         };
         rebuild_shooting_line(&mut line, &slot.ratings, pts, rng);
@@ -457,7 +506,6 @@ fn build_lines_realism(
     team_abbrev: &str,
     rng: &mut dyn RngCore,
 ) -> Vec<PlayerLine> {
-    
     use nba3k_models::stat_projection::{
         infer_archetype, project_player_line, StatProjectionInput,
     };
@@ -476,7 +524,11 @@ fn build_lines_realism(
 
     // Distribute usage shares so they sum to ~1.0 (one team's possessions).
     let usage_sum: f32 = rotation.iter().map(|r| r.usage.max(0.01)).sum();
-    let usage_norm = if usage_sum > 0.0 { 1.0 / usage_sum } else { 1.0 };
+    let usage_norm = if usage_sum > 0.0 {
+        1.0 / usage_sum
+    } else {
+        1.0
+    };
 
     let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
 
@@ -544,11 +596,20 @@ fn build_lines_realism(
         let target_idx = rotation
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.usage.partial_cmp(&b.1.usage).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.usage
+                    .partial_cmp(&b.1.usage)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
             .unwrap_or(0);
         let pts = team_score.min(99) as u8;
-        rebuild_shooting_line(&mut lines[target_idx], &rotation[target_idx].ratings, pts, rng);
+        rebuild_shooting_line(
+            &mut lines[target_idx],
+            &rotation[target_idx].ratings,
+            pts,
+            rng,
+        );
     }
 
     // PTS may now drift from the simmed team_score by a few points (rounding
@@ -588,7 +649,8 @@ fn apply_pts_drift(line: &mut PlayerLine, drift: i32) {
         line.pts = line.pts.saturating_sub(ft_cut as u8);
         remaining = remaining.saturating_sub(ft_cut);
         if remaining >= 2 && line.fg_made > line.three_made {
-            let two_makes_to_remove = (remaining / 2).min((line.fg_made - line.three_made) as u16) as u8;
+            let two_makes_to_remove =
+                (remaining / 2).min((line.fg_made - line.three_made) as u16) as u8;
             line.fg_made = line.fg_made.saturating_sub(two_makes_to_remove);
             line.pts = line.pts.saturating_sub(two_makes_to_remove * 2);
         }
@@ -618,15 +680,14 @@ fn synthesize_player(slot: &RotationSlot) -> nba3k_core::Player {
     }
 }
 
-
 mod realism_resources {
     //! Lazy-loaded archetype profiles + weights + star roster. Same pattern
     //! used by the trade engine — single load per process.
 
+    use nba3k_models::star_protection::{load_star_roster, StarRoster, STAR_ROSTER_PATH};
     use nba3k_models::stat_projection::{
         load_archetype_profiles, ArchetypeProfiles, ARCHETYPE_PROFILES_PATH,
     };
-    use nba3k_models::star_protection::{load_star_roster, StarRoster, STAR_ROSTER_PATH};
     use nba3k_models::weights::{load_or_default, RealismWeights, StatProjectionWeights};
     use std::path::Path;
     use std::sync::OnceLock;
@@ -644,15 +705,12 @@ mod realism_resources {
     }
 
     pub fn star_roster() -> &'static StarRoster {
-        STAR_ROSTER.get_or_init(|| {
-            load_star_roster(Path::new(STAR_ROSTER_PATH)).unwrap_or_default()
-        })
+        STAR_ROSTER
+            .get_or_init(|| load_star_roster(Path::new(STAR_ROSTER_PATH)).unwrap_or_default())
     }
 
     fn weights() -> &'static RealismWeights {
-        WEIGHTS.get_or_init(|| {
-            load_or_default(Path::new(REALISM_WEIGHTS_PATH)).unwrap_or_default()
-        })
+        WEIGHTS.get_or_init(|| load_or_default(Path::new(REALISM_WEIGHTS_PATH)).unwrap_or_default())
     }
 
     pub fn stat_projection_weights() -> &'static StatProjectionWeights {
@@ -685,7 +743,11 @@ fn roll_one_injury(minutes: u8, rng: &mut dyn RngCore) -> Option<InjuryStatus> {
         let games = rng.gen_range(20..=50);
         (InjurySeverity::LongTerm, games, long_term_desc(rng))
     };
-    Some(InjuryStatus { description, games_remaining, severity })
+    Some(InjuryStatus {
+        description,
+        games_remaining,
+        severity,
+    })
 }
 
 fn day_to_day_desc(rng: &mut dyn RngCore) -> String {
@@ -747,7 +809,11 @@ pub fn roll_injuries_from_box(
     rng: &mut dyn RngCore,
 ) -> Vec<(PlayerId, InjuryStatus)> {
     let mut out = Vec::new();
-    for line in box_score.home_lines.iter().chain(box_score.away_lines.iter()) {
+    for line in box_score
+        .home_lines
+        .iter()
+        .chain(box_score.away_lines.iter())
+    {
         if line.minutes == 0 {
             continue;
         }
@@ -793,8 +859,10 @@ impl Engine for StatisticalEngine {
             p.home_court_advantage
         };
 
-        let mut home_score = sample_score(&home_prof, &away_prof, possessions, hca, p.score_sigma, rng);
-        let mut away_score = sample_score(&away_prof, &home_prof, possessions, 0.0, p.score_sigma, rng);
+        let mut home_score =
+            sample_score(&home_prof, &away_prof, possessions, hca, p.score_sigma, rng);
+        let mut away_score =
+            sample_score(&away_prof, &home_prof, possessions, 0.0, p.score_sigma, rng);
 
         // OT recursion if tied. Cap retries to avoid runaway loops.
         let mut overtimes: u8 = 0;
@@ -816,8 +884,24 @@ impl Engine for StatisticalEngine {
         let home_pm = diff.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
         let away_pm = (-diff).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
 
-        let home_lines = build_lines(&home.rotation, 1, home_score, team_minutes, home_pm, rng, &home.abbrev);
-        let away_lines = build_lines(&away.rotation, 2, away_score, team_minutes, away_pm, rng, &away.abbrev);
+        let home_lines = build_lines(
+            &home.rotation,
+            1,
+            home_score,
+            team_minutes,
+            home_pm,
+            rng,
+            &home.abbrev,
+        );
+        let away_lines = build_lines(
+            &away.rotation,
+            2,
+            away_score,
+            team_minutes,
+            away_pm,
+            rng,
+            &away.abbrev,
+        );
 
         // Injury rolls happen in `roll_injuries_from_box`, called by the CLI
         // after `simulate_game` so it can persist via `Store::upsert_player`.
@@ -832,7 +916,10 @@ impl Engine for StatisticalEngine {
             away: away.id,
             home_score,
             away_score,
-            box_score: BoxScore { home_lines, away_lines },
+            box_score: BoxScore {
+                home_lines,
+                away_lines,
+            },
             overtime_periods: overtimes,
             is_playoffs: ctx.is_playoffs,
         }
@@ -850,20 +937,42 @@ mod tests {
 
     fn uniform_ratings(base: u8) -> Ratings {
         Ratings {
-            close_shot: base, driving_layup: base, driving_dunk: base,
-            standing_dunk: base, post_control: base,
-            mid_range: base, three_point: base, free_throw: base,
-            passing_accuracy: base, ball_handle: base, speed_with_ball: base,
-            interior_defense: base, perimeter_defense: base, steal: base, block: base,
-            off_reb: base, def_reb: base,
-            speed: base, agility: base, strength: base, vertical: base,
+            close_shot: base,
+            driving_layup: base,
+            driving_dunk: base,
+            standing_dunk: base,
+            post_control: base,
+            mid_range: base,
+            three_point: base,
+            free_throw: base,
+            passing_accuracy: base,
+            ball_handle: base,
+            speed_with_ball: base,
+            interior_defense: base,
+            perimeter_defense: base,
+            steal: base,
+            block: base,
+            off_reb: base,
+            def_reb: base,
+            speed: base,
+            agility: base,
+            strength: base,
+            vertical: base,
         }
     }
 
     fn fair_team(id: u8, abbrev: &str, base: u8) -> TeamSnapshot {
         let ratings = uniform_ratings(base);
-        let positions = [Position::PG, Position::SG, Position::SF, Position::PF, Position::C,
-                         Position::PG, Position::SG, Position::C];
+        let positions = [
+            Position::PG,
+            Position::SG,
+            Position::SF,
+            Position::PF,
+            Position::C,
+            Position::PG,
+            Position::SG,
+            Position::C,
+        ];
         let minutes_share = [1.0, 0.95, 0.95, 0.85, 0.85, 0.45, 0.45, 0.50];
         let usage = [0.22, 0.20, 0.18, 0.14, 0.14, 0.05, 0.04, 0.03];
         let rotation: Vec<RotationSlot> = (0..8)
@@ -911,23 +1020,48 @@ mod tests {
         let mut away_wins = 0u32;
         for _ in 0..1000 {
             let r = engine.simulate_game(&home, &away, &c, &mut rng);
-            assert!(r.home_score >= 60 && r.home_score <= 200, "home_score out of range: {}", r.home_score);
-            assert!(r.away_score >= 60 && r.away_score <= 200, "away_score out of range: {}", r.away_score);
+            assert!(
+                r.home_score >= 60 && r.home_score <= 200,
+                "home_score out of range: {}",
+                r.home_score
+            );
+            assert!(
+                r.away_score >= 60 && r.away_score <= 200,
+                "away_score out of range: {}",
+                r.away_score
+            );
             assert_ne!(r.home_score, r.away_score, "tie should have been resolved");
 
             let expected_team_minutes = 240u32 + (r.overtime_periods as u32) * 25;
-            let home_min: u32 = r.box_score.home_lines.iter().map(|l| l.minutes as u32).sum();
-            let away_min: u32 = r.box_score.away_lines.iter().map(|l| l.minutes as u32).sum();
+            let home_min: u32 = r
+                .box_score
+                .home_lines
+                .iter()
+                .map(|l| l.minutes as u32)
+                .sum();
+            let away_min: u32 = r
+                .box_score
+                .away_lines
+                .iter()
+                .map(|l| l.minutes as u32)
+                .sum();
             assert_eq!(home_min, expected_team_minutes, "home minutes mismatch");
             assert_eq!(away_min, expected_team_minutes, "away minutes mismatch");
 
-            if r.home_score > r.away_score { home_wins += 1; } else { away_wins += 1; }
+            if r.home_score > r.away_score {
+                home_wins += 1;
+            } else {
+                away_wins += 1;
+            }
         }
 
         // Loose home-advantage sanity bound: between 40% and 60%.
         let home_rate = home_wins as f32 / (home_wins + away_wins) as f32;
-        assert!(home_rate >= 0.40 && home_rate <= 0.60,
-            "home win rate {} out of [0.40, 0.60]", home_rate);
+        assert!(
+            home_rate >= 0.40 && home_rate <= 0.60,
+            "home win rate {} out of [0.40, 0.60]",
+            home_rate
+        );
     }
 
     #[test]
@@ -945,8 +1079,16 @@ mod tests {
         assert_eq!(r_a.home_score, r_b.home_score);
         assert_eq!(r_a.away_score, r_b.away_score);
         assert_eq!(r_a.overtime_periods, r_b.overtime_periods);
-        assert_eq!(r_a.box_score.home_lines.len(), r_b.box_score.home_lines.len());
-        for (la, lb) in r_a.box_score.home_lines.iter().zip(r_b.box_score.home_lines.iter()) {
+        assert_eq!(
+            r_a.box_score.home_lines.len(),
+            r_b.box_score.home_lines.len()
+        );
+        for (la, lb) in r_a
+            .box_score
+            .home_lines
+            .iter()
+            .zip(r_b.box_score.home_lines.iter())
+        {
             assert_eq!(la.player, lb.player);
             assert_eq!(la.minutes, lb.minutes);
             assert_eq!(la.pts, lb.pts);
@@ -972,12 +1114,18 @@ mod tests {
     fn fallback_no_rotation_still_works() {
         let engine = StatisticalEngine::with_defaults();
         let home = TeamSnapshot {
-            id: TeamId(10), abbrev: "X".into(), overall: 75,
-            home_court_advantage: 2.0, rotation: vec![],
+            id: TeamId(10),
+            abbrev: "X".into(),
+            overall: 75,
+            home_court_advantage: 2.0,
+            rotation: vec![],
         };
         let away = TeamSnapshot {
-            id: TeamId(11), abbrev: "Y".into(), overall: 75,
-            home_court_advantage: 2.0, rotation: vec![],
+            id: TeamId(11),
+            abbrev: "Y".into(),
+            overall: 75,
+            home_court_advantage: 2.0,
+            rotation: vec![],
         };
         let mut rng = ChaCha8Rng::seed_from_u64(99);
         let r = engine.simulate_game(&home, &away, &ctx(1), &mut rng);
@@ -997,7 +1145,8 @@ mod tests {
             max_overtimes = 4
             usage_distribution_alpha = 1.4
             "#,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(p.max_overtimes, 4);
     }
 
@@ -1007,8 +1156,10 @@ mod tests {
         // root and find data/sim_params.toml. The file must exist and parse.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
         let path = std::path::PathBuf::from(manifest)
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("data/sim_params.toml");
         let p = SimParams::from_toml(&path).expect("data/sim_params.toml must parse");
         assert!(p.pace_mean > 80.0 && p.pace_mean < 120.0);
@@ -1029,7 +1180,11 @@ mod tests {
         }
         let elapsed = start.elapsed();
         if cfg!(not(debug_assertions)) {
-            assert!(elapsed.as_secs() < 5, "1230 sims took {:?}, want <5s", elapsed);
+            assert!(
+                elapsed.as_secs() < 5,
+                "1230 sims took {:?}, want <5s",
+                elapsed
+            );
         }
     }
 }

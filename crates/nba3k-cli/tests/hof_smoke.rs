@@ -9,8 +9,8 @@
 
 use chrono::NaiveDate;
 use nba3k_core::{
-    BoxScore, Coach, Conference, Division, GMArchetype, GMPersonality, GameId, GameResult,
-    Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId, Team, TeamId,
+    BoxScore, Coach, Conference, Division, GMArchetype, GMPersonality, GameId, GameResult, Player,
+    PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId, Team, TeamId,
 };
 use nba3k_store::Store;
 use std::path::PathBuf;
@@ -42,8 +42,12 @@ fn make_team(id: TeamId, abbrev: &str, city: &str, name: &str) -> Team {
 
 fn fresh_store(path: &std::path::Path) -> Store {
     let store = Store::open(path).expect("open store");
-    store.upsert_team(&make_team(HOME, "BOS", "Boston", "Celtics")).expect("upsert home");
-    store.upsert_team(&make_team(AWAY, "NYK", "New York", "Knicks")).expect("upsert away");
+    store
+        .upsert_team(&make_team(HOME, "BOS", "Boston", "Celtics"))
+        .expect("upsert home");
+    store
+        .upsert_team(&make_team(AWAY, "NYK", "New York", "Knicks"))
+        .expect("upsert away");
     store
 }
 
@@ -136,10 +140,7 @@ fn hof_lists_retired_player_with_career_totals() {
         home_score: 110,
         away_score: 100,
         box_score: BoxScore {
-            home_lines: vec![
-                line_for(star.id, 40, 8, 8),
-                line_for(role.id, 8, 2, 3),
-            ],
+            home_lines: vec![line_for(star.id, 40, 8, 8), line_for(role.id, 8, 2, 3)],
             away_lines: Vec::new(),
         },
         overtime_periods: 0,
@@ -165,9 +166,17 @@ fn hof_lists_retired_player_with_career_totals() {
         String::from_utf8_lossy(&out.stderr),
     );
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(stdout.contains("Hall of Fame"), "missing header:\n{}", stdout);
+    assert!(
+        stdout.contains("Hall of Fame"),
+        "missing header:\n{}",
+        stdout
+    );
     assert!(stdout.contains("LeBron James"), "star missing:\n{}", stdout);
-    assert!(stdout.contains("Average Joe"), "role player missing:\n{}", stdout);
+    assert!(
+        stdout.contains("Average Joe"),
+        "role player missing:\n{}",
+        stdout
+    );
 
     // The star outscored the role player, so #1 must be LeBron.
     let lebron_idx = stdout.find("LeBron James").expect("lebron present");
@@ -179,7 +188,11 @@ fn hof_lists_retired_player_with_career_totals() {
     );
 
     // Career PTS for the star = 40 (one game). Make sure the number renders.
-    assert!(stdout.contains(" 40 "), "career PTS=40 missing in:\n{}", stdout);
+    assert!(
+        stdout.contains(" 40 "),
+        "career PTS=40 missing in:\n{}",
+        stdout
+    );
 }
 
 #[test]

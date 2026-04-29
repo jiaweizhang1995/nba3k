@@ -6,8 +6,8 @@
 use chrono::NaiveDate;
 use nba3k_core::{
     BoxScore, Coach, Conference, Division, GMArchetype, GMPersonality, GameId, GameMode,
-    GameResult, Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId,
-    SeasonPhase, SeasonState, Team, TeamId,
+    GameResult, Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId, SeasonPhase,
+    SeasonState, Team, TeamId,
 };
 use nba3k_store::Store;
 use std::path::PathBuf;
@@ -80,10 +80,20 @@ fn line_for(player: PlayerId, pts: u8, reb: u8, ast: u8) -> PlayerLine {
 fn fresh_store(path: &std::path::Path) -> Store {
     let store = Store::open(path).expect("open store");
     store
-        .upsert_team(&make_team(HOME, "BOS", Conference::East, Division::Atlantic))
+        .upsert_team(&make_team(
+            HOME,
+            "BOS",
+            Conference::East,
+            Division::Atlantic,
+        ))
         .expect("upsert home");
     store
-        .upsert_team(&make_team(AWAY, "NYK", Conference::East, Division::Atlantic))
+        .upsert_team(&make_team(
+            AWAY,
+            "NYK",
+            Conference::East,
+            Division::Atlantic,
+        ))
         .expect("upsert away");
     let st = SeasonState {
         season: SEASON,
@@ -184,8 +194,7 @@ fn records_season_ppg_after_30_games() {
         let game = GameResult {
             id: GameId((i + 1) as u64),
             season: SEASON,
-            date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
-                + chrono::Duration::days(i as i64),
+            date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap() + chrono::Duration::days(i as i64),
             home: HOME,
             away: AWAY,
             home_score: 110,
@@ -256,8 +265,7 @@ fn records_season_ppg_after_30_games() {
         .expect("run nba3k records --json");
     assert!(out_json.status.success(), "records --json exited non-zero");
     let stdout_json = String::from_utf8_lossy(&out_json.stdout);
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout_json).expect("must emit valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout_json).expect("must emit valid JSON");
     let rows = v["rows"].as_array().expect("rows must be array");
     assert!(
         rows.len() >= 5,

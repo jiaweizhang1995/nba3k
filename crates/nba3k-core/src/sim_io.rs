@@ -43,10 +43,18 @@ pub struct GameResult {
 
 impl GameResult {
     pub fn winner(&self) -> TeamId {
-        if self.home_score >= self.away_score { self.home } else { self.away }
+        if self.home_score >= self.away_score {
+            self.home
+        } else {
+            self.away
+        }
     }
 
     pub fn loser(&self) -> TeamId {
-        if self.home_score >= self.away_score { self.away } else { self.home }
+        if self.home_score >= self.away_score {
+            self.away
+        } else {
+            self.home
+        }
     }
 }

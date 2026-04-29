@@ -62,8 +62,13 @@ pub struct TradeEvaluation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NegotiationState {
-    Open { chain: Vec<TradeOffer> },
+    Open {
+        chain: Vec<TradeOffer>,
+    },
     Accepted(TradeOffer),
-    Rejected { final_offer: TradeOffer, reason: RejectReason },
+    Rejected {
+        final_offer: TradeOffer,
+        reason: RejectReason,
+    },
     Stalled,
 }

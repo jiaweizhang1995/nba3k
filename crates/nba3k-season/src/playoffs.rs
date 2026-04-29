@@ -77,10 +77,18 @@ pub struct SeriesResult {
 
 impl SeriesResult {
     pub fn winner(&self) -> TeamId {
-        if self.home_wins > self.away_wins { self.series.home } else { self.series.away }
+        if self.home_wins > self.away_wins {
+            self.series.home
+        } else {
+            self.series.away
+        }
     }
     pub fn loser(&self) -> TeamId {
-        if self.home_wins > self.away_wins { self.series.away } else { self.series.home }
+        if self.home_wins > self.away_wins {
+            self.series.away
+        } else {
+            self.series.home
+        }
     }
     pub fn is_complete(&self) -> bool {
         self.home_wins == 4 || self.away_wins == 4
@@ -208,7 +216,12 @@ pub fn simulate_series(
         games.push(game);
     }
 
-    SeriesResult { series, home_wins, away_wins, games }
+    SeriesResult {
+        series,
+        home_wins,
+        away_wins,
+        games,
+    }
 }
 
 // ----------------------------------------------------------------------

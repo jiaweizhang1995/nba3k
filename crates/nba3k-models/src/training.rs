@@ -78,12 +78,7 @@ pub fn apply_training_focus(player: &mut Player, focus: TrainingFocus) -> Traini
     let cluster: &[&'static str] = match focus {
         TrainingFocus::Shoot => &["mid_range", "three_point", "free_throw"],
         TrainingFocus::Inside => &["close_shot", "driving_layup", "post_control"],
-        TrainingFocus::Defense => &[
-            "interior_defense",
-            "perimeter_defense",
-            "steal",
-            "block",
-        ],
+        TrainingFocus::Defense => &["interior_defense", "perimeter_defense", "steal", "block"],
         TrainingFocus::Rebound => &["off_reb", "def_reb"],
         TrainingFocus::Athletic => &["speed", "agility", "vertical", "strength"],
         TrainingFocus::Handle => &["passing_accuracy", "ball_handle", "speed_with_ball"],

@@ -195,10 +195,7 @@ fn draw_summary(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
     let lead = if active {
         Span::styled(t(tui.lang, T::CommonReady), theme.accent_style())
     } else {
-        Span::styled(
-            t(tui.lang, T::DraftNotActive),
-            theme.accent_style(),
-        )
+        Span::styled(t(tui.lang, T::DraftNotActive), theme.accent_style())
     };
     let line = Line::from(vec![
         lead,
@@ -228,11 +225,17 @@ fn draw_board(f: &mut Frame, area: Rect, theme: &Theme, lang: Lang) {
 
         let header = Row::new(vec![
             Cell::from(Span::styled("RANK", theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::DraftProspect), theme.accent_style())),
+            Cell::from(Span::styled(
+                t(lang, T::DraftProspect),
+                theme.accent_style(),
+            )),
             Cell::from(Span::styled("POS", theme.accent_style())),
             Cell::from(Span::styled("AGE", theme.accent_style())),
             Cell::from(Span::styled("OVR/POT", theme.accent_style())),
-            Cell::from(Span::styled(t(lang, T::DraftProjectedPick), theme.accent_style())),
+            Cell::from(Span::styled(
+                t(lang, T::DraftProjectedPick),
+                theme.accent_style(),
+            )),
         ]);
 
         let rows: Vec<Row> = data
@@ -287,7 +290,14 @@ fn draw_order(f: &mut Frame, area: Rect, theme: &Theme, tui: &TuiApp) {
         let cursor = cache.order_cursor.min(data.order.len().saturating_sub(1));
         let title = data
             .user_next_pick
-            .map(|p| format!(" {} - {} #{} ", t(tui.lang, T::DraftOrder), tui.user_abbrev, p))
+            .map(|p| {
+                format!(
+                    " {} - {} #{} ",
+                    t(tui.lang, T::DraftOrder),
+                    tui.user_abbrev,
+                    p
+                )
+            })
             .unwrap_or_else(|| format!(" {} ", t(tui.lang, T::DraftOrder)));
 
         let header = Row::new(vec![
@@ -585,10 +595,12 @@ fn load_draft_data(app: &mut AppState, tui: &TuiApp) -> Result<DraftData> {
         .into_iter()
         .enumerate()
         .map(|(i, team_id)| {
-            let (abbrev, full_name) = names
-                .get(&team_id)
-                .cloned()
-                .unwrap_or_else(|| (format!("T{}", team_id.0), t(tui.lang, T::DraftUnknownTeam).to_string()));
+            let (abbrev, full_name) = names.get(&team_id).cloned().unwrap_or_else(|| {
+                (
+                    format!("T{}", team_id.0),
+                    t(tui.lang, T::DraftUnknownTeam).to_string(),
+                )
+            });
             OrderRow {
                 pick: i + 1,
                 team_id,

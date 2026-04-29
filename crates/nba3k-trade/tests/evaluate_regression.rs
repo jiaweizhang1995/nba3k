@@ -156,7 +156,10 @@ fn evaluate_star_for_filler_rejected() {
     let traits = GMTraits::default();
     let eval = evaluate_with_traits(&offer, lal, &snap, &traits, &mut rng);
     assert!(
-        matches!(eval.verdict, Verdict::Reject(RejectReason::InsufficientValue)),
+        matches!(
+            eval.verdict,
+            Verdict::Reject(RejectReason::InsufficientValue)
+        ),
         "star-for-filler should be Reject(InsufficientValue), got {:?}",
         eval.verdict
     );

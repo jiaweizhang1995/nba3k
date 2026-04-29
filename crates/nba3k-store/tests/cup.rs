@@ -84,9 +84,7 @@ fn ko_bracket_records_qf_sf_final_with_correct_widths() {
     let season = SeasonId(2025);
 
     // QF: 8 teams → 4 matches.
-    let qf: Vec<(TeamId, TeamId)> = (1..=4)
-        .map(|i| (TeamId(i), TeamId(9 - i)))
-        .collect();
+    let qf: Vec<(TeamId, TeamId)> = (1..=4).map(|i| (TeamId(i), TeamId(9 - i))).collect();
     for (h, a) in &qf {
         store
             .record_cup_match(season, "qf", None, *h, *a, 110, 100, 45)
@@ -94,10 +92,7 @@ fn ko_bracket_records_qf_sf_final_with_correct_widths() {
     }
 
     // SF: 4 → 2.
-    let sf: Vec<(TeamId, TeamId)> = vec![
-        (TeamId(1), TeamId(4)),
-        (TeamId(2), TeamId(3)),
-    ];
+    let sf: Vec<(TeamId, TeamId)> = vec![(TeamId(1), TeamId(4)), (TeamId(2), TeamId(3))];
     for (h, a) in &sf {
         store
             .record_cup_match(season, "sf", None, *h, *a, 105, 99, 53)
@@ -134,7 +129,16 @@ fn read_cup_matches_preserves_insertion_order() {
 
     // Insert one row per round in order.
     store
-        .record_cup_match(season, "group", Some("east-A"), TeamId(1), TeamId(2), 100, 90, 30)
+        .record_cup_match(
+            season,
+            "group",
+            Some("east-A"),
+            TeamId(1),
+            TeamId(2),
+            100,
+            90,
+            30,
+        )
         .unwrap();
     store
         .record_cup_match(season, "qf", None, TeamId(1), TeamId(2), 110, 100, 45)

@@ -6,9 +6,9 @@
 
 use chrono::NaiveDate;
 use nba3k_core::{
-    BirdRights, Cents, Coach, Conference, Contract, ContractYear, Division, GMArchetype, GMPersonality,
-    LeagueSnapshot, LeagueYear, Player, PlayerId, PlayerRole, Position, Ratings, SeasonId, SeasonPhase, Team,
-    TeamId, TeamRecordSummary,
+    BirdRights, Cents, Coach, Conference, Contract, ContractYear, Division, GMArchetype,
+    GMPersonality, LeagueSnapshot, LeagueYear, Player, PlayerId, PlayerRole, Position, Ratings,
+    SeasonId, SeasonPhase, Team, TeamId, TeamRecordSummary,
 };
 use nba3k_models::asset_fit::asset_fit;
 use nba3k_models::weights::AssetFitWeights;

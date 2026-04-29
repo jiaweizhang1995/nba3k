@@ -47,8 +47,8 @@ impl OverridesIndex {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("read overrides {path:?}"))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("read overrides {path:?}"))?;
         let file: OverridesFile = toml::from_str(&text).context("parse overrides toml")?;
         let mut by_name = HashMap::with_capacity(file.player.len());
         for o in file.player {

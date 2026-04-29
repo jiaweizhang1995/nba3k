@@ -69,7 +69,9 @@ fn non_apron_match_5m_for_11m_fails() {
     );
     let res = validate(&offer, &snap);
     match res {
-        Err(CbaViolation::SalaryMatching { team, in_dollars, .. }) => {
+        Err(CbaViolation::SalaryMatching {
+            team, in_dollars, ..
+        }) => {
             assert_eq!(team, TEAM_A);
             assert_eq!(in_dollars, 11_000_000);
         }
@@ -84,8 +86,12 @@ fn non_apron_ceiling_math_explicit() {
     let snap = w.snapshot();
 
     // Below the $7.5M break: 200% + $250K.
-    let cap_5m =
-        max_incoming_for_tier(SalaryTier::NonApron, Cents::from_dollars(5_000_000), TEAM_A, &snap);
+    let cap_5m = max_incoming_for_tier(
+        SalaryTier::NonApron,
+        Cents::from_dollars(5_000_000),
+        TEAM_A,
+        &snap,
+    );
     assert_eq!(cap_5m.as_dollars(), 5_000_000 * 2 + 250_000);
 
     // Above the $7.5M break: 125% + $250K.

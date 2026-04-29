@@ -755,12 +755,14 @@ fn cmd_sim_paced(app: &mut AppState, days: u32, allow_pause: bool, label: &str) 
         let new_news = &news[..news
             .len()
             .saturating_sub(baseline_news_count.min(news.len()))];
-        if let Some(injury) = new_news.iter().find(|n| {
-            n.kind == "injury"
-                && user_player_ids
-                    .iter()
-                    .any(|pid| n.headline.contains(&format!("#{}", pid.0)) || true)
-        }) {
+        // Coarse match: any injury news during this paced sim, as long as
+        // the user actually has roster slots. Caller reads `news` for the
+        // detail. Predicate stays lenient on purpose — headline format is
+        // not stable and we'd rather over-pause than miss an injury.
+        if let Some(injury) = new_news
+            .iter()
+            .find(|n| n.kind == "injury" && !user_player_ids.is_empty())
+        {
             // Coarse match: any injury news during this paced sim — caller
             // can read `news` for details. Avoids tight coupling to news
             // headline format.
@@ -5351,7 +5353,9 @@ mod tests {
         );
         // 174-day window between start and end matches the legacy default.
         assert_eq!(
-            next.end_date.signed_duration_since(next.start_date).num_days(),
+            next.end_date
+                .signed_duration_since(next.start_date)
+                .num_days(),
             174
         );
         // Deadline sits 107 days into the season (matches Feb 5 in 2025-26).

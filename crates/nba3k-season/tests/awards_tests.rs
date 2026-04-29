@@ -217,16 +217,41 @@ fn mvp_luka_shape_beats_embiid_shape() {
     let mut by_player: HashMap<PlayerId, PlayerSeason> = HashMap::new();
     by_player.insert(
         luka_id,
-        season_with(luka_id, luka_team, 70, 32 * 70, 8 * 70, 8 * 70, 1 * 70, 1 * 70, 4 * 70, 36 * 70),
+        season_with(
+            luka_id,
+            luka_team,
+            70,
+            32 * 70,
+            8 * 70,
+            8 * 70,
+            1 * 70,
+            1 * 70,
+            4 * 70,
+            36 * 70,
+        ),
     );
     by_player.insert(
         embiid_id,
-        season_with(embiid_id, embiid_team, 65, 28 * 65, 11 * 65, 5 * 65, 1 * 65, 2 * 65, 3 * 65, 35 * 65),
+        season_with(
+            embiid_id,
+            embiid_team,
+            65,
+            28 * 65,
+            11 * 65,
+            5 * 65,
+            1 * 65,
+            2 * 65,
+            3 * 65,
+            35 * 65,
+        ),
     );
     let mut team_drtg: HashMap<TeamId, f32> = HashMap::new();
     team_drtg.insert(luka_team, 110.0);
     team_drtg.insert(embiid_team, 110.0);
-    let agg = SeasonAggregate { by_player, team_drtg };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg,
+    };
 
     let mut wins = HashMap::new();
     wins.insert(luka_team, 50);
@@ -263,15 +288,40 @@ fn mvp_below_30_win_gate_zeroes_score() {
     // Tank-team monster: 35 PPG, 10 APG but team won only 22 games → gate=0.
     by_player.insert(
         scorer,
-        season_with(scorer, scorer_team, 70, 35 * 70, 6 * 70, 10 * 70, 70, 70, 5 * 70, 36 * 70),
+        season_with(
+            scorer,
+            scorer_team,
+            70,
+            35 * 70,
+            6 * 70,
+            10 * 70,
+            70,
+            70,
+            5 * 70,
+            36 * 70,
+        ),
     );
     // Quietly elite player on a 60-win team — should win MVP because tank
     // monster's gate zeroes him out.
     by_player.insert(
         star,
-        season_with(star, star_team, 70, 25 * 70, 7 * 70, 7 * 70, 70, 70, 3 * 70, 33 * 70),
+        season_with(
+            star,
+            star_team,
+            70,
+            25 * 70,
+            7 * 70,
+            7 * 70,
+            70,
+            70,
+            3 * 70,
+            33 * 70,
+        ),
     );
-    let agg = SeasonAggregate { by_player, team_drtg: HashMap::new() };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg: HashMap::new(),
+    };
 
     let mut wins = HashMap::new();
     wins.insert(scorer_team, 22);
@@ -282,7 +332,12 @@ fn mvp_below_30_win_gate_zeroes_score() {
     let standings = make_standings(&teams, &wins);
 
     let mvp = compute_mvp(&agg, &standings, SeasonId(2026));
-    assert_eq!(mvp.winner, Some(star), "tank-team monster should be gated; ballot {:?}", mvp.ballot);
+    assert_eq!(
+        mvp.winner,
+        Some(star),
+        "tank-team monster should be gated; ballot {:?}",
+        mvp.ballot
+    );
 }
 
 // ----------------------------------------------------------------------
@@ -299,17 +354,42 @@ fn dpoy_wemby_shape_beats_average_wing() {
     let mut by_player: HashMap<PlayerId, PlayerSeason> = HashMap::new();
     by_player.insert(
         wemby,
-        season_with(wemby, wemby_team, 70, 22 * 70, 11 * 70, 4 * 70, 1 * 70, 4 * 70, 3 * 70, 33 * 70),
+        season_with(
+            wemby,
+            wemby_team,
+            70,
+            22 * 70,
+            11 * 70,
+            4 * 70,
+            1 * 70,
+            4 * 70,
+            3 * 70,
+            33 * 70,
+        ),
     );
     by_player.insert(
         wing,
-        season_with(wing, wing_team, 70, 18 * 70, 4 * 70, 4 * 70, 1 * 70, 1 * 70, 2 * 70, 32 * 70),
+        season_with(
+            wing,
+            wing_team,
+            70,
+            18 * 70,
+            4 * 70,
+            4 * 70,
+            1 * 70,
+            1 * 70,
+            2 * 70,
+            32 * 70,
+        ),
     );
     // Wemby on top-5 defense (low DRtg); wing on average defense.
     let mut team_drtg: HashMap<TeamId, f32> = HashMap::new();
     team_drtg.insert(wemby_team, 102.0);
     team_drtg.insert(wing_team, 113.0);
-    let agg = SeasonAggregate { by_player, team_drtg };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg,
+    };
 
     let dpoy = compute_dpoy(&agg, SeasonId(2026));
     assert_eq!(
@@ -333,13 +413,38 @@ fn roy_filters_to_rookies_only() {
     let mut by_player: HashMap<PlayerId, PlayerSeason> = HashMap::new();
     by_player.insert(
         rookie,
-        season_with(rookie, team, 60, 18 * 60, 5 * 60, 4 * 60, 60, 60, 2 * 60, 30 * 60),
+        season_with(
+            rookie,
+            team,
+            60,
+            18 * 60,
+            5 * 60,
+            4 * 60,
+            60,
+            60,
+            2 * 60,
+            30 * 60,
+        ),
     );
     by_player.insert(
         veteran_scorer,
-        season_with(veteran_scorer, team, 70, 30 * 70, 5 * 70, 5 * 70, 70, 70, 3 * 70, 35 * 70),
+        season_with(
+            veteran_scorer,
+            team,
+            70,
+            30 * 70,
+            5 * 70,
+            5 * 70,
+            70,
+            70,
+            3 * 70,
+            35 * 70,
+        ),
     );
-    let agg = SeasonAggregate { by_player, team_drtg: HashMap::new() };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg: HashMap::new(),
+    };
 
     let roy = compute_roy(&agg, SeasonId(2026), |id| id == rookie);
     assert_eq!(roy.winner, Some(rookie));
@@ -365,19 +470,44 @@ fn sixth_man_only_rotation_non_starters() {
     // 24 mpg, 18 ppg.
     by_player.insert(
         sixth,
-        season_with(sixth, team, 70, 18 * 70, 4 * 70, 5 * 70, 70, 70, 2 * 70, 24 * 70),
+        season_with(
+            sixth,
+            team,
+            70,
+            18 * 70,
+            4 * 70,
+            5 * 70,
+            70,
+            70,
+            2 * 70,
+            24 * 70,
+        ),
     );
     // Starter at 36 mpg — gated out.
     by_player.insert(
         starter,
-        season_with(starter, team, 70, 28 * 70, 6 * 70, 6 * 70, 70, 70, 3 * 70, 36 * 70),
+        season_with(
+            starter,
+            team,
+            70,
+            28 * 70,
+            6 * 70,
+            6 * 70,
+            70,
+            70,
+            3 * 70,
+            36 * 70,
+        ),
     );
     // DNP-level — gated out.
     by_player.insert(
         dnp,
         season_with(dnp, team, 70, 4 * 70, 1 * 70, 1 * 70, 70, 70, 70, 8 * 70),
     );
-    let agg = SeasonAggregate { by_player, team_drtg: HashMap::new() };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg: HashMap::new(),
+    };
 
     let sm = compute_sixth_man(&agg, SeasonId(2026));
     assert_eq!(sm.winner, Some(sixth));
@@ -396,24 +526,74 @@ fn mip_picks_biggest_improver() {
     let mut prev: HashMap<PlayerId, PlayerSeason> = HashMap::new();
     prev.insert(
         breakout,
-        season_with(breakout, team, 60, 8 * 60, 3 * 60, 2 * 60, 60, 60, 60, 18 * 60),
+        season_with(
+            breakout,
+            team,
+            60,
+            8 * 60,
+            3 * 60,
+            2 * 60,
+            60,
+            60,
+            60,
+            18 * 60,
+        ),
     );
     prev.insert(
         steady,
-        season_with(steady, team, 70, 22 * 70, 5 * 70, 5 * 70, 70, 70, 2 * 70, 33 * 70),
+        season_with(
+            steady,
+            team,
+            70,
+            22 * 70,
+            5 * 70,
+            5 * 70,
+            70,
+            70,
+            2 * 70,
+            33 * 70,
+        ),
     );
-    let prev_agg = SeasonAggregate { by_player: prev, team_drtg: HashMap::new() };
+    let prev_agg = SeasonAggregate {
+        by_player: prev,
+        team_drtg: HashMap::new(),
+    };
 
     let mut curr: HashMap<PlayerId, PlayerSeason> = HashMap::new();
     curr.insert(
         breakout,
-        season_with(breakout, team, 70, 22 * 70, 7 * 70, 5 * 70, 70, 70, 2 * 70, 32 * 70),
+        season_with(
+            breakout,
+            team,
+            70,
+            22 * 70,
+            7 * 70,
+            5 * 70,
+            70,
+            70,
+            2 * 70,
+            32 * 70,
+        ),
     );
     curr.insert(
         steady,
-        season_with(steady, team, 70, 23 * 70, 5 * 70, 5 * 70, 70, 70, 2 * 70, 33 * 70),
+        season_with(
+            steady,
+            team,
+            70,
+            23 * 70,
+            5 * 70,
+            5 * 70,
+            70,
+            70,
+            2 * 70,
+            33 * 70,
+        ),
     );
-    let curr_agg = SeasonAggregate { by_player: curr, team_drtg: HashMap::new() };
+    let curr_agg = SeasonAggregate {
+        by_player: curr,
+        team_drtg: HashMap::new(),
+    };
 
     let mip = compute_mip(&curr_agg, &prev_agg, SeasonId(2026));
     assert_eq!(mip.winner, Some(breakout));
@@ -432,11 +612,21 @@ fn all_nba_three_teams_positional_balance() {
     let mut wins = HashMap::new();
     let mut positions: HashMap<PlayerId, Position> = HashMap::new();
     let positions_seq: Vec<Position> = vec![
-        Position::PG, Position::PG, Position::PG,
-        Position::SG, Position::SG, Position::SG,
-        Position::SF, Position::SF, Position::SF,
-        Position::PF, Position::PF, Position::PF,
-        Position::C,  Position::C,  Position::C,
+        Position::PG,
+        Position::PG,
+        Position::PG,
+        Position::SG,
+        Position::SG,
+        Position::SG,
+        Position::SF,
+        Position::SF,
+        Position::SF,
+        Position::PF,
+        Position::PF,
+        Position::PF,
+        Position::C,
+        Position::C,
+        Position::C,
     ];
     for (i, pos) in positions_seq.iter().enumerate() {
         let pid = PlayerId(700 + i as u32);
@@ -448,14 +638,28 @@ fn all_nba_three_teams_positional_balance() {
         let pts_base = (35 - i) as u32 * 70;
         by_player.insert(
             pid,
-            season_with(pid, team, 70, pts_base, 5 * 70, 5 * 70, 70, 70, 2 * 70, 33 * 70),
+            season_with(
+                pid,
+                team,
+                70,
+                pts_base,
+                5 * 70,
+                5 * 70,
+                70,
+                70,
+                2 * 70,
+                33 * 70,
+            ),
         );
     }
     for t in &teams {
         wins.entry(t.id).or_insert(35);
     }
     let standings = make_standings(&teams, &wins);
-    let agg = SeasonAggregate { by_player, team_drtg: HashMap::new() };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg: HashMap::new(),
+    };
 
     let all_nba = compute_all_nba(&agg, &standings, SeasonId(2026), |pid| {
         positions.get(&pid).copied()
@@ -463,7 +667,12 @@ fn all_nba_three_teams_positional_balance() {
     let total: usize = all_nba.iter().map(|t| t.ballot.len()).sum();
     assert_eq!(total, 15, "All-NBA must have 15 players across 3 teams");
     for (i, team) in all_nba.iter().enumerate() {
-        assert_eq!(team.ballot.len(), 5, "All-NBA team {} must have 5 players", i + 1);
+        assert_eq!(
+            team.ballot.len(),
+            5,
+            "All-NBA team {} must have 5 players",
+            i + 1
+        );
         let mut g = 0;
         let mut f = 0;
         let mut c = 0;
@@ -474,7 +683,13 @@ fn all_nba_three_teams_positional_balance() {
                 Position::C => c += 1,
             }
         }
-        assert_eq!((g, f, c), (2, 2, 1), "team {} positional shape {:?}", i + 1, (g, f, c));
+        assert_eq!(
+            (g, f, c),
+            (2, 2, 1),
+            "team {} positional shape {:?}",
+            i + 1,
+            (g, f, c)
+        );
     }
 }
 
@@ -488,11 +703,26 @@ fn all_defensive_two_teams_positional_balance() {
     let mut team_drtg: HashMap<TeamId, f32> = HashMap::new();
     let mut positions: HashMap<PlayerId, Position> = HashMap::new();
     let positions_seq: Vec<Position> = vec![
-        Position::PG, Position::PG, Position::PG, Position::PG,
-        Position::SG, Position::SG, Position::SG, Position::SG,
-        Position::SF, Position::SF, Position::SF, Position::SF,
-        Position::PF, Position::PF, Position::PF, Position::PF,
-        Position::C,  Position::C,  Position::C,  Position::C,
+        Position::PG,
+        Position::PG,
+        Position::PG,
+        Position::PG,
+        Position::SG,
+        Position::SG,
+        Position::SG,
+        Position::SG,
+        Position::SF,
+        Position::SF,
+        Position::SF,
+        Position::SF,
+        Position::PF,
+        Position::PF,
+        Position::PF,
+        Position::PF,
+        Position::C,
+        Position::C,
+        Position::C,
+        Position::C,
     ];
     for (i, pos) in positions_seq.iter().enumerate() {
         let pid = PlayerId(800 + i as u32);
@@ -502,18 +732,38 @@ fn all_defensive_two_teams_positional_balance() {
         let stocks = 4 - (i as u32 / 5);
         by_player.insert(
             pid,
-            season_with(pid, team, 70, 12 * 70, 6 * 70, 3 * 70, stocks * 70 / 2, stocks * 70 / 2, 70, 30 * 70),
+            season_with(
+                pid,
+                team,
+                70,
+                12 * 70,
+                6 * 70,
+                3 * 70,
+                stocks * 70 / 2,
+                stocks * 70 / 2,
+                70,
+                30 * 70,
+            ),
         );
     }
-    let agg = SeasonAggregate { by_player, team_drtg };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg,
+    };
 
-    let all_def = compute_all_defensive(&agg, SeasonId(2026), |pid| {
-        positions.get(&pid).copied()
-    });
+    let all_def = compute_all_defensive(&agg, SeasonId(2026), |pid| positions.get(&pid).copied());
     let total: usize = all_def.iter().map(|t| t.ballot.len()).sum();
-    assert_eq!(total, 10, "All-Defensive must have 10 players across 2 teams");
+    assert_eq!(
+        total, 10,
+        "All-Defensive must have 10 players across 2 teams"
+    );
     for (i, team) in all_def.iter().enumerate() {
-        assert_eq!(team.ballot.len(), 5, "All-Defensive team {} must have 5", i + 1);
+        assert_eq!(
+            team.ballot.len(),
+            5,
+            "All-Defensive team {} must have 5",
+            i + 1
+        );
     }
 }
 
@@ -531,7 +781,11 @@ fn all_star_24_players_12_per_conference() {
     // Put 15 candidates per conference (more than enough to fill 12 slots
     // per side with positional balance).
     let pos_cycle = [
-        Position::PG, Position::SG, Position::SF, Position::PF, Position::C,
+        Position::PG,
+        Position::SG,
+        Position::SF,
+        Position::PF,
+        Position::C,
     ];
     for c in 0..30 {
         let pid = PlayerId(900 + c as u32);
@@ -541,7 +795,18 @@ fn all_star_24_players_12_per_conference() {
         // High-scoring rotation player so we clear the volume floor.
         by_player.insert(
             pid,
-            season_with(pid, team_id, 50, 22 * 50, 5 * 50, 5 * 50, 50, 50, 2 * 50, 33 * 50),
+            season_with(
+                pid,
+                team_id,
+                50,
+                22 * 50,
+                5 * 50,
+                5 * 50,
+                50,
+                50,
+                2 * 50,
+                33 * 50,
+            ),
         );
     }
 
@@ -550,7 +815,10 @@ fn all_star_24_players_12_per_conference() {
         wins.insert(t.id, 41);
     }
     let standings = make_standings(&teams, &wins);
-    let agg = SeasonAggregate { by_player, team_drtg: HashMap::new() };
+    let agg = SeasonAggregate {
+        by_player,
+        team_drtg: HashMap::new(),
+    };
 
     let all_star = compute_all_star(
         &agg,
@@ -561,14 +829,24 @@ fn all_star_24_players_12_per_conference() {
     );
     let east = &all_star[0];
     let west = &all_star[1];
-    assert_eq!(east.starters.len() + east.reserves.len(), 12, "East roster must be 12");
-    assert_eq!(west.starters.len() + west.reserves.len(), 12, "West roster must be 12");
+    assert_eq!(
+        east.starters.len() + east.reserves.len(),
+        12,
+        "East roster must be 12"
+    );
+    assert_eq!(
+        west.starters.len() + west.reserves.len(),
+        12,
+        "West roster must be 12"
+    );
     assert_eq!(east.starters.len(), 5);
     assert_eq!(west.starters.len(), 5);
 
     // 2 guards + 2 forwards + 1 center per conference's starting five.
     for roster in [east, west] {
-        let mut g = 0; let mut f = 0; let mut c = 0;
+        let mut g = 0;
+        let mut f = 0;
+        let mut c = 0;
         for s in &roster.starters {
             match positions[s] {
                 Position::PG | Position::SG => g += 1,
@@ -576,11 +854,16 @@ fn all_star_24_players_12_per_conference() {
                 Position::C => c += 1,
             }
         }
-        assert_eq!((g, f, c), (2, 2, 1), "starters must be 2G+2F+1C; got {:?}", (g, f, c));
+        assert_eq!(
+            (g, f, c),
+            (2, 2, 1),
+            "starters must be 2G+2F+1C; got {:?}",
+            (g, f, c)
+        );
     }
 
     // Total = 24 across both conferences.
-    let total = east.starters.len() + east.reserves.len()
-        + west.starters.len() + west.reserves.len();
+    let total =
+        east.starters.len() + east.reserves.len() + west.starters.len() + west.reserves.len();
     assert_eq!(total, 24);
 }

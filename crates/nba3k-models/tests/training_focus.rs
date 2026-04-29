@@ -220,10 +220,10 @@ fn position_aware_overall_recomputed_handle_pg_vs_center() {
     // And a direct weighted-total invariant: the *unrounded* gain must be
     // strictly greater for the PG. We reconstruct it by reading the
     // category averages.
-    let pre_handling = (pre.passing_accuracy as u32 + pre.ball_handle as u32
-        + pre.speed_with_ball as u32) / 3;
-    let post_handling = (post.passing_accuracy as u32 + post.ball_handle as u32
-        + post.speed_with_ball as u32) / 3;
+    let pre_handling =
+        (pre.passing_accuracy as u32 + pre.ball_handle as u32 + pre.speed_with_ball as u32) / 3;
+    let post_handling =
+        (post.passing_accuracy as u32 + post.ball_handle as u32 + post.speed_with_ball as u32) / 3;
     let category_step = post_handling as i32 - pre_handling as i32;
     assert!(category_step > 0, "handling category should advance");
     let pg_weighted_step = category_step * 30; // PG handling weight
@@ -238,15 +238,30 @@ fn position_aware_overall_recomputed_handle_pg_vs_center() {
 
 #[test]
 fn focus_parser_accepts_short_and_long_forms() {
-    assert_eq!(TrainingFocus::parse_str("shoot"), Some(TrainingFocus::Shoot));
-    assert_eq!(TrainingFocus::parse_str("SHOOT"), Some(TrainingFocus::Shoot));
-    assert_eq!(TrainingFocus::parse_str("def"), Some(TrainingFocus::Defense));
+    assert_eq!(
+        TrainingFocus::parse_str("shoot"),
+        Some(TrainingFocus::Shoot)
+    );
+    assert_eq!(
+        TrainingFocus::parse_str("SHOOT"),
+        Some(TrainingFocus::Shoot)
+    );
+    assert_eq!(
+        TrainingFocus::parse_str("def"),
+        Some(TrainingFocus::Defense)
+    );
     assert_eq!(
         TrainingFocus::parse_str("defense"),
         Some(TrainingFocus::Defense)
     );
-    assert_eq!(TrainingFocus::parse_str("reb"), Some(TrainingFocus::Rebound));
-    assert_eq!(TrainingFocus::parse_str("ath"), Some(TrainingFocus::Athletic));
+    assert_eq!(
+        TrainingFocus::parse_str("reb"),
+        Some(TrainingFocus::Rebound)
+    );
+    assert_eq!(
+        TrainingFocus::parse_str("ath"),
+        Some(TrainingFocus::Athletic)
+    );
     assert_eq!(
         TrainingFocus::parse_str("handle"),
         Some(TrainingFocus::Handle)

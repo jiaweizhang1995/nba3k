@@ -133,13 +133,27 @@ fn two_team_offer(
     let mut assets = IndexMap::new();
     assets.insert(
         from,
-        TradeAssets { players_out: send, picks_out: vec![], cash_out: Cents::ZERO },
+        TradeAssets {
+            players_out: send,
+            picks_out: vec![],
+            cash_out: Cents::ZERO,
+        },
     );
     assets.insert(
         to,
-        TradeAssets { players_out: receive, picks_out: vec![], cash_out: Cents::ZERO },
+        TradeAssets {
+            players_out: receive,
+            picks_out: vec![],
+            cash_out: Cents::ZERO,
+        },
     );
-    TradeOffer { id: TradeId(1), initiator: from, assets_by_team: assets, round: 1, parent: None }
+    TradeOffer {
+        id: TradeId(1),
+        initiator: from,
+        assets_by_team: assets,
+        round: 1,
+        parent: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -174,8 +188,7 @@ fn mock_providers<'a>(knobs: &'a MockKnobs) -> ValueProviders<'a> {
         // Keeps the math simple and easy to reason about in tests.
         player_value: Box::new(|p, _t, _ev, _l| {
             let dollars = ((p.overall.saturating_sub(50)) as f64) * 1_000_000.0;
-            Score::new(dollars * 100.0)
-                .with_reason("mock player_value", dollars * 100.0)
+            Score::new(dollars * 100.0).with_reason("mock player_value", dollars * 100.0)
         }),
         // contract_value: 0 — mock doesn't care about contracts.
         contract_value: Box::new(|_p, _t, _ly| Score::new(0.0)),
@@ -277,7 +290,13 @@ fn untouchable_short_circuits_to_reject_regardless_of_incoming_value() {
     let mut rng = ChaCha8Rng::seed_from_u64(42);
     let star_roster = StarRoster::default();
     let result = trade_acceptance_with_providers(
-        &offer, LAL, &snap, &star_roster, &bundle, &providers, &mut rng,
+        &offer,
+        LAL,
+        &snap,
+        &star_roster,
+        &bundle,
+        &providers,
+        &mut rng,
     );
 
     match &result.verdict {
@@ -286,7 +305,10 @@ fn untouchable_short_circuits_to_reject_regardless_of_incoming_value() {
         }
         other => panic!("expected Reject(Other(\"untouchable\")), got {other:?}"),
     }
-    assert_eq!(result.probability, 0.0, "untouchable short-circuit must be p=0.0");
+    assert_eq!(
+        result.probability, 0.0,
+        "untouchable short-circuit must be p=0.0"
+    );
     assert_eq!(result.net_value, Cents::ZERO);
     assert!(
         result.reasons.iter().any(|r| r.label == "untouchable star"),
@@ -305,7 +327,13 @@ fn untouchable_short_circuits_even_with_absurd_incoming_value() {
     let luka = mk_player(100, "Luka", 96, LAL, 50_000_000);
     // 5 incoming stars worth 500M+ combined.
     for i in 0..5 {
-        world.add(mk_player(20 + i, &format!("MegaStar{i}"), 99, BOS, 50_000_000));
+        world.add(mk_player(
+            20 + i,
+            &format!("MegaStar{i}"),
+            99,
+            BOS,
+            50_000_000,
+        ));
     }
     world.add(luka.clone());
     let snap = world.snap();
@@ -327,7 +355,13 @@ fn untouchable_short_circuits_even_with_absurd_incoming_value() {
 
     let mut rng = ChaCha8Rng::seed_from_u64(0);
     let result = trade_acceptance_with_providers(
-        &offer, LAL, &snap, &StarRoster::default(), &bundle, &providers, &mut rng,
+        &offer,
+        LAL,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers,
+        &mut rng,
     );
 
     assert!(
@@ -362,7 +396,13 @@ fn balanced_one_for_one_lands_in_accept_with_high_probability() {
 
     let mut rng = ChaCha8Rng::seed_from_u64(7);
     let result = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle, &providers, &mut rng,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers,
+        &mut rng,
     );
 
     assert!(
@@ -404,11 +444,20 @@ fn wildly_imbalanced_filler_for_star_is_rejected() {
 
     let mut rng = ChaCha8Rng::seed_from_u64(7);
     let result = trade_acceptance_with_providers(
-        &offer, LAL, &snap, &StarRoster::default(), &bundle, &providers, &mut rng,
+        &offer,
+        LAL,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers,
+        &mut rng,
     );
 
     assert!(
-        matches!(result.verdict, Verdict::Reject(RejectReason::InsufficientValue)),
+        matches!(
+            result.verdict,
+            Verdict::Reject(RejectReason::InsufficientValue)
+        ),
         "filler-for-star must reject as InsufficientValue; got {:?} (p={}, net={})",
         result.verdict,
         result.probability,
@@ -453,7 +502,13 @@ fn reasons_capped_to_top_k_and_sorted_by_abs_delta() {
 
     let mut rng = ChaCha8Rng::seed_from_u64(7);
     let result = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle, &providers, &mut rng,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers,
+        &mut rng,
     );
 
     let top_k = ta.top_k_reasons;
@@ -494,16 +549,31 @@ fn deterministic_same_seed_same_inputs_same_output() {
     let providers_a = mock_providers(&knobs);
     let mut rng_a = ChaCha8Rng::seed_from_u64(1234);
     let a = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle, &providers_a, &mut rng_a,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers_a,
+        &mut rng_a,
     );
 
     let providers_b = mock_providers(&knobs);
     let mut rng_b = ChaCha8Rng::seed_from_u64(1234);
     let b = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle, &providers_b, &mut rng_b,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers_b,
+        &mut rng_b,
     );
 
-    assert_eq!(a.probability, b.probability, "p must be deterministic for same seed");
+    assert_eq!(
+        a.probability, b.probability,
+        "p must be deterministic for same seed"
+    );
     assert_eq!(a.net_value, b.net_value);
     assert_eq!(a.reasons.len(), b.reasons.len());
     assert_eq!(
@@ -547,7 +617,12 @@ fn premium_zone_protection_makes_offer_harder_to_accept() {
     let providers_plain = mock_providers(&knobs_plain);
     let mut rng_plain = ChaCha8Rng::seed_from_u64(7);
     let plain = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle_no_noise, &providers_plain,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle_no_noise,
+        &providers_plain,
         &mut rng_plain,
     );
 
@@ -556,7 +631,12 @@ fn premium_zone_protection_makes_offer_harder_to_accept() {
     let providers_premium = mock_providers(&knobs_premium);
     let mut rng_premium = ChaCha8Rng::seed_from_u64(7);
     let premium = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle_no_noise, &providers_premium,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle_no_noise,
+        &providers_premium,
         &mut rng_premium,
     );
 
@@ -595,7 +675,13 @@ fn contend_mode_raises_bar_vs_full_rebuild() {
     let providers_contend = mock_providers(&knobs_contend);
     let mut rng_c = ChaCha8Rng::seed_from_u64(9);
     let contend = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle, &providers_contend, &mut rng_c,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers_contend,
+        &mut rng_c,
     );
 
     let mut knobs_rebuild = MockKnobs::default();
@@ -603,7 +689,13 @@ fn contend_mode_raises_bar_vs_full_rebuild() {
     let providers_rebuild = mock_providers(&knobs_rebuild);
     let mut rng_r = ChaCha8Rng::seed_from_u64(9);
     let rebuild = trade_acceptance_with_providers(
-        &offer, BOS, &snap, &StarRoster::default(), &bundle, &providers_rebuild, &mut rng_r,
+        &offer,
+        BOS,
+        &snap,
+        &StarRoster::default(),
+        &bundle,
+        &providers_rebuild,
+        &mut rng_r,
     );
 
     assert!(

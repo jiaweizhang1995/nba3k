@@ -25,7 +25,9 @@ pub fn probe() -> NbaApiStatus {
     if py.is_err() {
         return NbaApiStatus::MissingPython;
     }
-    let check = Command::new("python3").args(["-c", "import nba_api"]).output();
+    let check = Command::new("python3")
+        .args(["-c", "import nba_api"])
+        .output();
     match check {
         Ok(o) if o.status.success() => NbaApiStatus::Available,
         _ => NbaApiStatus::MissingPackage,
@@ -74,14 +76,24 @@ pub fn fetch_league_advanced(cache: &Cache, season: &str) -> Result<Option<Vec<u
 pub fn parse_league_advanced(bytes: &[u8]) -> Result<Vec<PlayerAdvanced>> {
     let raw: serde_json::Value = serde_json::from_slice(bytes).context("parse json")?;
     // The script normalizes to `[{name, usage, ts_pct}, ...]`.
-    let arr = raw.as_array().ok_or_else(|| anyhow::anyhow!("expected json array"))?;
+    let arr = raw
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("expected json array"))?;
     let mut out = Vec::with_capacity(arr.len());
     for v in arr {
-        let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let name = v
+            .get("name")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
         let usage = v.get("usage").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
         let ts_pct = v.get("ts_pct").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
         if !name.is_empty() {
-            out.push(PlayerAdvanced { name, usage, ts_pct });
+            out.push(PlayerAdvanced {
+                name,
+                usage,
+                ts_pct,
+            });
         }
     }
     Ok(out)

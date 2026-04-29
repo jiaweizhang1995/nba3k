@@ -4,7 +4,9 @@
 //! 2. `tick_injury` monotonically reduces `games_remaining` to 0.
 
 use chrono::NaiveDate;
-use nba3k_core::{GameId, InjurySeverity, InjuryStatus, PlayerId, Position, Ratings, SeasonId, TeamId};
+use nba3k_core::{
+    GameId, InjurySeverity, InjuryStatus, PlayerId, Position, Ratings, SeasonId, TeamId,
+};
 use nba3k_sim::{
     roll_injuries_from_box, tick_injury, Engine, GameContext, RotationSlot, StatisticalEngine,
     TeamSnapshot,
@@ -14,20 +16,42 @@ use rand_chacha::ChaCha8Rng;
 
 fn uniform_ratings(base: u8) -> Ratings {
     Ratings {
-        close_shot: base, driving_layup: base, driving_dunk: base,
-        standing_dunk: base, post_control: base,
-        mid_range: base, three_point: base, free_throw: base,
-        passing_accuracy: base, ball_handle: base, speed_with_ball: base,
-        interior_defense: base, perimeter_defense: base, steal: base, block: base,
-        off_reb: base, def_reb: base,
-        speed: base, agility: base, strength: base, vertical: base,
+        close_shot: base,
+        driving_layup: base,
+        driving_dunk: base,
+        standing_dunk: base,
+        post_control: base,
+        mid_range: base,
+        three_point: base,
+        free_throw: base,
+        passing_accuracy: base,
+        ball_handle: base,
+        speed_with_ball: base,
+        interior_defense: base,
+        perimeter_defense: base,
+        steal: base,
+        block: base,
+        off_reb: base,
+        def_reb: base,
+        speed: base,
+        agility: base,
+        strength: base,
+        vertical: base,
     }
 }
 
 fn fair_team(id: u8, abbrev: &str, base: u8) -> TeamSnapshot {
     let ratings = uniform_ratings(base);
-    let positions = [Position::PG, Position::SG, Position::SF, Position::PF, Position::C,
-                     Position::PG, Position::SG, Position::C];
+    let positions = [
+        Position::PG,
+        Position::SG,
+        Position::SF,
+        Position::PF,
+        Position::C,
+        Position::PG,
+        Position::SG,
+        Position::C,
+    ];
     let minutes_share = [1.0, 0.95, 0.95, 0.85, 0.85, 0.45, 0.45, 0.50];
     let usage = [0.22, 0.20, 0.18, 0.14, 0.14, 0.05, 0.04, 0.03];
     let rotation: Vec<RotationSlot> = (0..8)
@@ -103,5 +127,9 @@ fn tick_injury_decrements_to_zero() {
     }
     // After the final tick (when games_remaining was 1), tick_injury returns
     // None — the slot is cleared. Steps taken: 4 - 1 = 3 (4→3→2→1, then None).
-    assert_eq!(steps, 3, "expected exactly 3 ticks before clear, got {}", steps);
+    assert_eq!(
+        steps, 3,
+        "expected exactly 3 ticks before clear, got {}",
+        steps
+    );
 }

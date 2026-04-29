@@ -39,7 +39,10 @@ fn pss_round_trip_get() {
     ).expect("seed player");
     let s = sample(1);
     store.upsert_player_season_stats(&s).expect("insert");
-    let got = store.get_player_season_stats(PlayerId(1), 2026).unwrap().unwrap();
+    let got = store
+        .get_player_season_stats(PlayerId(1), 2026)
+        .unwrap()
+        .unwrap();
     assert_eq!(got, s);
 }
 
@@ -53,9 +56,15 @@ fn pss_upsert_replaces_existing() {
     ).expect("seed player");
     let s1 = sample(2);
     store.upsert_player_season_stats(&s1).expect("insert");
-    let s2 = PlayerSeasonStats { ppg: 30.1, ..s1.clone() };
+    let s2 = PlayerSeasonStats {
+        ppg: 30.1,
+        ..s1.clone()
+    };
     store.upsert_player_season_stats(&s2).expect("update");
-    let got = store.get_player_season_stats(PlayerId(2), 2026).unwrap().unwrap();
+    let got = store
+        .get_player_season_stats(PlayerId(2), 2026)
+        .unwrap()
+        .unwrap();
     assert!((got.ppg - 30.1).abs() < 1e-3);
 }
 
@@ -68,7 +77,9 @@ fn pss_list_filters_by_season() {
              VALUES (?1, ?2, 'PG', 25, 80, 85, '{}')",
             rusqlite::params![pid as i64, format!("p{pid}")],
         ).expect("seed player");
-        store.upsert_player_season_stats(&sample(pid)).expect("insert");
+        store
+            .upsert_player_season_stats(&sample(pid))
+            .expect("insert");
     }
     let rows = store.list_player_season_stats(2026).unwrap();
     assert_eq!(rows.len(), 3);

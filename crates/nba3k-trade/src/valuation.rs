@@ -47,8 +47,8 @@ fn baseline_dollars_for_ovr(ovr: u8) -> i64 {
     // Quadratic-ish curve anchored to the bullets above. Coefficients fit
     // by hand — keep round numbers and re-tune in calibration.
     let x = ovr - 50.0; // 0..=49
-    // Power curve: each OVR point past 80 adds dramatically more value than
-    // each one below. Anchored to the bullets in the doc comment above.
+                        // Power curve: each OVR point past 80 adds dramatically more value than
+                        // each one below. Anchored to the bullets in the doc comment above.
     let v = (x / 49.0).powf(2.6) * 210.0; // millions
     (v * 1_000_000.0) as i64
 }
@@ -136,7 +136,7 @@ pub(crate) fn player_value_for(
     let age_pref = {
         let a = player.age as f64;
         let prefer_young = traits.age_curve_weight as f64; // -1..=1 typical
-        // Centered at 25: under-25 gets +bump if prefer_young>0.
+                                                           // Centered at 25: under-25 gets +bump if prefer_young>0.
         let raw = (25.0 - a) * prefer_young * 0.01;
         (1.0 + raw).clamp(0.5, 1.5)
     };
@@ -289,7 +289,9 @@ pub fn value_side(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nba3k_core::{Contract, ContractYear, GMTraits, Player, PlayerId, Position, Ratings, SeasonId, TeamId};
+    use nba3k_core::{
+        Contract, ContractYear, GMTraits, Player, PlayerId, Position, Ratings, SeasonId, TeamId,
+    };
 
     fn mk_player(id: u32, ovr: u8, age: u8, salary_dollars: i64, team: Option<TeamId>) -> Player {
         Player {

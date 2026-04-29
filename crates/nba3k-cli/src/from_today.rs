@@ -58,8 +58,7 @@ pub fn build_today_save(
     today: NaiveDate,
 ) -> Result<TodayReport> {
     // (1) Pre-flight. If ESPN is unreachable, bail before touching disk.
-    preflight()
-        .map_err(|e| anyhow!("--from-today requires internet access to ESPN. {}", e))?;
+    preflight().map_err(|e| anyhow!("--from-today requires internet access to ESPN. {}", e))?;
 
     // (2) Wal/shm cleanup + seed copy. Mirror cmd_new's logic so we don't
     // produce a corrupt file from stale sidecars.
@@ -80,9 +79,8 @@ pub fn build_today_save(
             seed.display(),
         );
     }
-    std::fs::copy(&seed, out).with_context(|| {
-        format!("copy seed {} -> {}", seed.display(), out.display())
-    })?;
+    std::fs::copy(&seed, out)
+        .with_context(|| format!("copy seed {} -> {}", seed.display(), out.display()))?;
 
     // From this point on, any error must remove the half-written file so
     // the user is left in a clean state and can retry.
@@ -157,8 +155,8 @@ fn run_import(
     store.upsert_season_calendar(&cal)?;
 
     // (3) Teams: ESPN abbrev ↔ ESPN id ↔ seed TeamId map.
-    let teams_bytes = espn::fetch_teams(&cache)?
-        .ok_or_else(|| anyhow!("ESPN teams returned no data"))?;
+    let teams_bytes =
+        espn::fetch_teams(&cache)?.ok_or_else(|| anyhow!("ESPN teams returned no data"))?;
     let espn_teams = espn::parse_teams(&teams_bytes)?;
     let mut team_map: HashMap<String, (TeamId, u32)> = HashMap::new();
     for et in &espn_teams {
@@ -249,8 +247,7 @@ fn run_import(
     let ps_rows = espn::parse_player_stats(&ps_bytes)?;
     let mut stat_count = 0_u32;
     for r in &ps_rows {
-        let Some(pid) = lookup_player(&r.display_name, &r.team_abbrev, &name_index, &store)?
-        else {
+        let Some(pid) = lookup_player(&r.display_name, &r.team_abbrev, &name_index, &store)? else {
             tracing::warn!(name = %r.display_name, "no seed match for player stats row");
             continue;
         };
@@ -290,8 +287,7 @@ fn run_import(
         };
         let (_abbrev, entries) = espn::parse_roster(&rb)?;
         for e in entries {
-            let Some(pid) = lookup_player(&e.display_name, &et.abbrev, &name_index, &store)?
-            else {
+            let Some(pid) = lookup_player(&e.display_name, &et.abbrev, &name_index, &store)? else {
                 tracing::warn!(name = %e.display_name, team = %et.abbrev, "no seed match for roster entry");
                 continue;
             };
@@ -467,17 +463,12 @@ fn strip_suffix(name: &str) -> String {
 }
 
 /// Translate ESPN's free-text injury status into an `InjuryStatus`.
-fn parse_injury(
-    status: &str,
-    detail: Option<&str>,
-    unplayed_count: u32,
-) -> Option<InjuryStatus> {
+fn parse_injury(status: &str, detail: Option<&str>, unplayed_count: u32) -> Option<InjuryStatus> {
     let lower = status.trim().to_ascii_lowercase();
     let (severity, games) = match lower.as_str() {
-        "out for season" | "season-ending" | "season ending" => (
-            InjurySeverity::SeasonEnding,
-            unplayed_count.max(20) as u16,
-        ),
+        "out for season" | "season-ending" | "season ending" => {
+            (InjurySeverity::SeasonEnding, unplayed_count.max(20) as u16)
+        }
         "out" => (InjurySeverity::LongTerm, 30),
         "day-to-day" | "day to day" | "questionable" | "gtd" => (InjurySeverity::DayToDay, 1),
         _ => return None,

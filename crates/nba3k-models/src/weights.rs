@@ -146,9 +146,15 @@ pub struct StatProjectionWeights {
     pub single_game_pts_cap: u8,
 }
 
-fn default_creator_ast_bonus() -> f32 { 5.0 }
-fn default_creator_reb_bonus() -> f32 { 6.0 }
-fn default_pts_cap() -> u8 { 55 }
+fn default_creator_ast_bonus() -> f32 {
+    5.0
+}
+fn default_creator_reb_bonus() -> f32 {
+    6.0
+}
+fn default_pts_cap() -> u8 {
+    55
+}
 
 impl Default for StatProjectionWeights {
     fn default() -> Self {

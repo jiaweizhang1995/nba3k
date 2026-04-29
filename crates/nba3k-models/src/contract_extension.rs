@@ -23,7 +23,10 @@ use crate::contract_gen::generate_contract;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExtensionDecision {
     Accept,
-    Counter { request_salary_cents: i64, request_years: u8 },
+    Counter {
+        request_salary_cents: i64,
+        request_years: u8,
+    },
     Reject(String),
 }
 

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Money in integer cents — never use f64 for money.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 #[serde(transparent)]
 pub struct Cents(pub i64);
 

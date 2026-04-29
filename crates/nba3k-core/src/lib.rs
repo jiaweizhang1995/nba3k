@@ -1,38 +1,38 @@
 //! Core domain types for nba3k-claude. Zero I/O. Pure data.
 
-mod ids;
-mod player;
-mod team;
+mod coach;
 mod contract;
 mod draft;
-mod trade;
-mod season;
-mod sim_io;
 mod gm;
-mod coach;
-mod money;
-mod league_year;
-mod snapshot;
 pub mod i18n;
 mod i18n_en;
 mod i18n_zh;
+mod ids;
+mod league_year;
+mod money;
+mod player;
 pub mod rotation;
+mod season;
+mod sim_io;
+mod snapshot;
+mod team;
+mod trade;
 
-pub use ids::*;
-pub use player::*;
-pub use team::*;
+pub use coach::*;
 pub use contract::*;
 pub use draft::*;
-pub use trade::*;
+pub use gm::*;
+pub use i18n::{t, Lang, T};
+pub use ids::*;
+pub use league_year::*;
+pub use money::*;
+pub use player::*;
+pub use rotation::Starters;
 pub use season::*;
 pub use sim_io::*;
-pub use gm::*;
-pub use coach::*;
-pub use money::*;
-pub use league_year::*;
 pub use snapshot::*;
-pub use i18n::{t, Lang, T};
-pub use rotation::Starters;
+pub use team::*;
+pub use trade::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {

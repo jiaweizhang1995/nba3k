@@ -70,13 +70,26 @@ impl Ratings {
     /// without copying their numeric weights — guards weight handling +
     /// shooting; bigs weight rebounding + interior; wings sit between.
     pub fn overall_for(&self, pos: Position) -> u8 {
-        let inside = (self.close_shot as u32 + self.driving_layup as u32 + self.driving_dunk as u32
-            + self.standing_dunk as u32 + self.post_control as u32) / 5;
-        let shooting = (self.mid_range as u32 + self.three_point as u32 + self.free_throw as u32) / 3;
-        let handling = (self.passing_accuracy as u32 + self.ball_handle as u32 + self.speed_with_ball as u32) / 3;
-        let defense = (self.interior_defense as u32 + self.perimeter_defense as u32 + self.steal as u32 + self.block as u32) / 4;
+        let inside = (self.close_shot as u32
+            + self.driving_layup as u32
+            + self.driving_dunk as u32
+            + self.standing_dunk as u32
+            + self.post_control as u32)
+            / 5;
+        let shooting =
+            (self.mid_range as u32 + self.three_point as u32 + self.free_throw as u32) / 3;
+        let handling =
+            (self.passing_accuracy as u32 + self.ball_handle as u32 + self.speed_with_ball as u32)
+                / 3;
+        let defense = (self.interior_defense as u32
+            + self.perimeter_defense as u32
+            + self.steal as u32
+            + self.block as u32)
+            / 4;
         let rebounding = (self.off_reb as u32 + self.def_reb as u32) / 2;
-        let athletic = (self.speed as u32 + self.agility as u32 + self.strength as u32 + self.vertical as u32) / 4;
+        let athletic =
+            (self.speed as u32 + self.agility as u32 + self.strength as u32 + self.vertical as u32)
+                / 4;
 
         // Rebalanced 2026-04-26 (M19.1 realism patch): centers were over-weighted
         // on rebounding+interior-defense (53% combined) which inverted role-player
@@ -89,8 +102,12 @@ impl Ratings {
             Position::PF => (20, 18, 8, 22, 18, 14),
             Position::C => (22, 12, 8, 20, 18, 20),
         };
-        let total = inside * w_in + shooting * w_sh + handling * w_ha
-            + defense * w_de + rebounding * w_re + athletic * w_at;
+        let total = inside * w_in
+            + shooting * w_sh
+            + handling * w_ha
+            + defense * w_de
+            + rebounding * w_re
+            + athletic * w_at;
         (total / 100).min(99) as u8
     }
 

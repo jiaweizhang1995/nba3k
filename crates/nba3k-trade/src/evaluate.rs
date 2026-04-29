@@ -54,9 +54,15 @@ pub fn evaluate(
     if let Some(outgoing) = offer.assets_by_team.get(&evaluator) {
         let sp_weights = &realism_resources::weights().star_protection;
         for pid in &outgoing.players_out {
-            let Some(player) = league.player(*pid) else { continue };
+            let Some(player) = league.player(*pid) else {
+                continue;
+            };
             let score = nba3k_models::star_protection::star_protection(
-                *pid, evaluator, league, star_roster, sp_weights,
+                *pid,
+                evaluator,
+                league,
+                star_roster,
+                sp_weights,
             );
             if score.value >= sp_weights.absolute_threshold as f64 {
                 return TradeEvaluation {
@@ -85,7 +91,12 @@ pub fn evaluate(
     // 3. Delegate to the realism composite.
     let weights = realism_resources::trade_acceptance_weights();
     let acceptance = nba3k_models::trade_acceptance::trade_acceptance(
-        offer, evaluator, league, star_roster, weights, rng,
+        offer,
+        evaluator,
+        league,
+        star_roster,
+        weights,
+        rng,
     );
 
     let confidence = acceptance.probability.clamp(0.0, 1.0) as f32;
@@ -114,20 +125,15 @@ mod realism_resources {
     static WEIGHTS: OnceLock<RealismWeights> = OnceLock::new();
 
     pub fn star_roster() -> &'static StarRoster {
-        STAR_ROSTER.get_or_init(|| {
-            load_star_roster(Path::new(STAR_ROSTER_PATH)).unwrap_or_default()
-        })
+        STAR_ROSTER
+            .get_or_init(|| load_star_roster(Path::new(STAR_ROSTER_PATH)).unwrap_or_default())
     }
 
     pub fn weights() -> &'static RealismWeights {
-        WEIGHTS.get_or_init(|| {
-            load_or_default(Path::new(REALISM_WEIGHTS_PATH)).unwrap_or_default()
-        })
+        WEIGHTS.get_or_init(|| load_or_default(Path::new(REALISM_WEIGHTS_PATH)).unwrap_or_default())
     }
 
-    pub fn trade_acceptance_weights()
-        -> &'static nba3k_models::weights::TradeAcceptanceWeights
-    {
+    pub fn trade_acceptance_weights() -> &'static nba3k_models::weights::TradeAcceptanceWeights {
         &weights().trade_acceptance
     }
 }
@@ -285,9 +291,7 @@ fn commentary_for(verdict: &Verdict, net_pct: f64) -> String {
             }
         }
         Verdict::Reject(reason) => match reason {
-            RejectReason::InsufficientValue => {
-                "Doesn't move the needle for us — we're out.".into()
-            }
+            RejectReason::InsufficientValue => "Doesn't move the needle for us — we're out.".into(),
             RejectReason::CbaViolation(_) => {
                 "Front office says no — CBA won't let us do it.".into()
             }
@@ -372,13 +376,7 @@ mod tests {
         }
     }
 
-    fn mk_player(
-        id: u32,
-        ovr: u8,
-        age: u8,
-        salary_dollars: i64,
-        team: TeamId,
-    ) -> Player {
+    fn mk_player(id: u32, ovr: u8, age: u8, salary_dollars: i64, team: TeamId) -> Player {
         Player {
             id: PlayerId(id),
             name: format!("P{id}"),
@@ -544,9 +542,9 @@ mod tests {
         let mut world = World::new();
         let okc = TeamId(3); // Cheapskate
         let lal = TeamId(2); // StarHunter — but we'll evaluate as if WinNow
-        // We're going to compare verdicts of the same offer evaluated by
-        // two GMs with very different traits (Cheapskate vs WinNow) acting
-        // as the *receiving* team.
+                             // We're going to compare verdicts of the same offer evaluated by
+                             // two GMs with very different traits (Cheapskate vs WinNow) acting
+                             // as the *receiving* team.
 
         // Outgoing: a young, cheap, mid-OVR rotation guy.
         let outgoing = mk_player(10, 78, 23, 4_000_000, okc);
@@ -562,10 +560,8 @@ mod tests {
         let mut rng_a = ChaCha8Rng::seed_from_u64(123);
         let mut rng_b = ChaCha8Rng::seed_from_u64(123);
 
-        let win_now =
-            GMPersonality::from_archetype("WN", GMArchetype::WinNow).traits;
-        let cheap =
-            GMPersonality::from_archetype("CS", GMArchetype::Cheapskate).traits;
+        let win_now = GMPersonality::from_archetype("WN", GMArchetype::WinNow).traits;
+        let cheap = GMPersonality::from_archetype("CS", GMArchetype::Cheapskate).traits;
 
         let win_eval = evaluate_with_traits(&offer, okc, &snap, &win_now, &mut rng_a);
         let cheap_eval = evaluate_with_traits(&offer, okc, &snap, &cheap, &mut rng_b);

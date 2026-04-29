@@ -6,8 +6,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use nba3k_core::{
-    BirdRights, Cents, Contract, ContractYear, DraftProspect, Player, PlayerId, Position,
-    SeasonId, Team, TeamId,
+    BirdRights, Cents, Contract, ContractYear, DraftProspect, Player, PlayerId, Position, SeasonId,
+    Team, TeamId,
 };
 use nba3k_store::Store;
 
@@ -96,12 +96,16 @@ pub fn write_seed(out: &Path, keep_existing: bool, input: SeedInput<'_>) -> Resu
     for team in &mut teams {
         if let Some(roster) = roster_by_team.remove(&team.id.0) {
             team.roster = roster;
-            store.upsert_team(team).context("re-upsert team with roster")?;
+            store
+                .upsert_team(team)
+                .context("re-upsert team with roster")?;
         }
     }
 
     let players_count = all_players.len() as u32;
-    store.bulk_upsert_players(&all_players).context("bulk upsert players")?;
+    store
+        .bulk_upsert_players(&all_players)
+        .context("bulk upsert players")?;
 
     // Contract backfill: every active player must end up with a contract.
     // HoopsHype gives real salaries to ~stars when their name normalization
@@ -117,7 +121,9 @@ pub fn write_seed(out: &Path, keep_existing: bool, input: SeedInput<'_>) -> Resu
         let mut contract = nba3k_models::contract_gen::generate_contract(player, input.season);
         perturb_contract(&mut contract, player.id);
         player.contract = Some(contract);
-        store.upsert_player(player).context("upsert player with generated contract")?;
+        store
+            .upsert_player(player)
+            .context("upsert player with generated contract")?;
         with_contract += 1;
         generated_contracts += 1;
     }
@@ -139,7 +145,9 @@ pub fn write_seed(out: &Path, keep_existing: bool, input: SeedInput<'_>) -> Resu
             potential: mp.potential,
             draft_class: SeasonId(input.season.0 + 1),
         };
-        store.upsert_draft_prospect(&prospect).context("upsert prospect")?;
+        store
+            .upsert_draft_prospect(&prospect)
+            .context("upsert prospect")?;
         prospects_count += 1;
     }
 

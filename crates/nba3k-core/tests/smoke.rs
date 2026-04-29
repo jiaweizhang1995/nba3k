@@ -37,9 +37,29 @@ fn gm_archetype_seeds_traits() {
 fn trade_offer_roundtrips_json() {
     use indexmap::IndexMap;
     let mut assets = IndexMap::new();
-    assets.insert(TeamId(1), TradeAssets { players_out: vec![PlayerId(10)], picks_out: vec![], cash_out: Cents::ZERO });
-    assets.insert(TeamId(2), TradeAssets { players_out: vec![PlayerId(20)], picks_out: vec![], cash_out: Cents::ZERO });
-    let offer = TradeOffer { id: TradeId(1), initiator: TeamId(1), assets_by_team: assets, round: 1, parent: None };
+    assets.insert(
+        TeamId(1),
+        TradeAssets {
+            players_out: vec![PlayerId(10)],
+            picks_out: vec![],
+            cash_out: Cents::ZERO,
+        },
+    );
+    assets.insert(
+        TeamId(2),
+        TradeAssets {
+            players_out: vec![PlayerId(20)],
+            picks_out: vec![],
+            cash_out: Cents::ZERO,
+        },
+    );
+    let offer = TradeOffer {
+        id: TradeId(1),
+        initiator: TeamId(1),
+        assets_by_team: assets,
+        round: 1,
+        parent: None,
+    };
     let s = serde_json::to_string(&offer).unwrap();
     let back: TradeOffer = serde_json::from_str(&s).unwrap();
     assert_eq!(back.assets_by_team.len(), 2);

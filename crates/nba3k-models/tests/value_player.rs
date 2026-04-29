@@ -11,7 +11,7 @@
 
 use chrono::NaiveDate;
 use nba3k_core::{
-    BirdRights, Cents, Coach, Conference, Contract, ContractYear, DraftPick, DraftPickId, Division,
+    BirdRights, Cents, Coach, Conference, Contract, ContractYear, Division, DraftPick, DraftPickId,
     GMArchetype, GMPersonality, GMTraits, InjuryStatus, LeagueSnapshot, LeagueYear, Player,
     PlayerId, PlayerRole, Position, Ratings, SeasonId, SeasonPhase, Team, TeamId,
     TeamRecordSummary,
@@ -270,7 +270,10 @@ fn value_loyalty_bonus_only_for_owning_team() {
     // Confirm a loyalty_bonus reason was emitted on the owner side.
     let owner_score = player_value(&player, &traits, owner, &snap, &weights);
     assert!(
-        owner_score.reasons.iter().any(|r| r.label == "loyalty_bonus"),
+        owner_score
+            .reasons
+            .iter()
+            .any(|r| r.label == "loyalty_bonus"),
         "owner-side score should include 'loyalty_bonus' reason"
     );
 }
@@ -374,7 +377,12 @@ fn value_future_year_discount_emits_both_components() {
     let traits = GMTraits::default();
     let ly = league_year_2026();
     // 4yr × $25M flat — reasonable for OVR-85.
-    let contract = mk_contract_multi(&[25_000_000, 25_000_000, 25_000_000, 25_000_000], SeasonId(2026), false, false);
+    let contract = mk_contract_multi(
+        &[25_000_000, 25_000_000, 25_000_000, 25_000_000],
+        SeasonId(2026),
+        false,
+        false,
+    );
 
     let score = contract_value(&player, Some(&contract), &traits, &ly, &cv_w);
 
@@ -408,7 +416,12 @@ fn value_expiring_premium_only_on_one_year_left() {
     let ly = league_year_2026();
 
     let one = mk_contract_one_year(20_000_000, SeasonId(2026));
-    let three = mk_contract_multi(&[20_000_000, 20_000_000, 20_000_000], SeasonId(2026), false, false);
+    let three = mk_contract_multi(
+        &[20_000_000, 20_000_000, 20_000_000],
+        SeasonId(2026),
+        false,
+        false,
+    );
 
     let s1 = contract_value(&player, Some(&one), &traits, &ly, &cv_w);
     let s3 = contract_value(&player, Some(&three), &traits, &ly, &cv_w);

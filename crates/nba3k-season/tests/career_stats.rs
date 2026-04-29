@@ -1,9 +1,7 @@
 //! Tests for the dynasty career-stats aggregator.
 
 use chrono::NaiveDate;
-use nba3k_core::{
-    BoxScore, GameId, GameResult, PlayerId, PlayerLine, SeasonId, TeamId,
-};
+use nba3k_core::{BoxScore, GameId, GameResult, PlayerId, PlayerLine, SeasonId, TeamId};
 use nba3k_season::career::{aggregate_career, career_totals};
 
 // ----------------------------------------------------------------------
@@ -65,7 +63,10 @@ fn game(
         away: TeamId(away),
         home_score: 110,
         away_score: 100,
-        box_score: BoxScore { home_lines, away_lines },
+        box_score: BoxScore {
+            home_lines,
+            away_lines,
+        },
         overtime_periods: 0,
         is_playoffs: false,
     }
@@ -137,7 +138,14 @@ fn seasons_returned_ascending_even_when_input_unsorted() {
 fn no_games_for_player_returns_empty_with_zero_career() {
     let player = PlayerId(99);
     let games = vec![
-        game(20, 2026, 1, 2, vec![line(7, 30, 5, 5)], vec![line(8, 20, 3, 3)]),
+        game(
+            20,
+            2026,
+            1,
+            2,
+            vec![line(7, 30, 5, 5)],
+            vec![line(8, 20, 3, 3)],
+        ),
         game(21, 2026, 1, 3, vec![line(7, 28, 4, 6)], vec![]),
     ];
     let rows = aggregate_career(&games, player);

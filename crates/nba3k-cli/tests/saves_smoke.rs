@@ -12,9 +12,7 @@ fn nba3k_bin() -> PathBuf {
 
 fn fresh_save(path: &std::path::Path) {
     let store = Store::open(path).expect("open store");
-    store
-        .init_metadata(SeasonId(2026))
-        .expect("init metadata");
+    store.init_metadata(SeasonId(2026)).expect("init metadata");
     store.set_meta("user_team", "BOS").expect("set user_team");
     drop(store);
 }
@@ -45,8 +43,8 @@ fn saves_show_prints_metadata() {
         .output()
         .expect("run nba3k saves show --json");
     assert!(out.status.success(), "saves show --json non-zero");
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .expect("saves show --json must be valid JSON");
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("saves show --json must be valid JSON");
     assert_eq!(v["team"], "BOS");
     assert_eq!(v["season"], 2026);
 }
@@ -72,10 +70,7 @@ fn saves_delete_requires_yes_flag() {
         "expected --yes hint in stderr; got:\n{}",
         stderr
     );
-    assert!(
-        save.exists(),
-        "save was deleted despite missing --yes flag"
-    );
+    assert!(save.exists(), "save was deleted despite missing --yes flag");
 }
 
 #[test]
@@ -123,7 +118,11 @@ fn saves_list_finds_save_in_explicit_dir() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("listed.db"), "missing path:\n{}", stdout);
     assert!(stdout.contains("team=BOS"), "missing team:\n{}", stdout);
-    assert!(stdout.contains("season=2026"), "missing season:\n{}", stdout);
+    assert!(
+        stdout.contains("season=2026"),
+        "missing season:\n{}",
+        stdout
+    );
 
     // JSON variant.
     let out = Command::new(nba3k_bin())
@@ -137,8 +136,8 @@ fn saves_list_finds_save_in_explicit_dir() {
         .output()
         .expect("run nba3k saves list --json");
     assert!(out.status.success(), "saves list --json non-zero");
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .expect("saves list --json must be valid JSON");
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("saves list --json must be valid JSON");
     let arr = v.as_array().expect("top-level must be array");
     assert_eq!(arr.len(), 1, "expected one row, got {:?}", arr);
     assert_eq!(arr[0]["team"], "BOS");

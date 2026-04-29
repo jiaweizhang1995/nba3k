@@ -7,8 +7,8 @@
 use chrono::NaiveDate;
 use nba3k_core::{
     BoxScore, Coach, Conference, Division, GMArchetype, GMPersonality, GameId, GameMode,
-    GameResult, Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId,
-    SeasonPhase, SeasonState, Team, TeamId,
+    GameResult, Player, PlayerId, PlayerLine, PlayerRole, Position, Ratings, SeasonId, SeasonPhase,
+    SeasonState, Team, TeamId,
 };
 use nba3k_store::Store;
 use std::path::PathBuf;
@@ -83,8 +83,12 @@ fn line(player: PlayerId, pts: u8, reb: u8, ast: u8) -> PlayerLine {
 
 fn fresh_save_with_game(path: &std::path::Path, game_date: NaiveDate, day: u32) {
     let mut store = Store::open(path).expect("open store");
-    store.upsert_team(&make_team(BOS, "BOS")).expect("upsert BOS");
-    store.upsert_team(&make_team(LAL, "LAL")).expect("upsert LAL");
+    store
+        .upsert_team(&make_team(BOS, "BOS"))
+        .expect("upsert BOS");
+    store
+        .upsert_team(&make_team(LAL, "LAL"))
+        .expect("upsert LAL");
     store.set_meta("user_team", "BOS").expect("set user_team");
 
     // Players: Tatum (BOS, top scorer 38), Brown (BOS, 22),
@@ -93,7 +97,8 @@ fn fresh_save_with_game(path: &std::path::Path, game_date: NaiveDate, day: u32) 
     let brown = make_player(1002, "Jaylen Brown", Some(BOS));
     let lebron = make_player(2001, "LeBron James", Some(LAL));
     let ad = make_player(2002, "Anthony Davis", Some(LAL));
-    store.bulk_upsert_players(&[tatum, brown, lebron, ad])
+    store
+        .bulk_upsert_players(&[tatum, brown, lebron, ad])
         .expect("upsert players");
 
     let state = SeasonState {
@@ -203,8 +208,8 @@ fn recap_json_has_expected_shape() {
         String::from_utf8_lossy(&out.stderr),
     );
 
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .expect("recap --json must emit valid JSON");
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("recap --json must emit valid JSON");
     let arr = v.as_array().expect("top-level must be array");
     assert_eq!(arr.len(), 1, "expected exactly one game; got {:?}", arr);
 
@@ -238,7 +243,10 @@ fn recap_empty_when_no_games_in_window() {
         .args(["--save", save.to_str().unwrap(), "recap", "--days", "1"])
         .output()
         .expect("run nba3k recap");
-    assert!(out.status.success(), "recap exited non-zero on empty window");
+    assert!(
+        out.status.success(),
+        "recap exited non-zero on empty window"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("No games in last"),
@@ -258,7 +266,10 @@ fn recap_empty_when_no_games_in_window() {
         ])
         .output()
         .expect("run nba3k recap --json");
-    assert!(out.status.success(), "recap --json non-zero on empty window");
+    assert!(
+        out.status.success(),
+        "recap --json non-zero on empty window"
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout)
         .expect("recap --json must emit valid JSON even when empty");
     let arr = v.as_array().expect("top-level must be array");

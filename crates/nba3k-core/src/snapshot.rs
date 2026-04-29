@@ -40,7 +40,12 @@ impl TeamRecordSummary {
 
 impl Default for TeamRecordSummary {
     fn default() -> Self {
-        Self { wins: 0, losses: 0, conf_rank: 0, point_diff: 0 }
+        Self {
+            wins: 0,
+            losses: 0,
+            conf_rank: 0,
+            point_diff: 0,
+        }
     }
 }
 

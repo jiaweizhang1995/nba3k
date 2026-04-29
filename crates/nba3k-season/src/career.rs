@@ -37,24 +37,50 @@ pub struct SeasonAvgRow {
 }
 
 impl SeasonAvgRow {
-    pub fn ppg(&self) -> f32 { per_game(self.pts, self.gp) }
-    pub fn rpg(&self) -> f32 { per_game(self.reb, self.gp) }
-    pub fn apg(&self) -> f32 { per_game(self.ast, self.gp) }
-    pub fn spg(&self) -> f32 { per_game(self.stl, self.gp) }
-    pub fn bpg(&self) -> f32 { per_game(self.blk, self.gp) }
-    pub fn mpg(&self) -> f32 { per_game(self.minutes, self.gp) }
+    pub fn ppg(&self) -> f32 {
+        per_game(self.pts, self.gp)
+    }
+    pub fn rpg(&self) -> f32 {
+        per_game(self.reb, self.gp)
+    }
+    pub fn apg(&self) -> f32 {
+        per_game(self.ast, self.gp)
+    }
+    pub fn spg(&self) -> f32 {
+        per_game(self.stl, self.gp)
+    }
+    pub fn bpg(&self) -> f32 {
+        per_game(self.blk, self.gp)
+    }
+    pub fn mpg(&self) -> f32 {
+        per_game(self.minutes, self.gp)
+    }
 
-    pub fn fg_pct(&self) -> f32 { ratio(self.fg_made, self.fg_att) }
-    pub fn three_pct(&self) -> f32 { ratio(self.three_made, self.three_att) }
-    pub fn ft_pct(&self) -> f32 { ratio(self.ft_made, self.ft_att) }
+    pub fn fg_pct(&self) -> f32 {
+        ratio(self.fg_made, self.fg_att)
+    }
+    pub fn three_pct(&self) -> f32 {
+        ratio(self.three_made, self.three_att)
+    }
+    pub fn ft_pct(&self) -> f32 {
+        ratio(self.ft_made, self.ft_att)
+    }
 }
 
 fn per_game(num: u32, gp: u32) -> f32 {
-    if gp == 0 { 0.0 } else { num as f32 / gp as f32 }
+    if gp == 0 {
+        0.0
+    } else {
+        num as f32 / gp as f32
+    }
 }
 
 fn ratio(made: u32, att: u32) -> f32 {
-    if att == 0 { 0.0 } else { made as f32 / att as f32 }
+    if att == 0 {
+        0.0
+    } else {
+        made as f32 / att as f32
+    }
 }
 
 /// Walk `games`, sum per-season totals for `player`. Returns one row per
@@ -64,41 +90,42 @@ pub fn aggregate_career(games: &[GameResult], player: PlayerId) -> Vec<SeasonAvg
     let mut by_season: BTreeMap<SeasonId, SeasonAvgRow> = BTreeMap::new();
 
     for g in games {
-        let walk = |lines: &[PlayerLine], team: TeamId, by_season: &mut BTreeMap<_, SeasonAvgRow>| {
-            for line in lines.iter().filter(|l| l.player == player) {
-                let entry = by_season.entry(g.season).or_insert_with(|| SeasonAvgRow {
-                    season: g.season,
-                    team: Some(team),
-                    gp: 0,
-                    pts: 0,
-                    reb: 0,
-                    ast: 0,
-                    stl: 0,
-                    blk: 0,
-                    fg_made: 0,
-                    fg_att: 0,
-                    three_made: 0,
-                    three_att: 0,
-                    ft_made: 0,
-                    ft_att: 0,
-                    minutes: 0,
-                });
-                entry.team = Some(team);
-                entry.gp += 1;
-                entry.pts += line.pts as u32;
-                entry.reb += line.reb as u32;
-                entry.ast += line.ast as u32;
-                entry.stl += line.stl as u32;
-                entry.blk += line.blk as u32;
-                entry.fg_made += line.fg_made as u32;
-                entry.fg_att += line.fg_att as u32;
-                entry.three_made += line.three_made as u32;
-                entry.three_att += line.three_att as u32;
-                entry.ft_made += line.ft_made as u32;
-                entry.ft_att += line.ft_att as u32;
-                entry.minutes += line.minutes as u32;
-            }
-        };
+        let walk =
+            |lines: &[PlayerLine], team: TeamId, by_season: &mut BTreeMap<_, SeasonAvgRow>| {
+                for line in lines.iter().filter(|l| l.player == player) {
+                    let entry = by_season.entry(g.season).or_insert_with(|| SeasonAvgRow {
+                        season: g.season,
+                        team: Some(team),
+                        gp: 0,
+                        pts: 0,
+                        reb: 0,
+                        ast: 0,
+                        stl: 0,
+                        blk: 0,
+                        fg_made: 0,
+                        fg_att: 0,
+                        three_made: 0,
+                        three_att: 0,
+                        ft_made: 0,
+                        ft_att: 0,
+                        minutes: 0,
+                    });
+                    entry.team = Some(team);
+                    entry.gp += 1;
+                    entry.pts += line.pts as u32;
+                    entry.reb += line.reb as u32;
+                    entry.ast += line.ast as u32;
+                    entry.stl += line.stl as u32;
+                    entry.blk += line.blk as u32;
+                    entry.fg_made += line.fg_made as u32;
+                    entry.fg_att += line.fg_att as u32;
+                    entry.three_made += line.three_made as u32;
+                    entry.three_att += line.three_att as u32;
+                    entry.ft_made += line.ft_made as u32;
+                    entry.ft_att += line.ft_att as u32;
+                    entry.minutes += line.minutes as u32;
+                }
+            };
         walk(&g.box_score.home_lines, g.home, &mut by_season);
         walk(&g.box_score.away_lines, g.away, &mut by_season);
     }
