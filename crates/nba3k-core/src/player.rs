@@ -264,3 +264,26 @@ pub fn role_morale_drift(old: PlayerRole, new: PlayerRole) -> f32 {
         0.0
     }
 }
+
+/// Per-player season-to-date aggregates (M32). Lives in the
+/// `player_season_stats` table; populated by the "Start From Today"
+/// importer from ESPN's `byathlete` stats endpoint. When present, the
+/// `records --scope season` command prefers these rows over on-the-fly
+/// aggregation from box scores.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayerSeasonStats {
+    pub player_id: PlayerId,
+    pub season_year: u16,
+    pub gp: u16,
+    pub mpg: f32,
+    pub ppg: f32,
+    pub rpg: f32,
+    pub apg: f32,
+    pub spg: f32,
+    pub bpg: f32,
+    pub fg_pct: f32,
+    pub three_pct: f32,
+    pub ft_pct: f32,
+    pub ts_pct: f32,
+    pub usage: f32,
+}

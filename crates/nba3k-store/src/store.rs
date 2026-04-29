@@ -1,4 +1,4 @@
-use crate::StoreResult;
+use crate::{StoreError, StoreResult};
 use nba3k_core::*;
 use nba3k_models::progression::PlayerDevelopment;
 use nba3k_season::career::{aggregate_career, SeasonAvgRow};
@@ -96,6 +96,200 @@ impl Store {
             )
             .optional()?;
         Ok(v)
+    }
+
+    // ------------------------------------------------------------------
+    // season_calendar (M31)
+    // ------------------------------------------------------------------
+
+    /// Read the calendar row for a season. Returns `None` when no row
+    /// exists yet; callers usually fall back to `SeasonCalendar::default_for`.
+    pub fn get_season_calendar(
+        &self,
+        season: SeasonId,
+    ) -> StoreResult<Option<SeasonCalendar>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT season_year, start_date, end_date, trade_deadline,
+                        all_star_day, cup_group_day, cup_qf_day, cup_sf_day, cup_final_day
+                   FROM season_calendar WHERE season_year = ?1",
+                params![season.0 as i64],
+                |r| {
+                    let year: i64 = r.get(0)?;
+                    let start: String = r.get(1)?;
+                    let end: String = r.get(2)?;
+                    let deadline: String = r.get(3)?;
+                    let asd: i64 = r.get(4)?;
+                    let cg: i64 = r.get(5)?;
+                    let cqf: i64 = r.get(6)?;
+                    let csf: i64 = r.get(7)?;
+                    let cf: i64 = r.get(8)?;
+                    Ok((year, start, end, deadline, asd, cg, cqf, csf, cf))
+                },
+            )
+            .optional()?;
+        let Some((year, start, end, deadline, asd, cg, cqf, csf, cf)) = row else {
+            return Ok(None);
+        };
+        let parse = |s: &str, label: &str| -> StoreResult<chrono::NaiveDate> {
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|e| StoreError::InvalidInput(format!("{label} not ISO date: {e}")))
+        };
+        Ok(Some(SeasonCalendar {
+            season_year: year as u16,
+            start_date: parse(&start, "start_date")?,
+            end_date: parse(&end, "end_date")?,
+            trade_deadline: parse(&deadline, "trade_deadline")?,
+            all_star_day: asd as u32,
+            cup_group_day: cg as u32,
+            cup_qf_day: cqf as u32,
+            cup_sf_day: csf as u32,
+            cup_final_day: cf as u32,
+        }))
+    }
+
+    /// Insert or replace the calendar row for a season.
+    pub fn upsert_season_calendar(&self, cal: &SeasonCalendar) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO season_calendar
+                (season_year, start_date, end_date, trade_deadline,
+                 all_star_day, cup_group_day, cup_qf_day, cup_sf_day, cup_final_day)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(season_year) DO UPDATE SET
+                start_date     = excluded.start_date,
+                end_date       = excluded.end_date,
+                trade_deadline = excluded.trade_deadline,
+                all_star_day   = excluded.all_star_day,
+                cup_group_day  = excluded.cup_group_day,
+                cup_qf_day     = excluded.cup_qf_day,
+                cup_sf_day     = excluded.cup_sf_day,
+                cup_final_day  = excluded.cup_final_day",
+            params![
+                cal.season_year as i64,
+                cal.start_date.format("%Y-%m-%d").to_string(),
+                cal.end_date.format("%Y-%m-%d").to_string(),
+                cal.trade_deadline.format("%Y-%m-%d").to_string(),
+                cal.all_star_day as i64,
+                cal.cup_group_day as i64,
+                cal.cup_qf_day as i64,
+                cal.cup_sf_day as i64,
+                cal.cup_final_day as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // player_season_stats (M32)
+    // ------------------------------------------------------------------
+
+    pub fn upsert_player_season_stats(&self, row: &PlayerSeasonStats) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO player_season_stats
+                (player_id, season_year, gp, mpg, ppg, rpg, apg, spg, bpg,
+                 fg_pct, three_pct, ft_pct, ts_pct, usage)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(player_id, season_year) DO UPDATE SET
+                gp        = excluded.gp,
+                mpg       = excluded.mpg,
+                ppg       = excluded.ppg,
+                rpg       = excluded.rpg,
+                apg       = excluded.apg,
+                spg       = excluded.spg,
+                bpg       = excluded.bpg,
+                fg_pct    = excluded.fg_pct,
+                three_pct = excluded.three_pct,
+                ft_pct    = excluded.ft_pct,
+                ts_pct    = excluded.ts_pct,
+                usage     = excluded.usage",
+            params![
+                row.player_id.0 as i64,
+                row.season_year as i64,
+                row.gp as i64,
+                row.mpg as f64,
+                row.ppg as f64,
+                row.rpg as f64,
+                row.apg as f64,
+                row.spg as f64,
+                row.bpg as f64,
+                row.fg_pct as f64,
+                row.three_pct as f64,
+                row.ft_pct as f64,
+                row.ts_pct as f64,
+                row.usage as f64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_player_season_stats(
+        &self,
+        player_id: PlayerId,
+        season_year: u16,
+    ) -> StoreResult<Option<PlayerSeasonStats>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT player_id, season_year, gp, mpg, ppg, rpg, apg, spg, bpg,
+                        fg_pct, three_pct, ft_pct, ts_pct, usage
+                   FROM player_season_stats
+                  WHERE player_id = ?1 AND season_year = ?2",
+                params![player_id.0 as i64, season_year as i64],
+                |r| {
+                    Ok(PlayerSeasonStats {
+                        player_id: PlayerId(r.get::<_, i64>(0)? as u32),
+                        season_year: r.get::<_, i64>(1)? as u16,
+                        gp: r.get::<_, i64>(2)? as u16,
+                        mpg: r.get::<_, f64>(3)? as f32,
+                        ppg: r.get::<_, f64>(4)? as f32,
+                        rpg: r.get::<_, f64>(5)? as f32,
+                        apg: r.get::<_, f64>(6)? as f32,
+                        spg: r.get::<_, f64>(7)? as f32,
+                        bpg: r.get::<_, f64>(8)? as f32,
+                        fg_pct: r.get::<_, f64>(9)? as f32,
+                        three_pct: r.get::<_, f64>(10)? as f32,
+                        ft_pct: r.get::<_, f64>(11)? as f32,
+                        ts_pct: r.get::<_, f64>(12)? as f32,
+                        usage: r.get::<_, f64>(13)? as f32,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn list_player_season_stats(
+        &self,
+        season_year: u16,
+    ) -> StoreResult<Vec<PlayerSeasonStats>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT player_id, season_year, gp, mpg, ppg, rpg, apg, spg, bpg,
+                    fg_pct, three_pct, ft_pct, ts_pct, usage
+               FROM player_season_stats
+              WHERE season_year = ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![season_year as i64], |r| {
+                Ok(PlayerSeasonStats {
+                    player_id: PlayerId(r.get::<_, i64>(0)? as u32),
+                    season_year: r.get::<_, i64>(1)? as u16,
+                    gp: r.get::<_, i64>(2)? as u16,
+                    mpg: r.get::<_, f64>(3)? as f32,
+                    ppg: r.get::<_, f64>(4)? as f32,
+                    rpg: r.get::<_, f64>(5)? as f32,
+                    apg: r.get::<_, f64>(6)? as f32,
+                    spg: r.get::<_, f64>(7)? as f32,
+                    bpg: r.get::<_, f64>(8)? as f32,
+                    fg_pct: r.get::<_, f64>(9)? as f32,
+                    three_pct: r.get::<_, f64>(10)? as f32,
+                    ft_pct: r.get::<_, f64>(11)? as f32,
+                    ts_pct: r.get::<_, f64>(12)? as f32,
+                    usage: r.get::<_, f64>(13)? as f32,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     // ------------------------------------------------------------------

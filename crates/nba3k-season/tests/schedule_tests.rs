@@ -397,3 +397,42 @@ fn opponent_helper_works() {
     assert_eq!(opponent(TeamId(1), TeamId(2), TeamId(1)), TeamId(2));
     assert_eq!(opponent(TeamId(1), TeamId(2), TeamId(2)), TeamId(1));
 }
+
+#[test]
+fn generate_with_dates_respects_custom_window() {
+    // M31: schedule generation is parameterized by SeasonCalendar dates.
+    // Pass a non-default window and verify the produced games sit inside it.
+    let teams = fixture_teams();
+    let start = NaiveDate::from_ymd_opt(2025, 10, 15).unwrap();
+    let end = NaiveDate::from_ymd_opt(2026, 4, 20).unwrap();
+    let schedule = Schedule::generate_with_dates(SeasonId(2026), 42, &teams, start, end);
+    assert_eq!(schedule.games.len(), 1230);
+    assert_eq!(schedule.start, start);
+    assert_eq!(schedule.end, end);
+    for g in &schedule.games {
+        assert!(
+            g.date >= start && g.date <= end,
+            "game {:?} date {} outside window {}..={}",
+            g.id,
+            g.date,
+            start,
+            end
+        );
+    }
+}
+
+#[test]
+fn calendar_aware_deadline_helpers() {
+    // M31: per-calendar deadline helpers honor an explicit SeasonCalendar.
+    use nba3k_core::SeasonCalendar;
+    use nba3k_season::{is_after_trade_deadline_for, is_trade_deadline_day_for, trade_deadline};
+    let cal = SeasonCalendar::default_for(2027);
+    let deadline = trade_deadline(&cal);
+    assert!(is_trade_deadline_day_for(deadline, &cal));
+    assert!(!is_trade_deadline_day_for(deadline + chrono::Duration::days(1), &cal));
+    assert!(is_after_trade_deadline_for(
+        deadline + chrono::Duration::days(1),
+        &cal
+    ));
+    assert!(!is_after_trade_deadline_for(deadline, &cal));
+}

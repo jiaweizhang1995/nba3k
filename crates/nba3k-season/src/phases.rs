@@ -3,7 +3,7 @@
 use crate::schedule::Schedule;
 use crate::standings::Standings;
 use chrono::NaiveDate;
-use nba3k_core::{SeasonPhase, SeasonState};
+use nba3k_core::{SeasonCalendar, SeasonPhase, SeasonState};
 
 /// Last day of preseason (inclusive). PreSeason runs days 0..=6, switches to
 /// Regular on day 7. Mirrors the NBA's roughly 1-week training-camp window.
@@ -55,6 +55,8 @@ pub fn regular_season_complete(schedule: &Schedule, standings: &Standings) -> bo
 }
 
 /// Whether `date` falls strictly after the 2025-26 NBA trade deadline.
+/// Legacy const-anchored helper. Prefer `is_after_trade_deadline_for` with
+/// an explicit calendar so per-save dates work correctly.
 pub fn is_after_trade_deadline(date: NaiveDate) -> bool {
     let deadline = NaiveDate::from_ymd_opt(TRADE_DEADLINE.0, TRADE_DEADLINE.1, TRADE_DEADLINE.2)
         .expect("valid deadline date");
@@ -63,10 +65,26 @@ pub fn is_after_trade_deadline(date: NaiveDate) -> bool {
 
 /// Whether `date` is the trade deadline itself (the day the deadline window
 /// closes — used by store/CLI to gate Standard-mode trade submission).
+/// Legacy const-anchored helper.
 pub fn is_trade_deadline_day(date: NaiveDate) -> bool {
     let deadline = NaiveDate::from_ymd_opt(TRADE_DEADLINE.0, TRADE_DEADLINE.1, TRADE_DEADLINE.2)
         .expect("valid deadline date");
     date == deadline
+}
+
+/// Per-save trade deadline accessor.
+pub fn trade_deadline(cal: &SeasonCalendar) -> NaiveDate {
+    cal.trade_deadline
+}
+
+/// Whether `date` falls strictly after the calendar's trade deadline.
+pub fn is_after_trade_deadline_for(date: NaiveDate, cal: &SeasonCalendar) -> bool {
+    date > cal.trade_deadline
+}
+
+/// Whether `date` is the calendar's trade-deadline day.
+pub fn is_trade_deadline_day_for(date: NaiveDate, cal: &SeasonCalendar) -> bool {
+    date == cal.trade_deadline
 }
 
 /// True when a phase transition is moving from `Playoffs` → `OffSeason`.

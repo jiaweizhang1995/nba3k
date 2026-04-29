@@ -43,13 +43,28 @@ pub struct Schedule {
 }
 
 impl Schedule {
-    /// Generate a full 82-game schedule. Deterministic for given (seed, teams).
+    /// Generate a full 82-game schedule using the hardcoded 2025-26 window.
+    /// Kept as a thin shim for old callers; new code should pass an explicit
+    /// `start` / `end` via `generate_with_dates`.
     pub fn generate(season: SeasonId, seed: u64, teams: &[Team]) -> Self {
-        assert_eq!(teams.len(), 30, "schedule generator expects 30 teams");
         let start = NaiveDate::from_ymd_opt(SEASON_START.0, SEASON_START.1, SEASON_START.2)
             .expect("valid season start");
         let end = NaiveDate::from_ymd_opt(SEASON_END.0, SEASON_END.1, SEASON_END.2)
             .expect("valid season end");
+        Self::generate_with_dates(season, seed, teams, start, end)
+    }
+
+    /// Generate a full 82-game schedule between `start` and `end`.
+    /// Deterministic for given (seed, teams, start, end).
+    pub fn generate_with_dates(
+        season: SeasonId,
+        seed: u64,
+        teams: &[Team],
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Self {
+        assert_eq!(teams.len(), 30, "schedule generator expects 30 teams");
+        assert!(end > start, "season end must come after start");
 
         let pairs = matchups(teams, seed);
         debug_assert_eq!(pairs.len(), 1230, "matchup solver produced wrong total");

@@ -22,8 +22,10 @@ pub use playoffs::{
     SeriesResult,
 };
 pub use phases::{
-    advance_day, is_after_trade_deadline, is_trade_deadline_day, next_phase,
-    regular_season_complete, transitioning_to_offseason, PRESEASON_LAST_DAY, TRADE_DEADLINE,
+    advance_day, is_after_trade_deadline, is_after_trade_deadline_for,
+    is_trade_deadline_day, is_trade_deadline_day_for, next_phase,
+    regular_season_complete, trade_deadline, transitioning_to_offseason,
+    PRESEASON_LAST_DAY, TRADE_DEADLINE,
 };
 pub use progression_pass::{
     aggregate_season_minutes, run_progression_pass, ProgressionSummary,
