@@ -18,17 +18,17 @@ impl Position {
 
 impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::PG => "PG",
-                Self::SG => "SG",
-                Self::SF => "SF",
-                Self::PF => "PF",
-                Self::C => "C",
-            }
-        )
+        // Use `f.pad` so format width / fill / align specs (e.g.
+        // `{:<2}` in the trade-builder asset row) work as expected.
+        // Plain `write!(f, "{}", ...)` would discard them and leave
+        // the single-char `C` row a column short of the others.
+        f.pad(match self {
+            Self::PG => "PG",
+            Self::SG => "SG",
+            Self::SF => "SF",
+            Self::PF => "PF",
+            Self::C => "C",
+        })
     }
 }
 

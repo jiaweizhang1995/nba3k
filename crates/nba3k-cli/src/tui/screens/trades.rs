@@ -631,16 +631,7 @@ fn draw_asset_list(
         };
         let mark = if is_selected { "✓" } else { " " };
         lines.push(Line::from(Span::styled(
-            format!(
-                "{} {} {:<2} {:>2} {:>2} {:>7} {:>3}",
-                mark,
-                pad_display(&p.name, 16),
-                p.position,
-                p.age,
-                p.overall,
-                money_m(p.salary_m),
-                years_label(p.years)
-            ),
+            format_builder_asset_row(mark, p),
             style,
         )));
     }
@@ -2285,7 +2276,11 @@ fn cba_gm_reject_dialog(
 ) -> String {
     match violation {
         CbaViolation::SalaryMatching { .. } => {
-            format!("{} {}", target_abbrev, t(lang, T::TradesGmRejectSalaryMatch))
+            format!(
+                "{} {}",
+                target_abbrev,
+                t(lang, T::TradesGmRejectSalaryMatch)
+            )
         }
         CbaViolation::HardCapTrigger { .. } | CbaViolation::Apron2Restriction { .. } => {
             format!("{} {}", target_abbrev, t(lang, T::TradesGmRejectHardCap))
@@ -2719,6 +2714,19 @@ fn pad_display(s: &str, width: usize) -> String {
     out
 }
 
+fn format_builder_asset_row(mark: &str, p: &PlayerOption) -> String {
+    format!(
+        "{} {} {:<2}{:>3}{:>3}{:>7}{:>3}",
+        mark,
+        pad_display(&p.name, 16),
+        p.position,
+        p.age,
+        p.overall,
+        money_m(p.salary_m),
+        years_label(p.years)
+    )
+}
+
 fn money_m(value: f32) -> String {
     if value <= 0.0 {
         "—".to_string()
@@ -2782,5 +2790,71 @@ mod tests {
             &["Anthony Davis".to_string()],
         );
         assert!(duplicate.is_err());
+    }
+
+    #[test]
+    fn builder_asset_row_keeps_year_suffix_within_side_panel_width() {
+        let mut player = PlayerOption {
+            id: PlayerId(1),
+            name: "Donovan Mitchell".to_string(),
+            raw_name: "Donovan Mitchell".to_string(),
+            position: nba3k_core::Position::SG,
+            age: 30,
+            overall: 83,
+            salary_m: 15.6,
+            years: 3,
+        };
+
+        let row = format_builder_asset_row("✓", &player);
+        assert!(row.ends_with(" 3y"));
+        assert!(row.chars().count() <= 37, "{row}");
+
+        player.years = 0;
+        let zero_year_row = format_builder_asset_row(" ", &player);
+        assert!(zero_year_row.ends_with("  —"));
+        assert!(zero_year_row.chars().count() <= 37, "{zero_year_row}");
+    }
+
+    #[test]
+    fn builder_asset_row_pads_center_position_to_two_columns() {
+        // Without `f.pad` in `Position::Display`, the single-char "C"
+        // would skip the format-string's `{:<2}` width spec, shifting the
+        // age column one cell left vs PG/SG/SF/PF rows. Pin both shapes
+        // so a regression in that Display impl trips this test.
+        let pf_row = format_builder_asset_row(
+            " ",
+            &PlayerOption {
+                id: PlayerId(1),
+                name: "Anthony Davis".to_string(),
+                raw_name: "Anthony Davis".to_string(),
+                position: nba3k_core::Position::PF,
+                age: 32,
+                overall: 88,
+                salary_m: 50.0,
+                years: 2,
+            },
+        );
+        let c_row = format_builder_asset_row(
+            " ",
+            &PlayerOption {
+                id: PlayerId(2),
+                name: "Nic Claxton".to_string(),
+                raw_name: "Nic Claxton".to_string(),
+                position: nba3k_core::Position::C,
+                age: 27,
+                overall: 81,
+                salary_m: 14.3,
+                years: 3,
+            },
+        );
+        // Position column: PF row contains "PF" then digits; C row must
+        // contain "C " (padded) then digits — same trailing offset.
+        assert!(pf_row.contains("PF 32"), "{pf_row}");
+        assert!(c_row.contains("C  27"), "{c_row}");
+        // Both rows align numerically: the age digit pair sits at the
+        // same character index whether the position is 1 or 2 chars.
+        let pf_age_idx = pf_row.find("32").expect("pf row has 32");
+        let c_age_idx = c_row.find("27").expect("c row has 27");
+        assert_eq!(pf_age_idx, c_age_idx, "C row must align with PF row");
     }
 }
